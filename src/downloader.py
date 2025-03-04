@@ -3,12 +3,12 @@ class Downloader:
         pass
 
     def download_video(self, url):
-        import youtube_dl
+        import yt_dlp
 
         ydl_opts = {
             'format': 'best',
             'outtmpl': '%(title)s.%(ext)s',
         }
 
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])

@@ -1,16 +1,15 @@
-[project]
+[tool.poetry]
 name = "media-bridge"
-version = "0.1.0"
-description = "Python CLI for video downloads using youtube-dl and upload them to cloud"
-authors = [
-    {name = "Jvillegasd",email = "johnnyvillegaslrs@gmail.com"}
-]
+version = "1.0.0"
+description = "Python CLI that use yt-dlp to download videos and upload them to cloud"
+authors = ["Jvillegasd <johnnyvillegaslrs@gmail.com>"]
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+yt-dlp = "^2025.2.19"
 
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
