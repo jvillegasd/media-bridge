@@ -1,37 +1,58 @@
 # README.md
 
-# YouTube-DL CLI
+# Media Bridge
 
-YouTube-DL CLI is a command-line interface tool for downloading videos from various platforms using the youtube-dl library. This project provides a simple and efficient way to fetch and save videos directly from your terminal.
+A Python-based CLI tool that downloads media content from various platforms using yt-dlp. This tool is designed to be simple, efficient, and easy to use.
 
 ## Features
 
-- Download videos from multiple platforms.
-- Easy-to-use command-line interface.
-- Supports various video formats and quality options.
+- Download videos from YouTube and other supported platforms
+- Simple command-line interface
+- Built with yt-dlp for reliable downloads
+- Python 3.12+ compatible
+
+## Prerequisites
+
+- Python 3.12 or higher
+- Poetry (for dependency management)
 
 ## Installation
 
-To install the required dependencies, run:
-
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/media-bridge.git
+cd media-bridge
 ```
-pip install -r requirements.txt
+
+2. Install dependencies using Poetry:
+```bash
+poetry install
 ```
 
 ## Usage
 
-To use the CLI tool, run the following command:
+To download a video:
+
+```bash
+poetry run python src/cli.py "VIDEO_URL"
+```
+
+Example:
+```bash
+poetry run python src/cli.py "https://www.youtube.com/watch?v=example"
+```
+
+## Project Structure
 
 ```
-python -m src.cli <video_url>
+media-bridge/
+├── src/
+│   ├── cli.py         # Command-line interface
+│   └── downloader.py  # Download functionality
+├── pyproject.toml     # Poetry configuration
+└── README.md         
 ```
-
-Replace `<video_url>` with the URL of the video you want to download.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a pull request or open an issue for any suggestions or improvements.
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for more details.
+This project is licensed under the MIT License.
