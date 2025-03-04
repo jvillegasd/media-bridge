@@ -1,5 +1,3 @@
-# README.md
-
 # Media Bridge
 
 A Python-based CLI tool that downloads media content from various platforms using yt-dlp. This tool is designed to be simple, efficient, and easy to use.
