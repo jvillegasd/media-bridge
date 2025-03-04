@@ -9,7 +9,7 @@ def main():
     args = parser.parse_args()
 
     downloader = Downloader()
-    downloader.download_video(args.url, args.output)
+    downloader.download_video(args.url)
 
 if __name__ == '__main__':
     main()
