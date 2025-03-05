@@ -163,3 +163,12 @@ cython_debug/
 
 # Mac
 .DS_Store
+
+# Video extensions
+*.mp4
+*.mov
+*.avi
+*.wmv
+*.flv
+*.mkv
+*.webm
