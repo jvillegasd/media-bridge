@@ -6,7 +6,12 @@ from schemas import DownloaderParams
 def main():
     parser = argparse.ArgumentParser(description="Download videos using youtube-dl.")
     parser.add_argument("url", type=str, help="The URL of the video to download.")
-    parser.add_argument("--filename", type=str, help="Optional custom filename for the downloaded video (without extension)", default=None)
+    parser.add_argument(
+        "--filename",
+        type=str,
+        help="Optional custom filename for the downloaded video (without extension)",
+        default=None,
+    )
 
     args = parser.parse_args()
 
