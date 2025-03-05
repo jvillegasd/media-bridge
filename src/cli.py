@@ -1,5 +1,6 @@
 import argparse
 from downloader import Downloader
+from schemas import DownloaderParams
 
 
 def main():
@@ -9,8 +10,10 @@ def main():
 
     args = parser.parse_args()
 
-    downloader = Downloader()
-    downloader.download_video(args.url, args.filename)
+    params = DownloaderParams(**vars(args))
+    downloader = Downloader(params)
+
+    downloader.download_video()
 
 
 if __name__ == "__main__":

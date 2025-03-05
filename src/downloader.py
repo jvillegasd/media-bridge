@@ -1,17 +1,20 @@
+import yt_dlp
+from schemas import DownloaderParams
+
+
 class Downloader:
-    def __init__(self):
-        pass
-
-    def download_video(self, url, filename=None):
-        import yt_dlp
-
-        output_template = filename if filename else "%(title)s"
-        ydl_opts = {
+    def __init__(self, params: DownloaderParams):
+        self.params = params
+        self._downloader_options = {
             "format": "best",
-            "outtmpl": f"{output_template}.%(ext)s",
+            "outtmpl": "%(title)s.%(ext)s",
             "sleep_interval": 1,
             "max_sleep_interval": 5,
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        if self.params.filename:
+            self._downloader_options["outtmpl"] = f"{self.params.filename}.%(ext)s"
+
+    def download_video(self):
+        with yt_dlp.YoutubeDL(self._downloader_options) as ydl:
+            ydl.download([self.params.url])
