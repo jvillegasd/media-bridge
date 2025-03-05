@@ -13,6 +13,9 @@ A Python-based CLI tool that downloads media content from various platforms usin
 
 - Python 3.12 or higher
 - Poetry (for dependency management)
+- FFmpeg and FFprobe (Required for media processing)
+  - Strongly recommended to use [yt-dlp's custom FFmpeg builds](https://github.com/yt-dlp/FFmpeg-Builds#ffmpeg-builds) to avoid known issues
+  - Note: You need the FFmpeg binary, not the Python package
 
 ## Installation
 
