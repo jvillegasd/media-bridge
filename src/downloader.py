@@ -12,7 +12,7 @@ class Downloader:
             "max_sleep_interval": 5,
         }
 
-        if self.params.filename and self.params.url:
+        if self.params.filename:
             self._downloader_options["outtmpl"] = f"{self.params.filename}.%(ext)s"
 
     def download_videos(self):
