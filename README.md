@@ -32,21 +32,36 @@ poetry install
 
 ## Usage
 
-Basic usage:
+The CLI supports both single and multiple URL downloads with validation:
+
 ```bash
-poetry run python src/cli.py "VIDEO_URL"
+# Single URL download
+poetry run python src/cli.py --url "VIDEO_URL"
+
+# Multiple URLs download
+poetry run python src/cli.py --urls "VIDEO_URL1" "VIDEO_URL2" "VIDEO_URL3"
+
+# Single URL with custom filename
+poetry run python src/cli.py --url "VIDEO_URL" --filename "my-video"
 ```
+
+### Validation Features
+
+- At least one URL must be provided (either --url or --urls)
+- Custom filename (--filename) can only be used with single URL downloads
+- Mutually exclusive URL options (cannot use --url and --urls together)
 
 Examples:
 
-1. Download a YouTube video:
 ```bash
-poetry run python src/cli.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-```
+# Download a single video
+poetry run python src/cli.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-2. Download with a custom filename:
-```bash
-poetry run python src/cli.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "my-video"
+# Download multiple videos
+poetry run python src/cli.py --urls "https://www.youtube.com/watch?v=video1" "https://www.youtube.com/watch?v=video2"
+
+# Download with custom filename
+poetry run python src/cli.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "rick-roll"
 ```
 
 The downloaded files will be saved in the current directory.
@@ -57,7 +72,8 @@ The downloaded files will be saved in the current directory.
 media-bridge/
 ├── src/
 │   ├── cli.py         # Command-line interface
-│   └── downloader.py  # Download functionality
+│   ├── downloader.py  # Download functionality
+│   └── schemas.py     # Data validation schemas
 ├── pyproject.toml     # Poetry configuration
 └── README.md         
 ```
