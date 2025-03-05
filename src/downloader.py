@@ -12,9 +12,9 @@ class Downloader:
             "max_sleep_interval": 5,
         }
 
-        if self.params.filename:
+        if self.params.filename and self.params.url:
             self._downloader_options["outtmpl"] = f"{self.params.filename}.%(ext)s"
 
-    def download_video(self):
+    def download_videos(self):
         with yt_dlp.YoutubeDL(self._downloader_options) as ydl:
-            ydl.download([self.params.url])
+            ydl.download(self.params.get_urls())
