@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "media-bridge"
-version = "1.0.0"
+version = "1.1.0"
 description = "Python CLI that use yt-dlp to download videos and upload them to cloud"
 authors = ["Jvillegasd <johnnyvillegaslrs@gmail.com>"]
 readme = "README.md"
