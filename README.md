@@ -32,16 +32,24 @@ poetry install
 
 ## Usage
 
-To download a video:
-
+Basic usage:
 ```bash
 poetry run python src/cli.py "VIDEO_URL"
 ```
 
-Example:
+Examples:
+
+1. Download a YouTube video:
 ```bash
-poetry run python src/cli.py "https://www.youtube.com/watch?v=example"
+poetry run python src/cli.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
+
+2. Download with a custom filename:
+```bash
+poetry run python src/cli.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "my-video"
+```
+
+The downloaded files will be saved in the current directory.
 
 ## Project Structure
 
