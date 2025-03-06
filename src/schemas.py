@@ -1,4 +1,5 @@
 from typing import List
+
 from pydantic import BaseModel, ValidationInfo, field_validator
 
 
@@ -16,13 +17,9 @@ class DownloaderParams(BaseModel):
         return "url" in info.data and info.data["url"] is not None
 
     @classmethod
-    def _no_urls_provided(
-        cls, v: str | List[str] | None, info: ValidationInfo
-    ) -> bool:
+    def _no_urls_provided(cls, v: str | List[str] | None, info: ValidationInfo) -> bool:
         return (
-            v is None
-            and not cls._has_single_url(info)
-            and not cls._has_urls_list(info)
+            v is None and not cls._has_single_url(info) and not cls._has_urls_list(info)
         )
 
     @field_validator("urls", "url")

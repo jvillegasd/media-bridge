@@ -1,8 +1,10 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
+import yt_dlp
+
 from src.downloader import Downloader
 from src.schemas import DownloaderParams
-import yt_dlp
 
 
 def test_downloader_initialization(valid_params):
@@ -28,12 +30,12 @@ def test_download_videos_alt(mock_ytdl, valid_params):
     mock_instance.download.assert_called_once_with(valid_params.get_urls())
 
 
-@patch('yt_dlp.YoutubeDL')
+@patch("yt_dlp.YoutubeDL")
 def test_download_with_invalid_url(mock_ytdl):
     # Setup mock to raise an error
     mock_instance = mock_ytdl.return_value.__enter__.return_value
     mock_instance.download.side_effect = yt_dlp.utils.DownloadError("Invalid URL")
-    
+
     params = DownloaderParams(urls=["not_a_url"])
     downloader = Downloader(params)
 

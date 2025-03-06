@@ -75,7 +75,7 @@ media-bridge/
 │   ├── downloader.py  # Download functionality
 │   └── schemas.py     # Data validation schemas
 ├── pyproject.toml     # Poetry configuration
-└── README.md         
+└── README.md
 ```
 
 ## License

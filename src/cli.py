@@ -1,5 +1,7 @@
 import argparse
+
 from pydantic import ValidationError
+
 from src.downloader import Downloader
 from src.schemas import DownloaderParams
 

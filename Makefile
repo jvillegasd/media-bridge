@@ -42,7 +42,7 @@ precommit: clean precommit-install## Run pre-commit
 ###
 .PHONY: test
 test: ## Run tests
-	@pytest -s -x -vvv --cov-report=html 
+	@pytest -s -x -vvv --cov-report=html
 
 .PHONY: show-cov
 show-cov: ## Open test coverage in browser

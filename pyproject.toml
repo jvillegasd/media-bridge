@@ -4,6 +4,7 @@ version = "1.1.0"
 description = "Python CLI that use yt-dlp to download videos and upload them to cloud"
 authors = ["Jvillegasd <johnnyvillegaslrs@gmail.com>"]
 readme = "README.md"
+package-mode = true
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -14,7 +15,43 @@ pydantic = "^2.10.6"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
 pytest-cov = "^6.0.0"
+pre-commit = "^4.1.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+src = ["src"]  # Source code directories
+exclude = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.coverage.run]
+branch = true
+omit = [
+    "tests/*",
+    "tests/*",
+    "*/tests/*",
+    ".venv/*",
+    "*tests*.py",
+    "cli.py",
+    ]
+
+[tool.coverage.report]
+fail_under = 80
+include_namespace_packages = true
+skip_covered = true
+exclude_also = [
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+    ]
