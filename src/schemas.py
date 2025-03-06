@@ -9,11 +9,11 @@ class DownloaderParams(BaseModel):
 
     @classmethod
     def _has_urls_list(cls, info: ValidationInfo) -> bool:
-        return "urls" in info and info["urls"] is not None
+        return "urls" in info.data and info.data["urls"] is not None
 
     @classmethod
     def _has_single_url(cls, info: ValidationInfo) -> bool:
-        return "url" in info and info["url"] is not None
+        return "url" in info.data and info.data["url"] is not None
 
     @classmethod
     def _no_urls_provided(
