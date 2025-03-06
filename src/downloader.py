@@ -1,5 +1,5 @@
 import yt_dlp
-from schemas import DownloaderParams
+from src.schemas import DownloaderParams
 
 
 class Downloader:

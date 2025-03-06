@@ -1,7 +1,7 @@
 import argparse
-from downloader import Downloader
 from pydantic import ValidationError
-from schemas import DownloaderParams
+from src.downloader import Downloader
+from src.schemas import DownloaderParams
 
 
 def main():

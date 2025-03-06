@@ -7,19 +7,22 @@ class DownloaderParams(BaseModel):
     urls: List[str] | None = None
     filename: str | None = None
 
-    def _has_urls_list(self, info: ValidationInfo) -> bool:
+    @classmethod
+    def _has_urls_list(cls, info: ValidationInfo) -> bool:
         return "urls" in info and info["urls"] is not None
 
-    def _has_single_url(self, info: ValidationInfo) -> bool:
+    @classmethod
+    def _has_single_url(cls, info: ValidationInfo) -> bool:
         return "url" in info and info["url"] is not None
 
+    @classmethod
     def _no_urls_provided(
-        self, v: str | List[str] | None, info: ValidationInfo
+        cls, v: str | List[str] | None, info: ValidationInfo
     ) -> bool:
         return (
             v is None
-            and not self._has_single_url(info)
-            and not self._has_urls_list(info)
+            and not cls._has_single_url(info)
+            and not cls._has_urls_list(info)
         )
 
     @field_validator("urls", "url")
