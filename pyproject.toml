@@ -11,6 +11,10 @@ yt-dlp = "^2025.2.19"
 pydantic = "^2.10.6"
 
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+pytest-cov = "^6.0.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
