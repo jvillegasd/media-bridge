@@ -37,7 +37,7 @@ omit = [
     "*/tests/*",
     ".venv/*",
     "*tests*.py",
-    "cli.py",
+    "core.py",
     ]
 
 [tool.coverage.report]

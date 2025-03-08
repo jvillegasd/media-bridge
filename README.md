@@ -36,13 +36,13 @@ The CLI supports both single and multiple URL downloads with validation:
 
 ```bash
 # Single URL download
-poetry run python src/cli.py --url "VIDEO_URL"
+poetry run python src/core.py --url "VIDEO_URL"
 
 # Multiple URLs download
-poetry run python src/cli.py --urls "VIDEO_URL1" "VIDEO_URL2" "VIDEO_URL3"
+poetry run python src/core.py --urls "VIDEO_URL1" "VIDEO_URL2" "VIDEO_URL3"
 
 # Single URL with custom filename
-poetry run python src/cli.py --url "VIDEO_URL" --filename "my-video"
+poetry run python src/core.py --url "VIDEO_URL" --filename "my-video"
 ```
 
 ### Validation Features
@@ -55,16 +55,16 @@ Examples:
 
 ```bash
 # Download a single video
-poetry run python src/cli.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+poetry run python src/core.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 # Download multiple videos
-poetry run python src/cli.py --urls "https://www.youtube.com/watch?v=video1" "https://www.youtube.com/watch?v=video2"
+poetry run python src/core.py --urls "https://www.youtube.com/watch?v=video1" "https://www.youtube.com/watch?v=video2"
 
 # Download with custom filename
-poetry run python src/cli.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "rick-roll"
+poetry run python src/core.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "rick-roll"
 
 # Download with custom output path
-poetry run python src/cli.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --output "path/to/save"
+poetry run python src/core.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --output "path/to/save"
 ```
 
 The downloaded files will be saved in the current directory.
@@ -74,7 +74,7 @@ The downloaded files will be saved in the current directory.
 ```
 media-bridge/
 ├── src/
-│   ├── cli.py         # Command-line interface
+│   ├── core.py         # Command-line interface
 │   ├── downloader.py  # Download functionality
 │   └── schemas.py     # Data validation schemas
 ├── pyproject.toml     # Poetry configuration

@@ -1,10 +1,16 @@
 import argparse
 from pathlib import Path
+from typing import List
 
 from pydantic import ValidationError
 
 from media_bridge.downloader import Downloader
 from media_bridge.schemas import DownloaderParams
+
+
+def parse_pydanctic_errors(e: ValidationError) -> List[str]:
+    new_errors = [error["msg"] for error in e.errors()]
+    return new_errors
 
 
 def main():
@@ -34,7 +40,7 @@ def main():
         downloader = Downloader(params)
         downloader.download_videos()
     except ValidationError as e:
-        parser.error(str(e))
+        parser.error(parse_pydanctic_errors(e))
 
 
 if __name__ == "__main__":

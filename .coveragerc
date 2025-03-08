@@ -5,7 +5,7 @@ omit =
     */tests/*
     .venv/*
     *tests*.py
-    src/cli.py
+    src/core.py
 
 
 [report]
