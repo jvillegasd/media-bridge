@@ -3,8 +3,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from src.downloader import Downloader
-from src.schemas import DownloaderParams
+from media_bridge.downloader import Downloader
+from media_bridge.schemas import DownloaderParams
 
 
 def main():

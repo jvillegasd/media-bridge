@@ -1,6 +1,6 @@
 import yt_dlp
 
-from src.schemas import DownloaderParams
+from media_bridge.schemas import DownloaderParams
 
 
 class Downloader:

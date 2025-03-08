@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.schemas import DownloaderParams
+from media_bridge.schemas import DownloaderParams
 
 
 @pytest.fixture

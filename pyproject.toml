@@ -4,18 +4,19 @@ version = "1.1.0"
 description = "Python CLI that use yt-dlp to download videos and upload them to cloud"
 authors = ["Jvillegasd <johnnyvillegaslrs@gmail.com>"]
 readme = "README.md"
-package-mode = true
 
 [tool.poetry.dependencies]
 python = "^3.12"
 yt-dlp = "^2025.2.19"
 pydantic = "^2.10.6"
 
-
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
 pytest-cov = "^6.0.0"
 pre-commit = "^4.1.0"
+
+[tool.poetry.scripts]
+media_bridge = "media_bridge.core:main"
 
 [build-system]
 requires = ["poetry-core"]

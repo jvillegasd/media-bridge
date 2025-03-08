@@ -3,8 +3,8 @@ from unittest.mock import patch
 import pytest
 import yt_dlp
 
-from src.downloader import Downloader
-from src.schemas import DownloaderParams
+from media_bridge.downloader import Downloader
+from media_bridge.schemas import DownloaderParams
 
 
 def test_downloader_initialization(valid_params):
