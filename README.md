@@ -36,13 +36,16 @@ The CLI supports both single and multiple URL downloads with validation:
 
 ```bash
 # Single URL download
-poetry run python src/core.py --url "VIDEO_URL"
+poetry run media-bridge --url "VIDEO_URL"
 
 # Multiple URLs download
-poetry run python src/core.py --urls "VIDEO_URL1" "VIDEO_URL2" "VIDEO_URL3"
+poetry run media-bridge --urls "VIDEO_URL1" "VIDEO_URL2" "VIDEO_URL3"
 
-# Single URL with custom filename
-poetry run python src/core.py --url "VIDEO_URL" --filename "my-video"
+# Single URL with custom filename (without extension)
+poetry run media-bridge --url "VIDEO_URL" --filename "my-video"
+
+# Download to specific directory
+poetry run media-bridge --url "VIDEO_URL" --output-path "/path/to/directory"
 ```
 
 ### Validation Features
@@ -55,29 +58,30 @@ Examples:
 
 ```bash
 # Download a single video
-poetry run python src/core.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+poetry run media-bridge --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 # Download multiple videos
-poetry run python src/core.py --urls "https://www.youtube.com/watch?v=video1" "https://www.youtube.com/watch?v=video2"
+poetry run media-bridge --urls "https://www.youtube.com/watch?v=video1" "https://www.youtube.com/watch?v=video2"
 
 # Download with custom filename
-poetry run python src/core.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "rick-roll"
+poetry run media-bridge --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "rick-roll"
 
 # Download with custom output path
-poetry run python src/core.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --output "path/to/save"
+poetry run media-bridge --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --output-path "./downloads"
 ```
 
-The downloaded files will be saved in the current directory.
+The downloaded files will be saved in the current directory unless --output-path is specified.
 
 ## Project Structure
 
 ```
 media-bridge/
-├── src/
-│   ├── core.py         # Command-line interface
-│   ├── downloader.py  # Download functionality
-│   └── schemas.py     # Data validation schemas
-├── pyproject.toml     # Poetry configuration
+├── media_bridge/
+│   ├── core.py       # Command-line interface
+│   ├── downloader.py # Download functionality
+│   └── schemas.py    # Data validation schemas
+├── tests/            # Test files
+├── pyproject.toml    # Poetry configuration
 └── README.md
 ```
 
