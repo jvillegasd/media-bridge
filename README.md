@@ -62,6 +62,9 @@ poetry run python src/cli.py --urls "https://www.youtube.com/watch?v=video1" "ht
 
 # Download with custom filename
 poetry run python src/cli.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --filename "rick-roll"
+
+# Download with custom output path
+poetry run python src/cli.py --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --output "path/to/save"
 ```
 
 The downloaded files will be saved in the current directory.

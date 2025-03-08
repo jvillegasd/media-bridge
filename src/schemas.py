@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List
 
 from pydantic import BaseModel, ValidationInfo, field_validator
@@ -7,6 +8,7 @@ class DownloaderParams(BaseModel):
     url: str | None = None
     urls: List[str] | None = None
     filename: str | None = None
+    output_path: Path | None = None
 
     @classmethod
     def _has_urls_list(cls, info: ValidationInfo) -> bool:

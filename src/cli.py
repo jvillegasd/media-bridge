@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -17,6 +18,12 @@ def main():
         "--filename",
         type=str,
         help="Optional custom filename for the downloaded video (without extension, only works with single URL)",
+        default=None,
+    )
+    parser.add_argument(
+        "--output-path",
+        type=Path,
+        help="Optional output directory for downloaded files",
         default=None,
     )
 
