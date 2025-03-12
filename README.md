@@ -9,6 +9,13 @@ A Python-based CLI tool that downloads media content from various platforms usin
 - Built with yt-dlp for reliable downloads
 - Python 3.12+ compatible
 
+## Future Features
+
+- Cloud upload integration:
+  - Upload downloaded media to Google Photos
+  - Upload downloaded media to Google Drive
+  - Support for additional cloud storage platforms planned
+
 ## Prerequisites
 
 - Python 3.12 or higher
@@ -32,7 +39,7 @@ poetry install
 
 ## Usage
 
-The CLI supports both single and multiple URL downloads with validation:
+The CLI supports both single and multiple URL downloads with validation, as well as YAML configuration files:
 
 ```bash
 # Single URL download
@@ -41,11 +48,28 @@ poetry run media-bridge --url "VIDEO_URL"
 # Multiple URLs download
 poetry run media-bridge --urls "VIDEO_URL1" "VIDEO_URL2" "VIDEO_URL3"
 
-# Single URL with custom filename (without extension)
-poetry run media-bridge --url "VIDEO_URL" --filename "my-video"
+# Using a configuration file
+poetry run media-bridge --config "path/to/config.yml"
+```
 
-# Download to specific directory
-poetry run media-bridge --url "VIDEO_URL" --output-path "/path/to/directory"
+### Command Line Options
+
+- `--url`: Single video URL to download
+- `--urls`: Multiple video URLs to download
+- `--filename`: Custom filename (without extension, only for single URL)
+- `--output-path`: Custom output directory path
+- `--config`: Path to YAML configuration file
+
+### Configuration File
+
+You can use a YAML configuration file to specify download options:
+
+```yaml
+output_path: "~/Desktop"  # Output directory for downloads
+urls:                     # List of URLs to download
+  - "https://www.youtube.com/watch?v=video1"
+  - "https://www.youtube.com/watch?v=video2"
+filename: "custom-name"   # Optional: Custom filename (only for single URL)
 ```
 
 ### Validation Features
