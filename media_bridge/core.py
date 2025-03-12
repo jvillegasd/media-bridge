@@ -4,6 +4,7 @@ from typing import List
 
 from pydantic import ValidationError
 
+from media_bridge.config import load_config
 from media_bridge.downloader import Downloader
 from media_bridge.schemas import DownloaderParams
 
@@ -32,11 +33,29 @@ def main():
         help="Optional output directory for downloaded files",
         default=None,
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Path to YAML configuration file",
+        default=None,
+    )
 
     args = parser.parse_args()
 
     try:
-        params = DownloaderParams(**vars(args))
+        params_dict = vars(args)
+        if args.config:
+            config_data = load_config(args.config)
+            # Remove None values from CLI args to allow config values to take precedence
+            params_dict.update(
+                {
+                    k: v
+                    for k, v in config_data.items()
+                    if k in DownloaderParams.__annotations__
+                }
+            )
+
+        params = DownloaderParams(**params_dict)
         downloader = Downloader(params)
         downloader.download_videos()
     except ValidationError as e:
