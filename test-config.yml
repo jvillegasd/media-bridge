@@ -1,3 +1,6 @@
 output_path: "~/Desktop"
-filename: "video"
-url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+# filename: "video"
+# url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+urls:
+  - "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  - "https://www.youtube.com/shorts/db4qA7qqlms"

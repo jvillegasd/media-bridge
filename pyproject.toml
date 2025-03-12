@@ -16,7 +16,7 @@ pytest-cov = "^6.0.0"
 pre-commit = "^4.1.0"
 
 [tool.poetry.scripts]
-media_bridge = "media_bridge.core:main"
+media-bridge = "media_bridge.core:main"
 
 [build-system]
 requires = ["poetry-core"]
