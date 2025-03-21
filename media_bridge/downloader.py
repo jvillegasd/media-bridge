@@ -6,6 +6,7 @@ from media_bridge.schemas import DownloaderParams
 class Downloader:
     def __init__(self, params: DownloaderParams):
         self.params = params
+        self._downloaded_files = []
         output_template = "%(title)s.%(ext)s"
 
         if self.params.filename:
@@ -19,19 +20,19 @@ class Downloader:
             "outtmpl": output_template,
             "sleep_interval": 1,
             "max_sleep_interval": 5,
+            "progress_hooks": [self._log_hook],
         }
 
-    def download_videos(self):
-        downloaded_files = []
-
-        def _log_hook(d):
-            if d["status"] == "finished":
-                downloaded_files.append(d["filename"])
+    def download_videos(self) -> list[str]:
+        self._downloaded_files = []
 
         options = self._downloader_options.copy()
-        options["progress_hooks"] = [_log_hook]
 
         with yt_dlp.YoutubeDL(options) as ydl:
             ydl.download(self.params.get_urls())
 
-        return downloaded_files
+        return self._downloaded_files
+
+    def _log_hook(self, download: dict):
+        if download["status"] == "finished":
+            self._downloaded_files.append(download["filename"])
