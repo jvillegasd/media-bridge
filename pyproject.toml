@@ -9,6 +9,9 @@ readme = "README.md"
 python = "^3.12"
 yt-dlp = "^2025.2.19"
 pydantic = "^2.10.6"
+google-api-python-client = "^2.165.0"
+google-auth-httplib2 = "^0.2.0"
+google-auth-oauthlib = "^1.2.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"

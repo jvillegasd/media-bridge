@@ -22,5 +22,16 @@ class Downloader:
         }
 
     def download_videos(self):
-        with yt_dlp.YoutubeDL(self._downloader_options) as ydl:
+        downloaded_files = []
+
+        def _log_hook(d):
+            if d["status"] == "finished":
+                downloaded_files.append(d["filename"])
+
+        options = self._downloader_options.copy()
+        options["progress_hooks"] = [_log_hook]
+
+        with yt_dlp.YoutubeDL(options) as ydl:
             ydl.download(self.params.get_urls())
+
+        return downloaded_files
