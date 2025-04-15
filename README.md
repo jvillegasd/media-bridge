@@ -1,6 +1,6 @@
 # Media Bridge
 
-A Python-based CLI tool that downloads media content from various platforms using yt-dlp. This tool is designed to be simple, efficient, and easy to use.
+A Python-based CLI tool that acts as a bridge, downloading media content using yt-dlp and seamlessly uploading it to configured cloud storage services like Google Drive and Google Photos.
 
 ## Features
 
