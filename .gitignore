@@ -181,3 +181,5 @@ cython_debug/
 pytest.xml
 
 config.yml
+
+!config_example.yaml
