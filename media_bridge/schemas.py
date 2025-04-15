@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -28,3 +28,30 @@ class DownloaderParams(BaseModel):
         if self.url:
             return [self.url]
         return self.urls or []
+
+
+class GoogleDriveConfig(BaseModel):
+    enabled: bool = False
+    credentials_file: Path
+    target_folder_id: Optional[str] = None
+    create_folder_if_not_exists: bool = True
+    rename_pattern: Optional[str] = None
+
+
+class GooglePhotosConfig(BaseModel):
+    enabled: bool = False
+    credentials_file: Path
+    target_album_id: Optional[str] = None
+    create_album_if_not_exists: bool = True
+    rename_as_description: bool = False
+    archive_after_upload: bool = False
+
+
+class StorageConfig(BaseModel):
+    google_drive: Optional[GoogleDriveConfig] = None
+    google_photos: Optional[GooglePhotosConfig] = None
+
+
+class Config(BaseModel):
+    output_path: Optional[Path] = None
+    storage: Optional[StorageConfig] = None

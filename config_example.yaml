@@ -1,0 +1,40 @@
+# MediaBridge Configuration Example
+
+# Basic download settings
+url: https://www.youtube.com/watch?v=example  # Single URL to download
+# Or use multiple URLs
+# urls:
+#  - https://www.youtube.com/watch?v=example1
+#  - https://www.youtube.com/watch?v=example2
+
+# Optional output path
+output_path: /path/to/downloads
+
+# Optional filename (only for single URL)
+# filename: custom_filename
+
+# Cloud Storage Configuration
+storage:
+  # Google Drive Configuration
+  google_drive:
+    enabled: true
+    credentials_file: /path/to/google_drive_credentials.json
+    # Optional target folder ID (uploads to root if not specified)
+    # target_folder_id: "your_folder_id_here"
+    # Create a folder if target_folder_id is not provided
+    create_folder_if_not_exists: true
+    # Optional pattern for renaming files
+    # rename_pattern: "My Video"
+
+  # Google Photos Configuration
+  google_photos:
+    enabled: true
+    credentials_file: /path/to/google_photos_credentials.json
+    # Optional target album ID (uploads without album if not specified)
+    # target_album_id: "your_album_id_here"
+    # Create an album if target_album_id is not provided
+    create_album_if_not_exists: true
+    # Use filename as the description (Google Photos API doesn't support direct renaming)
+    rename_as_description: true
+    # Archive uploads (hide from main library)
+    archive_after_upload: false

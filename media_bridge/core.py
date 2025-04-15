@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from media_bridge.config import load_config
 from media_bridge.downloader import Downloader
-from media_bridge.schemas import DownloaderParams
+from media_bridge.schemas import DownloaderParams, StorageConfig
 
 
 def parse_pydanctic_errors(e: ValidationError) -> List[str]:
@@ -43,20 +43,29 @@ def main():
     args = parser.parse_args()
 
     try:
+        storage_config = None
         params_dict = vars(args)
+
         if args.config:
             config_data = load_config(args.config)
+
+            # Extract downloader params from config
+            downloader_params_dict = {}
+            for k, v in config_data.items():
+                if k in DownloaderParams.__annotations__:
+                    downloader_params_dict[k] = v
+
             # Remove None values from CLI args to allow config values to take precedence
-            params_dict.update(
-                {
-                    k: v
-                    for k, v in config_data.items()
-                    if k in DownloaderParams.__annotations__
-                }
-            )
+            for k, v in downloader_params_dict.items():
+                if params_dict.get(k) is None:
+                    params_dict[k] = v
+
+            # Get storage config if available
+            if "storage" in config_data:
+                storage_config = StorageConfig(**config_data["storage"])
 
         params = DownloaderParams(**params_dict)
-        downloader = Downloader(params)
+        downloader = Downloader(params, storage_config)
         downloader.download_videos()
     except ValidationError as e:
         parser.error(parse_pydanctic_errors(e))

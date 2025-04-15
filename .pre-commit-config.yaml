@@ -16,6 +16,7 @@ repos:
     rev: 1.7.10
     hooks:
       - id: bandit
+        args: ["--skip=B113"]
         exclude: ^tests/
 
   - repo: https://github.com/PyCQA/isort

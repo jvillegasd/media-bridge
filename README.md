@@ -8,13 +8,14 @@ A Python-based CLI tool that downloads media content from various platforms usin
 - Simple command-line interface
 - Built with yt-dlp for reliable downloads
 - Python 3.12+ compatible
+- Cloud storage integration:
+  - Upload downloaded media to Google Photos
+  - Upload downloaded media to Google Drive
 
 ## Future Features
 
-- Cloud upload integration:
-  - Upload downloaded media to Google Photos
-  - Upload downloaded media to Google Drive
-  - Support for additional cloud storage platforms planned
+- Support for additional cloud storage platforms
+- Direct upload to locked folder in Google Photos (when API supports it)
 
 ## Prerequisites
 
@@ -23,6 +24,7 @@ A Python-based CLI tool that downloads media content from various platforms usin
 - FFmpeg and FFprobe (Required for media processing)
   - Strongly recommended to use [yt-dlp's custom FFmpeg builds](https://github.com/yt-dlp/FFmpeg-Builds#ffmpeg-builds) to avoid known issues
   - Note: You need the FFmpeg binary, not the Python package
+- Google API Credentials (for cloud storage uploads)
 
 ## Installation
 
@@ -62,7 +64,7 @@ poetry run media-bridge --config "path/to/config.yml"
 
 ### Configuration File
 
-You can use a YAML configuration file to specify download options:
+You can use a YAML configuration file to specify download options and cloud storage integrations:
 
 ```yaml
 output_path: "~/Desktop"  # Output directory for downloads
@@ -70,7 +72,65 @@ urls:                     # List of URLs to download
   - "https://www.youtube.com/watch?v=video1"
   - "https://www.youtube.com/watch?v=video2"
 filename: "custom-name"   # Optional: Custom filename (only for single URL)
+
+# Cloud Storage Configuration
+storage:
+  # Google Drive Configuration
+  google_drive:
+    enabled: true
+    credentials_file: /path/to/google_drive_credentials.json
+    target_folder_id: "your_folder_id_here"  # Optional
+    create_folder_if_not_exists: true
+    rename_pattern: "My Video"  # Optional
+
+  # Google Photos Configuration
+  google_photos:
+    enabled: true
+    credentials_file: /path/to/google_photos_credentials.json
+    target_album_id: "your_album_id_here"  # Optional
+    create_album_if_not_exists: true
+    rename_as_description: true
+    archive_after_upload: false
 ```
+
+A complete sample configuration file is available at `config_example.yaml`.
+
+### Cloud Storage Integration
+
+#### Google Drive
+
+Upload downloaded videos to Google Drive with the following options:
+
+- **enabled**: Set to `true` to enable Google Drive uploads
+- **credentials_file**: Path to your Google Drive API credentials JSON file
+- **target_folder_id**: (Optional) Specific folder ID to upload to
+- **create_folder_if_not_exists**: If true and no target folder is specified, creates a "MediaBridge Uploads" folder
+- **rename_pattern**: (Optional) Custom filename pattern for uploaded files
+
+#### Google Photos
+
+Upload downloaded videos to Google Photos with the following options:
+
+- **enabled**: Set to `true` to enable Google Photos uploads
+- **credentials_file**: Path to your Google Photos API credentials JSON file
+- **target_album_id**: (Optional) Specific album ID to upload to
+- **create_album_if_not_exists**: If true and no target album is specified, creates a "MediaBridge Uploads" album
+- **rename_as_description**: If true, uses the local filename as the description (Google Photos API doesn't support direct file renaming)
+- **archive_after_upload**: If true, uploaded media will be archived (hidden from the main library)
+
+### Google API Credentials
+
+To use the cloud storage features, you'll need to set up Google API credentials:
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project
+3. Enable the Google Drive API and/or Google Photos Library API
+4. Create OAuth credentials:
+   - Create OAuth 2.0 Client ID credentials
+   - Download the JSON file
+   - Place it in a secure location and reference it in your configuration file
+
+For more detailed instructions, see the [Google API Setup Guide](https://developers.google.com/workspace/guides/create-credentials).
 
 ### Validation Features
 
@@ -92,6 +152,9 @@ poetry run media-bridge --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --fi
 
 # Download with custom output path
 poetry run media-bridge --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --output-path "./downloads"
+
+# Download and upload to cloud storage using config
+poetry run media-bridge --url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --config "my_config.yaml"
 ```
 
 The downloaded files will be saved in the current directory unless --output-path is specified.
@@ -101,11 +164,16 @@ The downloaded files will be saved in the current directory unless --output-path
 ```
 media-bridge/
 ├── media_bridge/
-│   ├── core.py       # Command-line interface
-│   ├── downloader.py # Download functionality
-│   └── schemas.py    # Data validation schemas
-├── tests/            # Test files
-├── pyproject.toml    # Poetry configuration
+│   ├── core.py             # Command-line interface
+│   ├── downloader.py       # Download functionality
+│   ├── schemas.py          # Data validation schemas
+│   ├── config.py           # Configuration loading
+│   └── integrations/       # Cloud storage integrations
+│       ├── base.py         # Base storage uploader class
+│       ├── google_drive.py # Google Drive integration
+│       └── google_photos.py # Google Photos integration
+├── tests/                  # Test files
+├── pyproject.toml          # Poetry configuration
 └── README.md
 ```
 
