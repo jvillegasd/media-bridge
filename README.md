@@ -82,6 +82,7 @@ storage:
     target_folder_id: "your_folder_id_here"  # Optional
     create_folder_if_not_exists: true
     rename_pattern: "My Video"  # Optional
+    token_file: "/path/to/your/google_drive_token.json" # Optional: Where to store the token, defaults to beside credentials_file
 
   # Google Photos Configuration
   google_photos:
@@ -90,7 +91,8 @@ storage:
     target_album_id: "your_album_id_here"  # Optional
     create_album_if_not_exists: true
     rename_as_description: true
-    archive_after_upload: false
+    archive_after_upload: false # Note: Archiving currently not supported via API
+    token_file: "/path/to/your/google_photos_token.json" # Optional: Where to store the token, defaults to beside credentials_file
 ```
 
 A complete sample configuration file is available at `config_example.yaml`.
@@ -123,14 +125,22 @@ Upload downloaded videos to Google Photos with the following options:
 To use the cloud storage features, you'll need to set up Google API credentials:
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project
-3. Enable the Google Drive API and/or Google Photos Library API
-4. Create OAuth credentials:
-   - Create OAuth 2.0 Client ID credentials
-   - Download the JSON file
-   - Place it in a secure location and reference it in your configuration file
+2. Create a new project or select an existing one.
+3. Enable the **Google Drive API** and/or **Google Photos Library API**.
+4. Create OAuth 2.0 Client ID credentials:
+   - Go to "Credentials" in the APIs & Services section.
+   - Click "+ CREATE CREDENTIALS" and select "OAuth client ID".
+   - Choose "Desktop app" as the Application type.
+   - Give it a name (e.g., "MediaBridge Desktop Client").
+   - Click "Create".
+   - Download the JSON file. This file contains your client ID and client secret.
+   - **Important:** Save this JSON file (often named `client_secrets.json` or similar) in a secure location.
+   - Reference the path to this downloaded JSON file in the `credentials_file` field in your `config.yaml`.
+5. **First Run Authorization:** The first time you run `media-bridge` with a cloud storage integration enabled, it will automatically open a web browser window asking you to log in to your Google account and grant permission for the application to access the requested services (Drive and/or Photos).
+6. **Token Storage:** After you grant permission, the application will save an authorization token (containing access and refresh tokens) to a file (e.g., `drive_token.json` or `photos_token.json`). By default, this token file is saved in the same directory as your `credentials_file`. You can specify a different location using the optional `token_file` setting in your `config.yaml`.
+7. **Security:** Ensure the downloaded credentials JSON file and the generated token file are kept secure and are **not** committed to version control (add `*token.json` to your `.gitignore`).
 
-For more detailed instructions, see the [Google API Setup Guide](https://developers.google.com/workspace/guides/create-credentials).
+For more detailed background, see the [Google API Setup Guide](https://developers.google.com/workspace/guides/create-credentials).
 
 ### Validation Features
 

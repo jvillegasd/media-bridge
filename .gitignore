@@ -183,3 +183,6 @@ pytest.xml
 config.yml
 
 !config_example.yaml
+
+# Google OAuth Tokens
+*token.json

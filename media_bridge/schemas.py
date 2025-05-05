@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FilePath, model_validator
 
 
 class DownloaderParams(BaseModel):
@@ -32,7 +32,14 @@ class DownloaderParams(BaseModel):
 
 class GoogleDriveConfig(BaseModel):
     enabled: bool = False
-    credentials_file: Path
+    credentials_file: FilePath = Field(
+        ...,
+        description="Path to the Google OAuth Client ID JSON file (client_secrets.json)",
+    )
+    token_file: Optional[Path] = Field(
+        None,
+        description="Path to store/load the generated OAuth token. Defaults to next to credentials_file.",
+    )
     target_folder_id: Optional[str] = None
     create_folder_if_not_exists: bool = True
     rename_pattern: Optional[str] = None
@@ -40,7 +47,14 @@ class GoogleDriveConfig(BaseModel):
 
 class GooglePhotosConfig(BaseModel):
     enabled: bool = False
-    credentials_file: Path
+    credentials_file: FilePath = Field(
+        ...,
+        description="Path to the Google OAuth Client ID JSON file (client_secrets.json)",
+    )
+    token_file: Optional[Path] = Field(
+        None,
+        description="Path to store/load the generated OAuth token. Defaults to next to credentials_file.",
+    )
     target_album_id: Optional[str] = None
     create_album_if_not_exists: bool = True
     rename_as_description: bool = False

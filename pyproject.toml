@@ -12,6 +12,8 @@ pydantic = "^2.10.6"
 google-api-python-client = "^2.165.0"
 google-auth-httplib2 = "^0.2.0"
 google-auth-oauthlib = "^1.2.1"
+pyyaml = "^6.0.1"
+google-auth-requests-session = "^0.3.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
