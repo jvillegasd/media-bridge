@@ -1,11 +1,13 @@
 import argparse
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from pydantic import ValidationError
 
 from media_bridge.config import load_config
 from media_bridge.downloader import Downloader
+from media_bridge.integrations.base import CloudStorageUploader
+from media_bridge.integrations.factory import create_uploaders
 from media_bridge.schemas import DownloaderParams, StorageConfig
 
 
@@ -43,7 +45,8 @@ def main():
     args = parser.parse_args()
 
     try:
-        storage_config = None
+        parsed_storage_config: Optional[StorageConfig] = None
+        uploaders: List[CloudStorageUploader] = []
         params_dict = vars(args)
 
         if args.config:
@@ -52,20 +55,33 @@ def main():
             # Extract downloader params from config
             downloader_params_dict = {}
             for k, v in config_data.items():
-                if k in DownloaderParams.__annotations__:
+                if k in DownloaderParams.__fields__:
                     downloader_params_dict[k] = v
 
-            # Remove None values from CLI args to allow config values to take precedence
-            for k, v in downloader_params_dict.items():
-                if params_dict.get(k) is None:
-                    params_dict[k] = v
+            # Override CLI args with config values if CLI args are None
+            # This ensures CLI can still override specific config values if provided
+            for key, value in downloader_params_dict.items():
+                if key in params_dict and params_dict[key] is None:
+                    params_dict[key] = value
+                elif key not in params_dict:  # Add if not present from CLI
+                    params_dict[key] = value
 
-            # Get storage config if available
-            if "storage" in config_data:
-                storage_config = StorageConfig(**config_data["storage"])
+            # Get storage config and initialize uploaders
+            if "storage" in config_data and config_data["storage"]:
+                parsed_storage_config = StorageConfig(**config_data["storage"])
+                uploaders = create_uploaders(parsed_storage_config)
+            else:
+                print("No 'storage' section found in config or it is empty.")
 
+        else:  # No --config provided
+            print("No configuration file provided. Downloads will be local only.")
+            # Attempt to load default/environmental storage if desired in future, or ensure params are valid
+
+        # Validate DownloaderParams after potential merge with config
         params = DownloaderParams(**params_dict)
-        downloader = Downloader(params, storage_config)
+
+        # Pass the list of uploaders to the Downloader
+        downloader = Downloader(params, uploaders)  # Pass list of uploaders
         downloader.download_videos()
     except ValidationError as e:
         parser.error(parse_pydanctic_errors(e))

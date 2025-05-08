@@ -1,18 +1,16 @@
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import yt_dlp
 
-from media_bridge.integrations import GoogleDriveUploader, GooglePhotosUploader
-from media_bridge.schemas import DownloaderParams, StorageConfig
+from media_bridge.integrations.base import CloudStorageUploader
+from media_bridge.schemas import DownloaderParams
 
 
 class Downloader:
-    def __init__(
-        self, params: DownloaderParams, storage_config: Optional[StorageConfig] = None
-    ):
+    def __init__(self, params: DownloaderParams, uploaders: List[CloudStorageUploader]):
         self.params = params
-        self.storage_config = storage_config
+        self.uploaders = uploaders
         self._downloaded_files = []
         output_template = "%(title)s.%(ext)s"
 
@@ -30,72 +28,86 @@ class Downloader:
             "progress_hooks": [self._log_hook],
         }
 
-    def download_videos(self) -> list[str]:
-        """
-        Download videos and optionally upload them to configured cloud storage services
+    def download_videos(self):
+        urls = self.params.get_urls()
+        output_path = self.params.output_path or Path.cwd()
 
-        Returns:
-            List of paths to downloaded files
-        """
-        self._downloaded_files = []
+        for i, url in enumerate(urls):
+            custom_filename_for_this_url = None
+            if len(urls) == 1 and self.params.filename:  # Filename only for single URL
+                custom_filename_for_this_url = self.params.filename
 
+            print(f"\nDownloading video from: {url}")
+            downloaded_file_path = self._run_yt_dlp(
+                url, output_path, filename=custom_filename_for_this_url
+            )
+
+            if downloaded_file_path and downloaded_file_path.exists():
+                print(f"Successfully downloaded: {downloaded_file_path.name}")
+
+                # If uploaders are configured, upload the file
+                if self.uploaders:
+                    print(f"Found {len(self.uploaders)} uploader(s) configured.")
+                    for uploader_instance in self.uploaders:
+                        uploader_name = uploader_instance.__class__.__name__
+                        print(f"Attempting upload with {uploader_name}...")
+                        try:
+                            # Determine desired filename for upload, could be from params or original
+                            # The uploader itself will handle its own rename_pattern or specific logic
+                            upload_filename = (
+                                custom_filename_for_this_url
+                                or downloaded_file_path.stem
+                            )
+
+                            # Determine target location hint, specific to each uploader type
+                            target_hint = None
+                            if hasattr(
+                                uploader_instance, "config"
+                            ):  # Check if uploader has a config attribute
+                                if hasattr(
+                                    uploader_instance.config, "target_folder_id"
+                                ):
+                                    target_hint = (
+                                        uploader_instance.config.target_folder_id
+                                    )
+                                elif hasattr(
+                                    uploader_instance.config, "target_album_id"
+                                ):
+                                    target_hint = (
+                                        uploader_instance.config.target_album_id
+                                    )
+
+                            uploaded_id = uploader_instance.upload_video(
+                                local_path=downloaded_file_path,
+                                desired_filename=upload_filename,
+                                target_location_hint=target_hint,
+                            )
+                            if uploaded_id:
+                                print(
+                                    f"Successfully uploaded to {uploader_name}. ID: {uploaded_id}"
+                                )
+                            else:
+                                print(
+                                    f"Upload failed or no ID returned by {uploader_name}."
+                                )
+                        except Exception as e:
+                            print(f"Error during upload with {uploader_name}: {e}")
+                else:
+                    print("No uploaders configured, skipping cloud upload.")
+            else:
+                print(f"Download failed for URL: {url}")
+
+    def _run_yt_dlp(
+        self, url: str, output_path: Path, filename: Optional[str] = None
+    ) -> Optional[Path]:
         options = self._downloader_options.copy()
+        options["outtmpl"] = str(output_path / (filename or "%(title)s.%(ext)s"))
 
         with yt_dlp.YoutubeDL(options) as ydl:
-            ydl.download(self.params.get_urls())
+            ydl.download([url])
 
-        # Upload to cloud storage if configured
-        self._upload_to_cloud_storage()
-
-        return self._downloaded_files
+        return output_path / (filename or "%(title)s.%(ext)s")
 
     def _log_hook(self, download: dict):
         if download["status"] == "finished":
             self._downloaded_files.append(download["filename"])
-
-    def _upload_to_cloud_storage(self):
-        """Upload downloaded files to configured cloud storage services"""
-        if not self.storage_config:
-            return
-
-        for file_path in self._downloaded_files:
-            path = Path(file_path)
-
-            # Extract base filename without extension for use in renaming
-            base_name = path.stem
-
-            # Upload to Google Drive if enabled
-            if (
-                self.storage_config.google_drive
-                and self.storage_config.google_drive.enabled
-            ):
-                try:
-                    drive_uploader = GoogleDriveUploader(
-                        self.storage_config.google_drive
-                    )
-                    drive_file_id = drive_uploader.upload_video(
-                        path,
-                        desired_filename=base_name if self.params.filename else None,
-                        target_location_hint=None,  # Use the one from config
-                    )
-                    print(f"Uploaded to Google Drive: {drive_file_id}")
-                except Exception as e:
-                    print(f"Error uploading to Google Drive: {e}")
-
-            # Upload to Google Photos if enabled
-            if (
-                self.storage_config.google_photos
-                and self.storage_config.google_photos.enabled
-            ):
-                try:
-                    photos_uploader = GooglePhotosUploader(
-                        self.storage_config.google_photos
-                    )
-                    media_item_id = photos_uploader.upload_video(
-                        path,
-                        desired_filename=base_name if self.params.filename else None,
-                        target_location_hint=None,  # Use the one from config
-                    )
-                    print(f"Uploaded to Google Photos: {media_item_id}")
-                except Exception as e:
-                    print(f"Error uploading to Google Photos: {e}")
