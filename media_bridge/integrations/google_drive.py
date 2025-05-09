@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,8 @@ from googleapiclient.http import MediaFileUpload
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.schemas import GoogleDriveConfig
 
+logger = logging.getLogger("media_bridge.google_drive")
+
 
 class GoogleDriveUploader(CloudStorageUploader):
     SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -19,6 +22,9 @@ class GoogleDriveUploader(CloudStorageUploader):
         self.config = config
         self.service = None
         self.credentials = None
+        logger.debug(
+            "GoogleDriveUploader instance created. Attempting authentication..."
+        )
         self.authenticate()
 
     def authenticate(self):
@@ -40,32 +46,50 @@ class GoogleDriveUploader(CloudStorageUploader):
             if creds and creds.expired and creds.refresh_token:
                 try:
                     creds.refresh(Request())
+                    logger.info("Google Drive token refreshed successfully.")
                 except Exception as e:
-                    print(f"Error refreshing token: {e}. Need to re-authenticate.")
+                    logger.warning(
+                        f"Error refreshing Google Drive token: {e}. Need to re-authenticate.",
+                        exc_info=True,
+                    )
                     creds = None  # Force re-authentication
             else:
                 if not self.config.credentials_file.exists():
+                    logger.error(
+                        f"Credentials file not found: {self.config.credentials_file}"
+                    )
                     raise FileNotFoundError(
                         f"Credentials file not found: {self.config.credentials_file}. "
                         "Please provide the path to your OAuth Client ID JSON file."
                     )
+                logger.info("Performing Google Drive OAuth flow...")
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(self.config.credentials_file), self.SCOPES
                 )
-                # Use run_local_server for a better UX than run_console
                 creds = flow.run_local_server(port=0)
+                logger.info("Google Drive OAuth flow completed.")
 
             # Save the credentials for the next run
             with open(token_path, "w") as token:
                 token.write(creds.to_json())
-            print(f"Authentication successful. Token saved to: {token_path}")
+            logger.info(
+                f"Google Drive authentication successful. Token saved to: {token_path}"
+            )
 
         self.credentials = creds
         try:
             self.service = build("drive", "v3", credentials=self.credentials)
-            print("Google Drive API service created successfully.")
+            logger.info("Google Drive API service created successfully.")
         except HttpError as error:
-            print(f"An error occurred building the Drive service: {error}")
+            logger.error(
+                f"An error occurred building the Drive service: {error}", exc_info=True
+            )
+            self.service = None
+        except Exception as e:
+            logger.error(
+                f"An unexpected error occurred building the Drive service: {e}",
+                exc_info=True,
+            )
             self.service = None
 
     def _create_folder_if_needed(self, folder_name: str) -> Optional[str]:
@@ -80,7 +104,7 @@ class GoogleDriveUploader(CloudStorageUploader):
         """
         # Add check for service existence
         if not self.service:
-            print("Google Drive service not available.")
+            logger.warning("Google Drive service not available, cannot create folder.")
             return None
 
         # Search for existing folders with the same name
@@ -92,7 +116,10 @@ class GoogleDriveUploader(CloudStorageUploader):
                 .execute()
             )
         except HttpError as error:
-            print(f"An error occurred searching for folder '{folder_name}': {error}")
+            logger.error(
+                f"An error occurred searching for folder '{folder_name}': {error}",
+                exc_info=True,
+            )
             return None
 
         if response.get("files"):
@@ -110,10 +137,15 @@ class GoogleDriveUploader(CloudStorageUploader):
             folder = (
                 self.service.files().create(body=folder_metadata, fields="id").execute()
             )
-            print(f"Created folder '{folder_name}' with ID: {folder.get('id')}")
-            return folder.get("id")
+            logger.debug(
+                f"Folder '{folder_name}' (ID: {folder.get('id') if folder else 'N/A'}) ensured."
+            )
+            return folder.get("id") if folder else None
         except HttpError as error:
-            print(f"An error occurred creating folder '{folder_name}': {error}")
+            logger.error(
+                f"An error occurred creating folder '{folder_name}': {error}",
+                exc_info=True,
+            )
             return None
 
     def upload_video(
@@ -135,7 +167,7 @@ class GoogleDriveUploader(CloudStorageUploader):
         """
         # Check if service is available
         if not self.service:
-            print("Google Drive service not available. Cannot upload.")
+            logger.warning("Google Drive service not available. Cannot upload.")
             return None
 
         # Determine the folder ID to use
@@ -163,10 +195,14 @@ class GoogleDriveUploader(CloudStorageUploader):
         if folder_id:
             file_metadata["parents"] = [folder_id]
         else:
-            print("Warning: No target folder specified for Google Drive upload.")
+            logger.debug(
+                f"No target folder specified for Google Drive upload of {filename}. Will upload to root (if no default creation). "
+            )
 
         # Upload the file
-        print(f"Starting upload of {local_path.name} to Google Drive as {filename}...")
+        logger.info(
+            f"Starting upload of {local_path.name} to Google Drive as {filename}..."
+        )
         media = MediaFileUpload(str(local_path), resumable=True)
 
         try:
@@ -176,17 +212,21 @@ class GoogleDriveUploader(CloudStorageUploader):
                 .execute()
             )
             file_id = file.get("id")
-            print(f"Successfully uploaded to Google Drive. File ID: {file_id}")
+            logger.info(
+                f"Successfully uploaded {filename} to Google Drive. File ID: {file_id}"
+            )
             return file_id
         except HttpError as error:
-            print(f"An error occurred during Google Drive upload: {error}")
-            # Attempt to parse error for more details (optional)
-            # error_details = error.resp.reason
-            # print(f"Error details: {error_details}")
+            logger.error(
+                f"An error occurred during Google Drive upload of {filename}: {error}",
+                exc_info=True,
+            )
             return None
         except Exception as e:
-            # Catch other potential errors during upload
-            print(f"An unexpected error occurred during Google Drive upload: {e}")
+            logger.error(
+                f"An unexpected error occurred during Google Drive upload of {filename}: {e}",
+                exc_info=True,
+            )
             return None
 
     # Remove legacy methods

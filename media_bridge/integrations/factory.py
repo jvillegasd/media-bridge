@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 
 from media_bridge.integrations.base import CloudStorageUploader
@@ -6,6 +7,8 @@ from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.integrations.google_drive import GoogleDriveUploader
 from media_bridge.integrations.google_photos import GooglePhotosUploader
 from media_bridge.schemas import StorageConfig
+
+logger = logging.getLogger("media_bridge.factory")
 
 
 def create_uploaders(
@@ -23,56 +26,68 @@ def create_uploaders(
     uploaders: List[CloudStorageUploader] = []
 
     if not storage_config:
-        print("No storage configuration provided.")
+        logger.info("No storage configuration provided. No uploaders will be created.")
         return uploaders
 
     # Google Drive
     if storage_config.google_drive and storage_config.google_drive.enabled:
         if storage_config.google_drive.credentials_file:
-            print("Initializing Google Drive uploader...")
+            logger.info("Initializing Google Drive uploader...")
             try:
                 drive_uploader = GoogleDriveUploader(config=storage_config.google_drive)
                 if drive_uploader.service:  # Check if authentication was successful
                     uploaders.append(drive_uploader)
-                    print("Google Drive uploader initialized successfully.")
+                    logger.info("Google Drive uploader initialized successfully.")
                 else:
-                    print(
+                    logger.warning(
                         "Google Drive uploader initialized but service is not available (authentication might have failed)."
                     )
             except FileNotFoundError as e:
-                print(
-                    f"Error initializing Google Drive: {e}. Credentials file likely missing."
+                logger.error(
+                    f"Error initializing Google Drive: {e}. Credentials file likely missing.",
+                    exc_info=True,
                 )
             except Exception as e:
-                print(f"Error initializing Google Drive uploader: {e}")
+                logger.error(
+                    f"Error initializing Google Drive uploader: {e}", exc_info=True
+                )
         else:
-            print("Google Drive is enabled but credentials_file is not configured.")
+            logger.warning(
+                "Google Drive is enabled but credentials_file is not configured."
+            )
 
     # Google Photos
     if storage_config.google_photos and storage_config.google_photos.enabled:
         if storage_config.google_photos.credentials_file:
-            print("Initializing Google Photos uploader...")
+            logger.info("Initializing Google Photos uploader...")
             try:
                 photos_uploader = GooglePhotosUploader(
                     config=storage_config.google_photos
                 )
                 if photos_uploader.service:  # Check if authentication was successful
                     uploaders.append(photos_uploader)
-                    print("Google Photos uploader initialized successfully.")
+                    logger.info("Google Photos uploader initialized successfully.")
                 else:
-                    print(
+                    logger.warning(
                         "Google Photos uploader initialized but service is not available (authentication might have failed)."
                     )
             except FileNotFoundError as e:
-                print(
-                    f"Error initializing Google Photos: {e}. Credentials file likely missing."
+                logger.error(
+                    f"Error initializing Google Photos: {e}. Credentials file likely missing.",
+                    exc_info=True,
                 )
             except Exception as e:
-                print(f"Error initializing Google Photos uploader: {e}")
+                logger.error(
+                    f"Error initializing Google Photos uploader: {e}", exc_info=True
+                )
         else:
-            print("Google Photos is enabled but credentials_file is not configured.")
+            logger.warning(
+                "Google Photos is enabled but credentials_file is not configured."
+            )
 
     if not uploaders:
-        print("No cloud storage uploaders are enabled or successfully initialized.")
+        logger.info(
+            "No cloud storage uploaders were enabled or successfully initialized."
+        )
 
     return uploaders

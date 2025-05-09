@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,8 @@ from googleapiclient.errors import HttpError
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.schemas import GooglePhotosConfig
 
+logger = logging.getLogger("media_bridge.google_photos")
+
 
 class GooglePhotosUploader(CloudStorageUploader):
     # Use read/write scope as we need to upload and create albums
@@ -25,6 +28,9 @@ class GooglePhotosUploader(CloudStorageUploader):
         self.config = config
         self.service = None
         self.credentials = None
+        logger.debug(
+            "GooglePhotosUploader instance created. Attempting authentication..."
+        )
         self.authenticate()
 
     def authenticate(self):
@@ -42,25 +48,34 @@ class GooglePhotosUploader(CloudStorageUploader):
             if creds and creds.expired and creds.refresh_token:
                 try:
                     creds.refresh(GoogleAuthRequest())
+                    logger.info("Google Photos token refreshed successfully.")
                 except Exception as e:
-                    print(
-                        f"Error refreshing Photos token: {e}. Need to re-authenticate."
+                    logger.warning(
+                        f"Error refreshing Photos token: {e}. Need to re-authenticate.",
+                        exc_info=True,
                     )
                     creds = None
             else:
                 if not self.config.credentials_file.exists():
+                    logger.error(
+                        f"Credentials file not found: {self.config.credentials_file}"
+                    )
                     raise FileNotFoundError(
                         f"Credentials file not found: {self.config.credentials_file}. "
                         "Please provide the path to your OAuth Client ID JSON file."
                     )
+                logger.info("Performing Google Photos OAuth flow...")
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(self.config.credentials_file), self.SCOPES
                 )
                 creds = flow.run_local_server(port=0)
+                logger.info("Google Photos OAuth flow completed.")
 
             with open(token_path, "w") as token:
                 token.write(creds.to_json())
-            print(f"Photos authentication successful. Token saved to: {token_path}")
+            logger.info(
+                f"Photos authentication successful. Token saved to: {token_path}"
+            )
 
         self.credentials = creds
         try:
@@ -71,12 +86,17 @@ class GooglePhotosUploader(CloudStorageUploader):
                 credentials=self.credentials,
                 static_discovery=False,
             )
-            print("Google Photos API service created successfully.")
+            logger.info("Google Photos API service created successfully.")
         except HttpError as error:
-            print(f"An error occurred building the Photos service: {error}")
+            logger.error(
+                f"An error occurred building the Photos service: {error}", exc_info=True
+            )
             self.service = None
         except Exception as e:
-            print(f"An unexpected error occurred building the Photos service: {e}")
+            logger.error(
+                f"An unexpected error occurred building the Photos service: {e}",
+                exc_info=True,
+            )
             self.service = None
 
     def _create_album_if_needed(self, album_name: str) -> Optional[str]:
@@ -90,7 +110,7 @@ class GooglePhotosUploader(CloudStorageUploader):
             The album ID of the created or existing album, or None on failure.
         """
         if not self.service:
-            print("Google Photos service not available.")
+            logger.warning("Google Photos service not available, cannot create album.")
             return None
         try:
             # List existing albums
@@ -102,21 +122,29 @@ class GooglePhotosUploader(CloudStorageUploader):
             # Check if album with the same name already exists
             for album in albums:
                 if album.get("title") == album_name:
-                    print(f"Found existing album '{album_name}' with ID: {album['id']}")
+                    logger.debug(
+                        f"Found existing album '{album_name}' with ID: {album['id']}"
+                    )
                     return album["id"]
 
             # Create a new album
-            print(f"Creating new album: {album_name}")
+            logger.info(f"Creating new Google Photos album: {album_name}")
             request_body = {"album": {"title": album_name}}
             response = self.service.albums().create(body=request_body).execute()
             album_id = response["id"]
-            print(f"Created album '{album_name}' with ID: {album_id}")
+            logger.info(f"Created album '{album_name}' with ID: {album_id}")
             return album_id
         except HttpError as error:
-            print(f"An error occurred interacting with albums: {error}")
+            logger.error(
+                f"An error occurred interacting with Google Photos albums for '{album_name}': {error}",
+                exc_info=True,
+            )
             return None
         except Exception as e:
-            print(f"An unexpected error occurred creating album: {e}")
+            logger.error(
+                f"An unexpected error occurred creating album '{album_name}': {e}",
+                exc_info=True,
+            )
             return None
 
     def _upload_bytes(self, file_path: Path) -> Optional[str]:
@@ -130,22 +158,35 @@ class GooglePhotosUploader(CloudStorageUploader):
             Upload token if successful, None otherwise
         """
         if not self.credentials or not self.credentials.valid:
-            print("Authentication required or token expired. Please re-authenticate.")
-            # Attempt refresh if possible
+            logger.warning(
+                "Photos: Authentication required or token invalid before byte upload attempt."
+            )
             if self.credentials and self.credentials.refresh_token:
                 try:
+                    logger.debug(
+                        "Attempting to refresh Photos token before byte upload..."
+                    )
                     self.credentials.refresh(GoogleAuthRequest())
+                    logger.info(
+                        "Photos token refreshed successfully during upload process."
+                    )
                 except Exception as e:
-                    print(f"Failed to refresh token during upload: {e}")
+                    logger.error(
+                        f"Failed to refresh Photos token during upload: {e}",
+                        exc_info=True,
+                    )
                     return None
             else:
-                return None  # Cannot proceed without valid credentials
+                logger.error(
+                    "Photos: Cannot proceed with byte upload, no valid credentials or refresh token."
+                )
+                return None
 
         # Get the file's mime type
         mime_type, _ = mimetypes.guess_type(str(file_path))
         if not mime_type:
             mime_type = "application/octet-stream"
-            print(
+            logger.debug(
                 f"Could not guess mime type for {file_path.name}, using default: {mime_type}"
             )
 
@@ -162,26 +203,35 @@ class GooglePhotosUploader(CloudStorageUploader):
                     # Consider adding filename for debugging/logging on Google's side
                     "X-Goog-Upload-File-Name": file_path.name,
                 }
-                print(f"Uploading bytes for {file_path.name} ({mime_type})...")
+                logger.info(
+                    f"Uploading bytes for {file_path.name} ({mime_type}) to Google Photos..."
+                )
                 response = authed_session.post(
                     upload_url, headers=headers, data=file_data
                 )
                 response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
                 upload_token = response.text
-                print(
-                    f"Byte upload successful. Token: {upload_token[:10]}...{upload_token[-10:]}"
-                )  # Avoid printing full token
+                logger.info(
+                    f"Google Photos byte upload successful for {file_path.name}. Token: {upload_token[:10]}...{upload_token[-10:]}"
+                )
                 return upload_token
         except HttpError as error:
-            print(
-                f"Error uploading bytes (HttpError): {error.resp.status} - {error.content}"
+            logger.error(
+                f"Error uploading bytes to Google Photos (HttpError) for {file_path.name}: {error.resp.status} - {error.content}",
+                exc_info=True,
             )
             return None
         except requests.exceptions.RequestException as error:
-            print(f"Error uploading bytes (RequestException): {error}")
+            logger.error(
+                f"Error uploading bytes to Google Photos (RequestException) for {file_path.name}: {error}",
+                exc_info=True,
+            )
             return None
         except Exception as e:
-            print(f"An unexpected error occurred during byte upload: {e}")
+            logger.error(
+                f"An unexpected error occurred during Google Photos byte upload for {file_path.name}: {e}",
+                exc_info=True,
+            )
             return None
 
     def _create_media_item(
@@ -202,7 +252,9 @@ class GooglePhotosUploader(CloudStorageUploader):
             Media item ID if successful, None otherwise
         """
         if not self.service:
-            print("Google Photos service not available.")
+            logger.warning(
+                "Google Photos service not available, cannot create media item."
+            )
             return None
 
         request_body = {
@@ -217,12 +269,14 @@ class GooglePhotosUploader(CloudStorageUploader):
         if album_id:
             request_body["albumId"] = album_id
 
-        print(f"Creating media item with token {upload_token[:10]}...", end="")
+        logger.info(
+            f"Creating Google Photos media item with token {upload_token[:10]}... in album '{album_id if album_id else "main library"}' with description '{description if description else "N/A"}'."
+        )
         if album_id:
-            print(f" in album {album_id}", end="")
+            logger.info(f" in album {album_id}", end="")
         if description:
-            print(f" with description '{description}'", end="")
-        print(".")
+            logger.info(f" with description '{description}'", end="")
+        logger.info(".")
 
         try:
             response = (
@@ -239,26 +293,36 @@ class GooglePhotosUploader(CloudStorageUploader):
                     media_item = item_result.get("mediaItem")
                     if media_item and media_item.get("id"):
                         media_item_id = media_item["id"]
-                        print(f"Successfully created media item. ID: {media_item_id}")
+                        logger.info(
+                            f"Successfully created Google Photos media item. ID: {media_item_id}"
+                        )
                         return media_item_id
                     else:
-                        print(
-                            f"Media item creation reported success, but no ID found in response: {item_result}"
+                        logger.warning(
+                            f"Google Photos media item creation reported success, but no ID found in response: {item_result}"
                         )
                         return None
                 else:
-                    print(f"Media item creation failed. Status: {status}")
+                    logger.warning(
+                        f"Google Photos media item creation failed. Status: {status}"
+                    )
                     return None
             else:
-                print(
-                    f"Media item creation failed. Unexpected response format: {response}"
+                logger.warning(
+                    f"Google Photos media item creation failed. Unexpected response format: {response}"
                 )
                 return None
         except HttpError as error:
-            print(f"An error occurred creating media item: {error}")
+            logger.error(
+                f"An error occurred creating Google Photos media item: {error}",
+                exc_info=True,
+            )
             return None
         except Exception as e:
-            print(f"An unexpected error occurred creating media item: {e}")
+            logger.error(
+                f"An unexpected error occurred creating Google Photos media item: {e}",
+                exc_info=True,
+            )
             return None
 
     def _archive_media_item(self, media_item_id: str) -> bool:
@@ -277,8 +341,8 @@ class GooglePhotosUploader(CloudStorageUploader):
         # There is no direct 'archive' method in the discovery document.
         # Some unofficial sources suggest undocumented API endpoints or methods.
         # For now, we cannot reliably implement archiving via the public API.
-        print(
-            f"Warning: Archiving media item {media_item_id} is not currently supported via the API."
+        logger.warning(
+            f"Archiving media item {media_item_id} in Google Photos is not currently supported via the API."
         )
         return False
         # if not self.service:
@@ -318,7 +382,7 @@ class GooglePhotosUploader(CloudStorageUploader):
             The media item ID of the uploaded video, or None if failed
         """
         if not self.service:
-            print("Google Photos service not available. Cannot upload.")
+            logger.warning("Google Photos service not available. Cannot upload.")
             return None
         # Determine the album ID to use
         album_id = target_location_hint or self.config.target_album_id
@@ -333,32 +397,35 @@ class GooglePhotosUploader(CloudStorageUploader):
             description = desired_filename
 
         # Upload the file bytes to get an upload token
-        print(f"Starting Google Photos upload process for: {local_path.name}")
+        logger.info(f"Starting Google Photos upload process for: {local_path.name}")
         upload_token = self._upload_bytes(local_path)
         if not upload_token:
-            print(f"Failed to get upload token for {local_path.name}. Aborting upload.")
-            # Don't raise here, allow graceful failure
+            logger.error(
+                f"Failed to get upload token for {local_path.name}. Aborting Google Photos upload."
+            )
             return None
 
         # Create the media item
         media_item_id = self._create_media_item(upload_token, description, album_id)
         if not media_item_id:
-            print(
-                f"Failed to create media item for {local_path.name}. Aborting upload."
+            logger.error(
+                f"Failed to create Google Photos media item for {local_path.name}. Aborting upload."
             )
-            # Don't raise here
             return None
 
         # Archive the media item if configured
         if self.config.archive_after_upload:
-            print(f"Archiving configured for {media_item_id}...")
+            logger.info(
+                f"Archiving configured for Google Photos item {media_item_id}..."
+            )
             archived = self._archive_media_item(media_item_id)
             if not archived:
-                print(
-                    f"Failed to archive media item {media_item_id}. It remains in the library."
+                logger.warning(
+                    f"Failed to archive Google Photos media item {media_item_id}. It remains in the library."
                 )
-                # Continue anyway, as upload was successful
             else:
-                print(f"Media item {media_item_id} archived successfully.")
+                logger.info(
+                    f"Google Photos media item {media_item_id} archived successfully."
+                )
 
         return media_item_id

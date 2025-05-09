@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -13,6 +14,8 @@ from media_bridge.state_manager import (
     STATUS_UPLOAD_PENDING,
     StateManager,
 )
+
+logger = logging.getLogger("media_bridge.downloader")
 
 
 class Downloader:
@@ -58,7 +61,7 @@ class Downloader:
 
                 if video_url:
                     self._downloaded_files_session_cache[video_url] = actual_filepath
-                    print(
+                    logger.info(
                         f"Download finished for {video_url}. Actual file: {actual_filepath}"
                     )
                     self.state_manager.add_or_update_media_item(
@@ -69,7 +72,7 @@ class Downloader:
                         yt_dlp_id=video_yt_dlp_id,
                     )
                 else:
-                    print(
+                    logger.warning(
                         f"Warning: Could not determine original URL for downloaded file {actual_filepath}. State may be incomplete."
                     )
 
@@ -79,7 +82,7 @@ class Downloader:
                 )
                 video_title = d.get("info_dict", {}).get("title")
                 error_msg = str(d.get("error", "Unknown yt-dlp error"))
-                print(
+                logger.error(
                     f"Error downloading {video_url if video_url else 'unknown video'}: {error_msg}"
                 )
                 if video_url:
@@ -98,9 +101,10 @@ class Downloader:
         output_base_path.mkdir(parents=True, exist_ok=True)
 
         enabled_uploader_ids = [u.__class__.__name__ for u in self.uploaders]
+        logger.info(f"Starting processing for {len(urls_to_process)} URL(s).")
 
         for i, url in enumerate(urls_to_process):
-            print(f"\nProcessing URL ({i+1}/{len(urls_to_process)}): {url}")
+            logger.info(f"Processing URL ({i+1}/{len(urls_to_process)}): {url}")
 
             item_details = self.state_manager.get_media_item_details(url)
             if (
@@ -110,7 +114,7 @@ class Downloader:
                     url, enabled_uploader_ids
                 )
             ):
-                print(
+                logger.info(
                     f"Skipping {url}: Already marked as COMPLETED for all enabled uploaders."
                 )
                 continue
@@ -126,7 +130,7 @@ class Downloader:
                 in [STATUS_DOWNLOADED, STATUS_UPLOAD_PENDING]
             ):
                 local_file_path = Path(item_details["local_path"])
-                print(
+                logger.info(
                     f"Found existing downloaded file for {url} at {local_file_path}. Will attempt to upload."
                 )
                 download_needed = False
@@ -137,7 +141,7 @@ class Downloader:
                 )
 
             if download_needed:
-                print(f"Downloading video from: {url}")
+                logger.info(f"Downloading video from: {url}")
                 filename_template_part = "%(title)s.%(ext)s"
                 if len(urls_to_process) == 1 and self.params.filename:
                     filename_template_part = f"{self.params.filename}.%(ext)s"
@@ -153,7 +157,10 @@ class Downloader:
                         # yt-dlp will call the progress hook which updates the DB on success/failure
                         ydl.download([url])
                 except Exception as e:
-                    print(f"Critical error during yt-dlp execution for {url}: {e}")
+                    logger.error(
+                        f"Critical error during yt-dlp execution for {url}: {e}",
+                        exc_info=True,
+                    )
                     self.state_manager.add_or_update_media_item(
                         video_url=url,
                         status=STATUS_FAILED_DOWNLOAD,
@@ -168,7 +175,7 @@ class Downloader:
                 if db_path and db_path.exists():
                     retrieved_local_file_path = db_path
                 else:
-                    print(
+                    logger.warning(
                         f"Download failed or file not found for URL: {url}. Skipping uploads."
                     )
                     if not (
@@ -183,7 +190,9 @@ class Downloader:
                     continue
 
             local_file_path = retrieved_local_file_path
-            print(f"Proceeding with uploads for {local_file_path.name}")
+            logger.info(
+                f"Proceeding with uploads for {local_file_path.name} (source: {url})"
+            )
 
             # 3. Upload to configured services
             if self.uploaders:
@@ -193,6 +202,10 @@ class Downloader:
                     self.params.filename
                     if len(urls_to_process) == 1 and self.params.filename
                     else local_file_path.stem
+                )
+
+                logger.debug(
+                    f"Found {len(self.uploaders)} uploader(s) configured for {url}."
                 )
 
                 for uploader_instance in self.uploaders:
@@ -206,12 +219,12 @@ class Downloader:
                     )
 
                     if current_upload_status_from_db == "SUCCESS":
-                        print(
-                            f"Skipping upload to {uploader_id} for {url}: Already marked as SUCCESS."
+                        logger.info(
+                            f"Skipping upload to {uploader_id} for {url}: Already marked as SUCCESS in DB."
                         )
                         continue
 
-                    print(
+                    logger.info(
                         f"Attempting upload with {uploader_id} for {local_file_path.name}..."
                     )
                     self.state_manager.update_upload_status(url, uploader_id, "PENDING")
@@ -229,7 +242,7 @@ class Downloader:
                             target_location_hint=target_hint,
                         )
                         if uploaded_cloud_id:
-                            print(
+                            logger.info(
                                 f"Successfully uploaded to {uploader_id}. ID: {uploaded_cloud_id}"
                             )
                             self.state_manager.update_upload_status(
@@ -239,14 +252,17 @@ class Downloader:
                                 uploaded_id=uploaded_cloud_id,
                             )
                         else:
-                            print(
+                            logger.warning(
                                 f"Upload to {uploader_id} did not return an ID. Assuming failure or incomplete."
                             )
                             self.state_manager.update_upload_status(
                                 url, uploader_id, "FAILED", uploaded_id="FAILED_NO_ID"
                             )
                     except Exception as e:
-                        print(f"Error during upload with {uploader_id}: {e}")
+                        logger.error(
+                            f"Error during upload with {uploader_id} for {url}: {e}",
+                            exc_info=True,
+                        )
                         self.state_manager.update_upload_status(
                             url,
                             uploader_id,
@@ -254,11 +270,13 @@ class Downloader:
                             uploaded_id=f"ERROR: {type(e).__name__}",
                         )
             else:
-                print("No uploaders configured, skipping cloud upload.")
+                logger.info(
+                    f"No uploaders configured for {url}, skipping cloud upload."
+                )
 
             # 4. Update overall status after all operations for this URL
             self.state_manager.update_item_status_if_all_uploads_done(
                 url, enabled_uploader_ids
             )
 
-        print("\nAll URL processing finished.")
+        logger.info("All URL processing finished.")

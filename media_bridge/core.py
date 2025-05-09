@@ -1,23 +1,49 @@
 import argparse
+import logging
 from pathlib import Path
 from typing import List, Optional
 
 from pydantic import ValidationError
+from rich.logging import RichHandler
 
 from media_bridge.config import load_config
 from media_bridge.downloader import Downloader
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.integrations.factory import create_uploaders
-from media_bridge.schemas import Config, DownloaderParams, StorageConfig
+from media_bridge.schemas import Config, DownloaderParams
 from media_bridge.state_manager import StateManager
 
+# Setup a module-level logger. This will be the parent for loggers in other app modules.
+logger = logging.getLogger("media_bridge")
 
-def parse_pydanctic_errors(e: ValidationError) -> List[str]:
+
+def setup_logging(level=logging.INFO):
+    """Configures logging for the application using RichHandler."""
+    logging.basicConfig(
+        level=level,
+        format="%(message)s",  # RichHandler often overrides this.
+        datefmt="[%X]",  # RichHandler often overrides this.
+        handlers=[
+            RichHandler(
+                rich_tracebacks=True, show_path=False, show_level=True, show_time=True
+            )
+        ],
+    )
+    # Explicitly set the level for the application's root logger.
+    # This helps ensure that even if basicConfig is called by a library,
+    # our application's logger level is respected.
+    logging.getLogger("media_bridge").setLevel(level)
+    # You might also want to silence overly verbose library loggers here, e.g.:
+    # logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
+
+
+def parse_pydantic_errors(e: ValidationError) -> List[str]:
     new_errors = [error["msg"] for error in e.errors()]
     return new_errors
 
 
 def main():
+    # Argument parsing must happen before logging setup if log level is a CLI arg
     parser = argparse.ArgumentParser(description="Download videos using youtube-dl.")
     url_group = parser.add_mutually_exclusive_group()
     url_group.add_argument(
@@ -42,36 +68,56 @@ def main():
         help="Path to YAML configuration file",
         default=None,
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set the logging level (default: INFO)",
+        # Convert to upper for case-insensitivity before passing to logging module
+        # action="store", # default
+        # dest="log_level_str" # if we want a different var name
+    )
 
     args = parser.parse_args()
 
-    # Determine database path
-    # Default to a file in the user's home directory if not specified
-    # This ensures a consistent db location if no config is used or if db_path is omitted
+    # Setup logging AFTER parsing args so we can use args.log_level
+    # Convert string level to logging level int
+    numeric_log_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    setup_logging(level=numeric_log_level)
+
+    # Now the logger is configured, we can use it for subsequent messages.
+    logger.info(f"Log level set to: {args.log_level.upper()}")
+
     default_db_name = ".media_bridge_state.db"
     config_defined_db_path: Optional[Path] = None
     app_config: Optional[Config] = None
-
     params_dict = vars(args)
+    uploaders: List[CloudStorageUploader] = []
 
     if args.config:
+        logger.debug(f"Loading configuration from: {args.config}")
         raw_config_data = load_config(args.config)
-        app_config = Config(
-            **raw_config_data
-        )  # Parse the full config including db_path
+        try:
+            app_config = Config(**raw_config_data)
+        except ValidationError as e:
+            logger.error(
+                f"Configuration validation error in {args.config}: {parse_pydantic_errors(e)}",
+                exc_info=True,
+            )
+            return  # Exit if config is invalid
 
         if app_config.database_path:
             config_defined_db_path = app_config.database_path
         else:
-            # If config file is provided but no db_path, store db next to config file
             config_defined_db_path = args.config.parent / default_db_name
+            logger.debug(
+                f"No database_path in config, defaulting to: {config_defined_db_path}"
+            )
 
-        # Extract downloader params from config
         downloader_params_dict = {}
         if app_config:
-            for k, v in app_config.model_dump(
-                exclude_none=True
-            ).items():  # Use model_dump
+            for k, v in app_config.model_dump(exclude_none=True).items():
                 if k in DownloaderParams.__fields__:
                     downloader_params_dict[k] = v
 
@@ -81,38 +127,41 @@ def main():
             elif key not in params_dict:
                 params_dict[key] = value
 
-        parsed_storage_config: Optional[StorageConfig] = None
-        uploaders: List[CloudStorageUploader] = []
         if app_config and app_config.storage:
-            parsed_storage_config = app_config.storage  # Already parsed StorageConfig
-            uploaders = create_uploaders(parsed_storage_config)
+            uploaders = create_uploaders(app_config.storage)
         else:
-            print("No 'storage' section found in config or it is empty.")
+            logger.info(
+                "No 'storage' section found in config or it is empty. No uploads will be performed."
+            )
+    else:
+        logger.info(
+            "No configuration file provided. Downloads will be local only. Using default DB path."
+        )
 
     final_db_path = config_defined_db_path or Path.home() / default_db_name
+    logger.info(f"Using state database at: {final_db_path}")
 
+    state_manager = None
     try:
         state_manager = StateManager(db_path=final_db_path)
-
-        # Validate DownloaderParams after potential merge with config
-        params = DownloaderParams(**params_dict)
-
-        # Pass the list of uploaders and state_manager to the Downloader
+        params = DownloaderParams(**params_dict)  # Validate params after all merging
         downloader = Downloader(params, uploaders, state_manager)
         downloader.download_videos()
 
-    except ValidationError as e:
-        parser.error(str(parse_pydanctic_errors(e)))  # Ensure error is string
+    except (
+        ValidationError
+    ) as e:  # Catches Pydantic validation errors for DownloaderParams
+        logger.error(
+            f"Parameter validation error: {parse_pydantic_errors(e)}", exc_info=True
+        )
     except Exception as e:
-        # General exception handling for other potential errors during setup or run
-        print(f"An unexpected error occurred: {e}")
-        # Consider if state_manager needs to be closed here if it was initialized
+        logger.error(
+            f"An unexpected critical error occurred in main execution: {e}",
+            exc_info=True,
+        )
     finally:
-        # Ensure StateManager is closed if it was initialized, regardless of success/failure
-        # This requires state_manager to be defined outside the try block or checked carefully
-        if "state_manager" in locals() and state_manager:  # Check if initialized
+        if state_manager:
             state_manager.close()
-            print("StateManager closed.")
 
 
 if __name__ == "__main__":

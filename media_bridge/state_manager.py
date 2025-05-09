@@ -1,7 +1,10 @@
 import datetime
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("media_bridge.state_manager")
 
 # Define constants for status values
 STATUS_PENDING_DOWNLOAD = "PENDING_DOWNLOAD"
@@ -28,14 +31,17 @@ class StateManager:
                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
             )
             self._conn.row_factory = sqlite3.Row  # Access columns by name
-            print(f"Connected to state database: {self.db_path}")
+            logger.info(f"Connected to state database: {self.db_path}")
         except sqlite3.Error as e:
-            print(f"Error connecting to database {self.db_path}: {e}")
+            logger.error(
+                f"Error connecting to database {self.db_path}: {e}", exc_info=True
+            )
             self._conn = None  # Ensure conn is None if connection failed
 
     def _create_tables(self):
         """Create necessary tables if they don't exist."""
         if not self._conn:
+            logger.warning("Cannot create tables, no database connection.")
             return
         try:
             with self._conn:
@@ -62,15 +68,15 @@ class StateManager:
                         FOREIGN KEY (video_url) REFERENCES media_items (video_url) ON DELETE CASCADE
                     )
                 """)
-                print("Database tables ensured.")
+                logger.info("Database tables ensured.")
         except sqlite3.Error as e:
-            print(f"Error creating tables: {e}")
+            logger.error(f"Error creating tables: {e}", exc_info=True)
 
     def close(self):
         if self._conn:
             self._conn.close()
             self._conn = None
-            print("State database connection closed.")
+            logger.info("State database connection closed.")
 
     def add_or_update_media_item(
         self,
@@ -82,6 +88,7 @@ class StateManager:
         error_message: Optional[str] = None,
     ):
         if not self._conn:
+            logger.warning("No DB connection, cannot update media item.")
             return
         now = datetime.datetime.now()
         try:
@@ -110,9 +117,13 @@ class StateManager:
                         error_message,
                     ),
                 )
-            print(f"Media item {video_url} added/updated with status: {status}")
+            logger.debug(
+                f"Media item {video_url} added/updated with status: {status}, local_path: {local_path}"
+            )
         except sqlite3.Error as e:
-            print(f"Error adding/updating media item {video_url}: {e}")
+            logger.error(
+                f"Error adding/updating media item {video_url}: {e}", exc_info=True
+            )
 
     def update_upload_status(
         self,
@@ -122,6 +133,7 @@ class StateManager:
         uploaded_id: Optional[str] = None,
     ):
         if not self._conn:
+            logger.warning("No DB connection, cannot update upload status.")
             return
         now = datetime.datetime.now()
         upload_ts = now if status == "SUCCESS" else None
@@ -138,14 +150,18 @@ class StateManager:
                 """,
                     (video_url, uploader_id, status, uploaded_id, upload_ts),
                 )
-                print(
+                logger.debug(
                     f"Upload status for {video_url} on {uploader_id} updated to {status}"
                 )
         except sqlite3.Error as e:
-            print(f"Error updating upload status for {video_url} on {uploader_id}: {e}")
+            logger.error(
+                f"Error updating upload status for {video_url} on {uploader_id}: {e}",
+                exc_info=True,
+            )
 
     def get_media_item_details(self, video_url: str) -> Optional[Dict[str, Any]]:
         if not self._conn:
+            logger.warning("No DB connection, cannot get media item details.")
             return None
         try:
             cur = self._conn.execute(
@@ -165,7 +181,7 @@ class StateManager:
                 return details
             return None
         except sqlite3.Error as e:
-            print(f"Error fetching media item {video_url}: {e}")
+            logger.error(f"Error fetching media item {video_url}: {e}", exc_info=True)
             return None
 
     def is_video_processed_for_uploaders(
@@ -213,28 +229,29 @@ class StateManager:
     def update_item_status_if_all_uploads_done(
         self, video_url: str, enabled_uploader_ids: List[str]
     ):
-        if not self._conn or not enabled_uploader_ids:
+        if not self._conn:
+            logger.warning("No DB connection, cannot update overall item status.")
+            return
+        if not enabled_uploader_ids:
             # If no uploaders are enabled, consider download as completed.
             self.add_or_update_media_item(video_url, status=STATUS_COMPLETED)
             return
 
         if self.is_video_processed_for_uploaders(video_url, enabled_uploader_ids):
             self.add_or_update_media_item(video_url, status=STATUS_COMPLETED)
-            print(
+            logger.info(
                 f"All enabled uploads for {video_url} are complete. Marked as COMPLETED."
             )
         else:
-            # If not all are success, but item was downloaded, keep as DOWNLOADED or UPLOAD_PENDING
-            # This logic might need more refinement based on specific states.
             details = self.get_media_item_details(video_url)
+            current_status_for_log = details.get("status") if details else "N/A"
+            has_pending_or_failed = False
             if details and details.get("status") not in [
                 STATUS_FAILED_DOWNLOAD,
                 STATUS_FAILED_UPLOAD,
             ]:
                 current_main_status = details.get("status")
                 if current_main_status == STATUS_DOWNLOADED:
-                    # Check if any upload is pending or failed to set a more specific status
-                    has_pending_or_failed = False
                     for u_id in enabled_uploader_ids:
                         u_stat = details.get("uploads", {}).get(u_id, {}).get("status")
                         if u_stat in ["PENDING", "FAILED"]:
@@ -244,6 +261,17 @@ class StateManager:
                         self.add_or_update_media_item(
                             video_url, status=STATUS_UPLOAD_PENDING
                         )
-            print(
-                f"Checked all uploads for {video_url}, not all completed. Current status: {details.get('status') if details else 'N/A'}"
+                        logger.info(
+                            f"{video_url} has pending/failed uploads. Status set to UPLOAD_PENDING."
+                        )
+                        current_status_for_log = (
+                            STATUS_UPLOAD_PENDING  # Update for final log message
+                        )
+                    else:
+                        # If downloaded and no pending/failed, but not all success yet, it remains DOWNLOADED
+                        logger.debug(
+                            f"{video_url} is downloaded, some uploads may not be SUCCESS yet but none are PENDING/FAILED."
+                        )
+            logger.debug(
+                f"Checked all uploads for {video_url}, not all completed. Final status for item: {current_status_for_log}"
             )
