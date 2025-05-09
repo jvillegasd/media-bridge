@@ -5,109 +5,260 @@ import yt_dlp
 
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.schemas import DownloaderParams
+from media_bridge.state_manager import (
+    STATUS_COMPLETED,
+    STATUS_DOWNLOADED,
+    STATUS_FAILED_DOWNLOAD,
+    STATUS_PENDING_DOWNLOAD,
+    STATUS_UPLOAD_PENDING,
+    StateManager,
+)
 
 
 class Downloader:
-    def __init__(self, params: DownloaderParams, uploaders: List[CloudStorageUploader]):
+    def __init__(
+        self,
+        params: DownloaderParams,
+        uploaders: List[CloudStorageUploader],
+        state_manager: StateManager,
+    ):
         self.params = params
         self.uploaders = uploaders
-        self._downloaded_files = []
-        output_template = "%(title)s.%(ext)s"
+        self.state_manager = state_manager
+        self._downloaded_files_session_cache = {}
+
+        output_template_str = "%(title)s.%(ext)s"
 
         if self.params.filename:
-            output_template = f"{self.params.filename}.%(ext)s"
+            output_template_str = f"{self.params.filename}.%(ext)s"
 
         if self.params.output_path:
-            output_template = str(self.params.output_path / output_template)
+            output_template_str = str(self.params.output_path / output_template_str)
 
         self._downloader_options = {
             "format": "best",
-            "outtmpl": output_template,
             "sleep_interval": 1,
             "max_sleep_interval": 5,
-            "progress_hooks": [self._log_hook],
+            "progress_hooks": [self._make_progress_hook()],
+            "continuedl": True,
+            "ignoreerrors": True,
+            "extract_flat": "discard_in_playlist",
+            "yes_playlist": True,
         }
 
+    def _make_progress_hook(self):
+        def _hook(d):
+            if d["status"] == "finished":
+                actual_filepath = Path(d["filename"])
+                video_url = d.get("info_dict", {}).get(
+                    "original_url", d.get("info_dict", {}).get("webpage_url")
+                )
+                video_title = d.get("info_dict", {}).get("title")
+                video_yt_dlp_id = d.get("info_dict", {}).get("id")
+
+                if video_url:
+                    self._downloaded_files_session_cache[video_url] = actual_filepath
+                    print(
+                        f"Download finished for {video_url}. Actual file: {actual_filepath}"
+                    )
+                    self.state_manager.add_or_update_media_item(
+                        video_url=video_url,
+                        title=video_title,
+                        local_path=actual_filepath,
+                        status=STATUS_DOWNLOADED,
+                        yt_dlp_id=video_yt_dlp_id,
+                    )
+                else:
+                    print(
+                        f"Warning: Could not determine original URL for downloaded file {actual_filepath}. State may be incomplete."
+                    )
+
+            elif d["status"] == "error":
+                video_url = d.get("info_dict", {}).get(
+                    "original_url", d.get("info_dict", {}).get("webpage_url")
+                )
+                video_title = d.get("info_dict", {}).get("title")
+                error_msg = str(d.get("error", "Unknown yt-dlp error"))
+                print(
+                    f"Error downloading {video_url if video_url else 'unknown video'}: {error_msg}"
+                )
+                if video_url:
+                    self.state_manager.add_or_update_media_item(
+                        video_url=video_url,
+                        title=video_title,
+                        status=STATUS_FAILED_DOWNLOAD,
+                        error_message=error_msg,
+                    )
+
+        return _hook
+
     def download_videos(self):
-        urls = self.params.get_urls()
-        output_path = self.params.output_path or Path.cwd()
+        urls_to_process = self.params.get_urls()
+        output_base_path = self.params.output_path or Path.cwd()
+        output_base_path.mkdir(parents=True, exist_ok=True)
 
-        for i, url in enumerate(urls):
-            custom_filename_for_this_url = None
-            if len(urls) == 1 and self.params.filename:  # Filename only for single URL
-                custom_filename_for_this_url = self.params.filename
+        enabled_uploader_ids = [u.__class__.__name__ for u in self.uploaders]
 
-            print(f"\nDownloading video from: {url}")
-            downloaded_file_path = self._run_yt_dlp(
-                url, output_path, filename=custom_filename_for_this_url
+        for i, url in enumerate(urls_to_process):
+            print(f"\nProcessing URL ({i+1}/{len(urls_to_process)}): {url}")
+
+            item_details = self.state_manager.get_media_item_details(url)
+            if (
+                item_details
+                and item_details.get("status") == STATUS_COMPLETED
+                and self.state_manager.is_video_processed_for_uploaders(
+                    url, enabled_uploader_ids
+                )
+            ):
+                print(
+                    f"Skipping {url}: Already marked as COMPLETED for all enabled uploaders."
+                )
+                continue
+
+            local_file_path: Optional[Path] = None
+            download_needed = True
+
+            if (
+                item_details
+                and item_details.get("local_path")
+                and Path(item_details["local_path"]).exists()
+                and item_details.get("status")
+                in [STATUS_DOWNLOADED, STATUS_UPLOAD_PENDING]
+            ):
+                local_file_path = Path(item_details["local_path"])
+                print(
+                    f"Found existing downloaded file for {url} at {local_file_path}. Will attempt to upload."
+                )
+                download_needed = False
+                self._downloaded_files_session_cache[url] = local_file_path
+            else:
+                self.state_manager.add_or_update_media_item(
+                    video_url=url, status=STATUS_PENDING_DOWNLOAD
+                )
+
+            if download_needed:
+                print(f"Downloading video from: {url}")
+                filename_template_part = "%(title)s.%(ext)s"
+                if len(urls_to_process) == 1 and self.params.filename:
+                    filename_template_part = f"{self.params.filename}.%(ext)s"
+
+                current_dl_options = self._downloader_options.copy()
+                current_dl_options["outtmpl"] = str(
+                    output_base_path / filename_template_part
+                )
+                current_dl_options["progress_hooks"] = [self._make_progress_hook()]
+
+                try:
+                    with yt_dlp.YoutubeDL(current_dl_options) as ydl:
+                        # yt-dlp will call the progress hook which updates the DB on success/failure
+                        ydl.download([url])
+                except Exception as e:
+                    print(f"Critical error during yt-dlp execution for {url}: {e}")
+                    self.state_manager.add_or_update_media_item(
+                        video_url=url,
+                        status=STATUS_FAILED_DOWNLOAD,
+                        error_message=str(e),
+                    )
+                    continue
+
+            retrieved_local_file_path = self._downloaded_files_session_cache.get(url)
+
+            if not retrieved_local_file_path or not retrieved_local_file_path.exists():
+                db_path = self.state_manager.get_local_path(url)
+                if db_path and db_path.exists():
+                    retrieved_local_file_path = db_path
+                else:
+                    print(
+                        f"Download failed or file not found for URL: {url}. Skipping uploads."
+                    )
+                    if not (
+                        item_details
+                        and item_details.get("status") == STATUS_FAILED_DOWNLOAD
+                    ):
+                        self.state_manager.add_or_update_media_item(
+                            video_url=url,
+                            status=STATUS_FAILED_DOWNLOAD,
+                            error_message="File not found post-download attempt.",
+                        )
+                    continue
+
+            local_file_path = retrieved_local_file_path
+            print(f"Proceeding with uploads for {local_file_path.name}")
+
+            # 3. Upload to configured services
+            if self.uploaders:
+                # Determine desired filename for upload (without extension for some services)
+                # Use original filename from download, or custom from params if single URL
+                base_upload_filename = (
+                    self.params.filename
+                    if len(urls_to_process) == 1 and self.params.filename
+                    else local_file_path.stem
+                )
+
+                for uploader_instance in self.uploaders:
+                    uploader_id = uploader_instance.__class__.__name__
+                    # Correctly fetch item_details again or ensure it's up-to-date if needed after download attempt.
+                    # For this logic, assuming item_details fetched at the start of URL processing is sufficient for upload check.
+                    current_upload_status_from_db = (
+                        (item_details.get("uploads", {}) if item_details else {})
+                        .get(uploader_id, {})
+                        .get("status")
+                    )
+
+                    if current_upload_status_from_db == "SUCCESS":
+                        print(
+                            f"Skipping upload to {uploader_id} for {url}: Already marked as SUCCESS."
+                        )
+                        continue
+
+                    print(
+                        f"Attempting upload with {uploader_id} for {local_file_path.name}..."
+                    )
+                    self.state_manager.update_upload_status(url, uploader_id, "PENDING")
+                    try:
+                        target_hint = None
+                        if hasattr(uploader_instance, "config"):
+                            if hasattr(uploader_instance.config, "target_folder_id"):
+                                target_hint = uploader_instance.config.target_folder_id
+                            elif hasattr(uploader_instance.config, "target_album_id"):
+                                target_hint = uploader_instance.config.target_album_id
+
+                        uploaded_cloud_id = uploader_instance.upload_video(
+                            local_path=local_file_path,
+                            desired_filename=base_upload_filename,
+                            target_location_hint=target_hint,
+                        )
+                        if uploaded_cloud_id:
+                            print(
+                                f"Successfully uploaded to {uploader_id}. ID: {uploaded_cloud_id}"
+                            )
+                            self.state_manager.update_upload_status(
+                                url,
+                                uploader_id,
+                                "SUCCESS",
+                                uploaded_id=uploaded_cloud_id,
+                            )
+                        else:
+                            print(
+                                f"Upload to {uploader_id} did not return an ID. Assuming failure or incomplete."
+                            )
+                            self.state_manager.update_upload_status(
+                                url, uploader_id, "FAILED", uploaded_id="FAILED_NO_ID"
+                            )
+                    except Exception as e:
+                        print(f"Error during upload with {uploader_id}: {e}")
+                        self.state_manager.update_upload_status(
+                            url,
+                            uploader_id,
+                            "FAILED",
+                            uploaded_id=f"ERROR: {type(e).__name__}",
+                        )
+            else:
+                print("No uploaders configured, skipping cloud upload.")
+
+            # 4. Update overall status after all operations for this URL
+            self.state_manager.update_item_status_if_all_uploads_done(
+                url, enabled_uploader_ids
             )
 
-            if downloaded_file_path and downloaded_file_path.exists():
-                print(f"Successfully downloaded: {downloaded_file_path.name}")
-
-                # If uploaders are configured, upload the file
-                if self.uploaders:
-                    print(f"Found {len(self.uploaders)} uploader(s) configured.")
-                    for uploader_instance in self.uploaders:
-                        uploader_name = uploader_instance.__class__.__name__
-                        print(f"Attempting upload with {uploader_name}...")
-                        try:
-                            # Determine desired filename for upload, could be from params or original
-                            # The uploader itself will handle its own rename_pattern or specific logic
-                            upload_filename = (
-                                custom_filename_for_this_url
-                                or downloaded_file_path.stem
-                            )
-
-                            # Determine target location hint, specific to each uploader type
-                            target_hint = None
-                            if hasattr(
-                                uploader_instance, "config"
-                            ):  # Check if uploader has a config attribute
-                                if hasattr(
-                                    uploader_instance.config, "target_folder_id"
-                                ):
-                                    target_hint = (
-                                        uploader_instance.config.target_folder_id
-                                    )
-                                elif hasattr(
-                                    uploader_instance.config, "target_album_id"
-                                ):
-                                    target_hint = (
-                                        uploader_instance.config.target_album_id
-                                    )
-
-                            uploaded_id = uploader_instance.upload_video(
-                                local_path=downloaded_file_path,
-                                desired_filename=upload_filename,
-                                target_location_hint=target_hint,
-                            )
-                            if uploaded_id:
-                                print(
-                                    f"Successfully uploaded to {uploader_name}. ID: {uploaded_id}"
-                                )
-                            else:
-                                print(
-                                    f"Upload failed or no ID returned by {uploader_name}."
-                                )
-                        except Exception as e:
-                            print(f"Error during upload with {uploader_name}: {e}")
-                else:
-                    print("No uploaders configured, skipping cloud upload.")
-            else:
-                print(f"Download failed for URL: {url}")
-
-    def _run_yt_dlp(
-        self, url: str, output_path: Path, filename: Optional[str] = None
-    ) -> Optional[Path]:
-        options = self._downloader_options.copy()
-        options["outtmpl"] = str(output_path / (filename or "%(title)s.%(ext)s"))
-
-        with yt_dlp.YoutubeDL(options) as ydl:
-            ydl.download([url])
-
-        return output_path / (filename or "%(title)s.%(ext)s")
-
-    def _log_hook(self, download: dict):
-        if download["status"] == "finished":
-            self._downloaded_files.append(download["filename"])
+        print("\nAll URL processing finished.")

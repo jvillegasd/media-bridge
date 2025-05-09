@@ -69,3 +69,6 @@ class StorageConfig(BaseModel):
 class Config(BaseModel):
     output_path: Optional[Path] = None
     storage: Optional[StorageConfig] = None
+    database_path: Optional[Path] = None
+
+    # Potentially add a validator for database_path or a default factory if needed

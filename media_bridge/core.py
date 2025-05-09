@@ -8,7 +8,8 @@ from media_bridge.config import load_config
 from media_bridge.downloader import Downloader
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.integrations.factory import create_uploaders
-from media_bridge.schemas import DownloaderParams, StorageConfig
+from media_bridge.schemas import Config, DownloaderParams, StorageConfig
+from media_bridge.state_manager import StateManager
 
 
 def parse_pydanctic_errors(e: ValidationError) -> List[str]:
@@ -44,47 +45,74 @@ def main():
 
     args = parser.parse_args()
 
-    try:
-        parsed_storage_config: Optional[StorageConfig] = None
-        uploaders: List[CloudStorageUploader] = []
-        params_dict = vars(args)
+    # Determine database path
+    # Default to a file in the user's home directory if not specified
+    # This ensures a consistent db location if no config is used or if db_path is omitted
+    default_db_name = ".media_bridge_state.db"
+    config_defined_db_path: Optional[Path] = None
+    app_config: Optional[Config] = None
 
-        if args.config:
-            config_data = load_config(args.config)
+    params_dict = vars(args)
 
-            # Extract downloader params from config
-            downloader_params_dict = {}
-            for k, v in config_data.items():
+    if args.config:
+        raw_config_data = load_config(args.config)
+        app_config = Config(
+            **raw_config_data
+        )  # Parse the full config including db_path
+
+        if app_config.database_path:
+            config_defined_db_path = app_config.database_path
+        else:
+            # If config file is provided but no db_path, store db next to config file
+            config_defined_db_path = args.config.parent / default_db_name
+
+        # Extract downloader params from config
+        downloader_params_dict = {}
+        if app_config:
+            for k, v in app_config.model_dump(
+                exclude_none=True
+            ).items():  # Use model_dump
                 if k in DownloaderParams.__fields__:
                     downloader_params_dict[k] = v
 
-            # Override CLI args with config values if CLI args are None
-            # This ensures CLI can still override specific config values if provided
-            for key, value in downloader_params_dict.items():
-                if key in params_dict and params_dict[key] is None:
-                    params_dict[key] = value
-                elif key not in params_dict:  # Add if not present from CLI
-                    params_dict[key] = value
+        for key, value in downloader_params_dict.items():
+            if key in params_dict and params_dict[key] is None:
+                params_dict[key] = value
+            elif key not in params_dict:
+                params_dict[key] = value
 
-            # Get storage config and initialize uploaders
-            if "storage" in config_data and config_data["storage"]:
-                parsed_storage_config = StorageConfig(**config_data["storage"])
-                uploaders = create_uploaders(parsed_storage_config)
-            else:
-                print("No 'storage' section found in config or it is empty.")
+        parsed_storage_config: Optional[StorageConfig] = None
+        uploaders: List[CloudStorageUploader] = []
+        if app_config and app_config.storage:
+            parsed_storage_config = app_config.storage  # Already parsed StorageConfig
+            uploaders = create_uploaders(parsed_storage_config)
+        else:
+            print("No 'storage' section found in config or it is empty.")
 
-        else:  # No --config provided
-            print("No configuration file provided. Downloads will be local only.")
-            # Attempt to load default/environmental storage if desired in future, or ensure params are valid
+    final_db_path = config_defined_db_path or Path.home() / default_db_name
+
+    try:
+        state_manager = StateManager(db_path=final_db_path)
 
         # Validate DownloaderParams after potential merge with config
         params = DownloaderParams(**params_dict)
 
-        # Pass the list of uploaders to the Downloader
-        downloader = Downloader(params, uploaders)  # Pass list of uploaders
+        # Pass the list of uploaders and state_manager to the Downloader
+        downloader = Downloader(params, uploaders, state_manager)
         downloader.download_videos()
+
     except ValidationError as e:
-        parser.error(parse_pydanctic_errors(e))
+        parser.error(str(parse_pydanctic_errors(e)))  # Ensure error is string
+    except Exception as e:
+        # General exception handling for other potential errors during setup or run
+        print(f"An unexpected error occurred: {e}")
+        # Consider if state_manager needs to be closed here if it was initialized
+    finally:
+        # Ensure StateManager is closed if it was initialized, regardless of success/failure
+        # This requires state_manager to be defined outside the try block or checked carefully
+        if "state_manager" in locals() and state_manager:  # Check if initialized
+            state_manager.close()
+            print("StateManager closed.")
 
 
 if __name__ == "__main__":
