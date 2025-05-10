@@ -4,9 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-
-# Use AuthorizedSession for uploads
-# Use google-auth-requests-session for authenticated HTTP requests
+from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import AuthorizedSession
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
@@ -14,10 +12,32 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from media_bridge.error_handler import (
+    UploadConnectionError,
+    UploadError,
+    UploadFormatError,
+    UploadPermissionError,
+    UploadQuotaError,
+    UploadRateLimitError,
+    UploadSizeError,
+    UploadTimeoutError,
+)
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.schemas import GooglePhotosConfig
 
 logger = logging.getLogger("media_bridge.google_photos")
+
+# Google Photos specific constants
+MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB (Google Photos limit)
+SUPPORTED_FORMATS = {
+    ".mp4": "video/mp4",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+    ".wmv": "video/x-ms-wmv",
+    ".flv": "video/x-flv",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+}
 
 
 class GooglePhotosUploader(CloudStorageUploader):
@@ -33,71 +53,136 @@ class GooglePhotosUploader(CloudStorageUploader):
         )
         self.authenticate()
 
+    def _validate_file(self, local_path: Path) -> None:
+        """
+        Validate the file before upload.
+
+        Args:
+            local_path: Path to the file to validate
+
+        Raises:
+            UploadFormatError: If file format is not supported
+            UploadSizeError: If file size exceeds limits
+        """
+        # Check file format
+        if local_path.suffix.lower() not in SUPPORTED_FORMATS:
+            raise UploadFormatError(
+                f"Unsupported file format: {local_path.suffix}. "
+                f"Supported formats: {', '.join(SUPPORTED_FORMATS.keys())}"
+            )
+
+        # Check file size
+        file_size = local_path.stat().st_size
+        if file_size > MAX_FILE_SIZE:
+            raise UploadSizeError(
+                f"File size ({file_size / (1024*1024):.1f}MB) exceeds maximum allowed size "
+                f"({MAX_FILE_SIZE / (1024*1024):.1f}MB)"
+            )
+
+    def _check_quota(self) -> None:
+        """
+        Check if upload quota is available.
+
+        Raises:
+            UploadQuotaError: If quota is exceeded
+        """
+        try:
+            response = self.service.mediaItems().list(pageSize=1).execute()
+            # If we can list items, we have access
+            if "mediaItems" not in response:
+                raise UploadQuotaError("Failed to check quota: Invalid response")
+        except HttpError as e:
+            if e.resp.status == 403:
+                raise UploadQuotaError("Failed to check quota: Permission denied")
+            elif e.resp.status == 429:
+                raise UploadRateLimitError("Rate limit exceeded: Too many requests")
+            raise UploadError(f"Failed to check quota: {str(e)}")
+        except Exception as e:
+            raise UploadError(f"Failed to check quota: {str(e)}")
+
     def authenticate(self):
         """Authenticate with Google Photos API using OAuth 2.0 flow."""
-        creds = None
-        token_path = (
-            self.config.token_file
-            or Path(self.config.credentials_file).parent / "photos_token.json"
-        )
+        try:
+            creds = None
+            token_path = (
+                self.config.token_file
+                or Path(self.config.credentials_file).parent / "photos_token.json"
+            )
 
-        if token_path.exists():
-            creds = Credentials.from_authorized_user_file(str(token_path), self.SCOPES)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
+            if token_path.exists():
                 try:
-                    creds.refresh(GoogleAuthRequest())
-                    logger.info("Google Photos token refreshed successfully.")
+                    creds = Credentials.from_authorized_user_file(
+                        str(token_path), self.SCOPES
+                    )
                 except Exception as e:
                     logger.warning(
-                        f"Error refreshing Photos token: {e}. Need to re-authenticate.",
-                        exc_info=True,
+                        f"Failed to load token file: {e}. Will re-authenticate."
                     )
-                    creds = None
-            else:
-                if not self.config.credentials_file.exists():
-                    logger.error(
-                        f"Credentials file not found: {self.config.credentials_file}"
+
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    try:
+                        creds.refresh(GoogleAuthRequest())
+                        logger.info("Google Photos token refreshed successfully.")
+                    except Exception as e:
+                        logger.warning(
+                            f"Error refreshing Photos token: {e}. Need to re-authenticate.",
+                            exc_info=True,
+                        )
+                        creds = None
+                else:
+                    if not self.config.credentials_file.exists():
+                        raise UploadError(
+                            f"Credentials file not found: {self.config.credentials_file}. "
+                            "Please provide the path to your OAuth Client ID JSON file."
+                        )
+                    logger.info("Performing Google Photos OAuth flow...")
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        str(self.config.credentials_file), self.SCOPES
                     )
-                    raise FileNotFoundError(
-                        f"Credentials file not found: {self.config.credentials_file}. "
-                        "Please provide the path to your OAuth Client ID JSON file."
+                    creds = flow.run_local_server(port=0)
+                    logger.info("Google Photos OAuth flow completed.")
+
+                try:
+                    with open(token_path, "w") as token:
+                        token.write(creds.to_json())
+                    logger.info(
+                        f"Photos authentication successful. Token saved to: {token_path}"
                     )
-                logger.info("Performing Google Photos OAuth flow...")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(self.config.credentials_file), self.SCOPES
+                except Exception as e:
+                    logger.warning(f"Failed to save token file: {e}")
+
+            self.credentials = creds
+            try:
+                # Build the service with static_discovery=False for Photos API
+                self.service = build(
+                    "photoslibrary",
+                    "v1",
+                    credentials=self.credentials,
+                    static_discovery=False,
                 )
-                creds = flow.run_local_server(port=0)
-                logger.info("Google Photos OAuth flow completed.")
+                logger.info("Google Photos API service created successfully.")
+            except HttpError as error:
+                if error.resp.status == 403:
+                    raise UploadPermissionError(
+                        "Failed to access Google Photos: Permission denied"
+                    )
+                elif error.resp.status == 429:
+                    raise UploadRateLimitError("Rate limit exceeded: Too many requests")
+                raise UploadError(f"Failed to build Photos service: {str(error)}")
+            except Exception as e:
+                raise UploadError(f"Failed to build Photos service: {str(e)}")
 
-            with open(token_path, "w") as token:
-                token.write(creds.to_json())
-            logger.info(
-                f"Photos authentication successful. Token saved to: {token_path}"
+        except GoogleAuthError as e:
+            raise UploadPermissionError(
+                f"Failed to authenticate with Google Photos: {str(e)}"
             )
-
-        self.credentials = creds
-        try:
-            # Build the service with static_discovery=False for Photos API
-            self.service = build(
-                "photoslibrary",
-                "v1",
-                credentials=self.credentials,
-                static_discovery=False,
-            )
-            logger.info("Google Photos API service created successfully.")
-        except HttpError as error:
-            logger.error(
-                f"An error occurred building the Photos service: {error}", exc_info=True
-            )
-            self.service = None
         except Exception as e:
-            logger.error(
-                f"An unexpected error occurred building the Photos service: {e}",
-                exc_info=True,
-            )
-            self.service = None
+            if isinstance(
+                e, (UploadPermissionError, UploadRateLimitError, UploadError)
+            ):
+                raise
+            raise UploadError(f"Failed to initialize Google Photos service: {str(e)}")
 
     def _create_album_if_needed(self, album_name: str) -> Optional[str]:
         """
@@ -156,31 +241,15 @@ class GooglePhotosUploader(CloudStorageUploader):
 
         Returns:
             Upload token if successful, None otherwise
+
+        Raises:
+            UploadError: For general upload errors
+            UploadTimeoutError: If upload times out
+            UploadConnectionError: If connection fails
+            UploadRateLimitError: If rate limit is hit
         """
         if not self.credentials or not self.credentials.valid:
-            logger.warning(
-                "Photos: Authentication required or token invalid before byte upload attempt."
-            )
-            if self.credentials and self.credentials.refresh_token:
-                try:
-                    logger.debug(
-                        "Attempting to refresh Photos token before byte upload..."
-                    )
-                    self.credentials.refresh(GoogleAuthRequest())
-                    logger.info(
-                        "Photos token refreshed successfully during upload process."
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to refresh Photos token during upload: {e}",
-                        exc_info=True,
-                    )
-                    return None
-            else:
-                logger.error(
-                    "Photos: Cannot proceed with byte upload, no valid credentials or refresh token."
-                )
-                return None
+            raise UploadPermissionError("Authentication required or token invalid")
 
         # Get the file's mime type
         mime_type, _ = mimetypes.guess_type(str(file_path))
@@ -196,11 +265,9 @@ class GooglePhotosUploader(CloudStorageUploader):
         try:
             with open(file_path, "rb") as file_data:
                 headers = {
-                    # Auth is handled by AuthorizedSession
                     "Content-Type": "application/octet-stream",
                     "X-Goog-Upload-Content-Type": mime_type,
                     "X-Goog-Upload-Protocol": "raw",
-                    # Consider adding filename for debugging/logging on Google's side
                     "X-Goog-Upload-File-Name": file_path.name,
                 }
                 logger.info(
@@ -209,30 +276,26 @@ class GooglePhotosUploader(CloudStorageUploader):
                 response = authed_session.post(
                     upload_url, headers=headers, data=file_data
                 )
-                response.raise_for_status()  # Raises HTTPError for bad responses (4xx or 5xx)
+                response.raise_for_status()
                 upload_token = response.text
                 logger.info(
                     f"Google Photos byte upload successful for {file_path.name}. Token: {upload_token[:10]}...{upload_token[-10:]}"
                 )
                 return upload_token
-        except HttpError as error:
-            logger.error(
-                f"Error uploading bytes to Google Photos (HttpError) for {file_path.name}: {error.resp.status} - {error.content}",
-                exc_info=True,
-            )
-            return None
-        except requests.exceptions.RequestException as error:
-            logger.error(
-                f"Error uploading bytes to Google Photos (RequestException) for {file_path.name}: {error}",
-                exc_info=True,
-            )
-            return None
+        except requests.exceptions.Timeout:
+            raise UploadTimeoutError("Upload timed out")
+        except requests.exceptions.ConnectionError:
+            raise UploadConnectionError("Failed to connect to Google Photos")
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                raise UploadRateLimitError("Rate limit exceeded: Too many requests")
+            elif e.response.status_code == 403:
+                raise UploadPermissionError(
+                    "Permission denied: Cannot upload to Google Photos"
+                )
+            raise UploadError(f"Upload failed: {str(e)}")
         except Exception as e:
-            logger.error(
-                f"An unexpected error occurred during Google Photos byte upload for {file_path.name}: {e}",
-                exc_info=True,
-            )
-            return None
+            raise UploadError(f"Upload failed: {str(e)}")
 
     def _create_media_item(
         self,
@@ -250,80 +313,65 @@ class GooglePhotosUploader(CloudStorageUploader):
 
         Returns:
             Media item ID if successful, None otherwise
+
+        Raises:
+            UploadError: For general upload errors
+            UploadPermissionError: If user lacks permission
+            UploadRateLimitError: If rate limit is hit
         """
         if not self.service:
-            logger.warning(
-                "Google Photos service not available, cannot create media item."
-            )
-            return None
+            raise UploadError("Google Photos service not available")
 
         request_body = {
             "newMediaItems": [{"simpleMediaItem": {"uploadToken": upload_token}}]
         }
 
-        # Add description if provided
         if description:
             request_body["newMediaItems"][0]["description"] = description
 
-        # If album_id is provided, add to album
         if album_id:
             request_body["albumId"] = album_id
-
-        logger.info(
-            f"Creating Google Photos media item with token {upload_token[:10]}... in album '{album_id if album_id else "main library"}' with description '{description if description else "N/A"}'."
-        )
-        if album_id:
-            logger.info(f" in album {album_id}", end="")
-        if description:
-            logger.info(f" with description '{description}'", end="")
-        logger.info(".")
 
         try:
             response = (
                 self.service.mediaItems().batchCreate(body=request_body).execute()
             )
+            results = response.get("newMediaItemResults", [])
 
-            # Check the response structure carefully
-            results = response.get("newMediaItemResults")
-            if results and len(results) > 0:
-                item_result = results[0]
-                # Check for errors reported by the API for this specific item
-                status = item_result.get("status")
-                if status and status.get("message") == "Success":
-                    media_item = item_result.get("mediaItem")
-                    if media_item and media_item.get("id"):
-                        media_item_id = media_item["id"]
-                        logger.info(
-                            f"Successfully created Google Photos media item. ID: {media_item_id}"
-                        )
-                        return media_item_id
-                    else:
-                        logger.warning(
-                            f"Google Photos media item creation reported success, but no ID found in response: {item_result}"
-                        )
-                        return None
-                else:
-                    logger.warning(
-                        f"Google Photos media item creation failed. Status: {status}"
-                    )
-                    return None
-            else:
-                logger.warning(
-                    f"Google Photos media item creation failed. Unexpected response format: {response}"
+            if not results:
+                raise UploadError("No results returned from media item creation")
+
+            item_result = results[0]
+            status = item_result.get("status", {})
+
+            if status.get("message") != "Success":
+                error_message = status.get("message", "Unknown error")
+                if "PERMISSION_DENIED" in error_message:
+                    raise UploadPermissionError(f"Permission denied: {error_message}")
+                elif "RESOURCE_EXHAUSTED" in error_message:
+                    raise UploadRateLimitError(f"Rate limit exceeded: {error_message}")
+                raise UploadError(f"Media item creation failed: {error_message}")
+
+            media_item = item_result.get("mediaItem")
+            if not media_item or not media_item.get("id"):
+                raise UploadError("Media item created but no ID returned")
+
+            return media_item["id"]
+
+        except HttpError as e:
+            if e.resp.status == 403:
+                raise UploadPermissionError(
+                    "Permission denied: Cannot create media item"
                 )
-                return None
-        except HttpError as error:
-            logger.error(
-                f"An error occurred creating Google Photos media item: {error}",
-                exc_info=True,
-            )
-            return None
+            elif e.resp.status == 429:
+                raise UploadRateLimitError("Rate limit exceeded: Too many requests")
+            raise UploadError(f"Failed to create media item: {str(e)}")
         except Exception as e:
-            logger.error(
-                f"An unexpected error occurred creating Google Photos media item: {e}",
-                exc_info=True,
-            )
-            return None
+            if isinstance(
+                e, (UploadPermissionError, UploadRateLimitError, UploadError)
+            ):
+                raise
+            raise UploadError(f"Failed to create media item: {str(e)}")
 
     def _archive_media_item(self, media_item_id: str) -> bool:
         """
@@ -368,7 +416,7 @@ class GooglePhotosUploader(CloudStorageUploader):
         local_path: Path,
         desired_filename: Optional[str] = None,
         target_location_hint: Optional[str] = None,
-    ) -> Optional[str]:  # Return Optional[str]
+    ) -> Optional[str]:
         """
         Upload a video to Google Photos
 
@@ -380,52 +428,77 @@ class GooglePhotosUploader(CloudStorageUploader):
 
         Returns:
             The media item ID of the uploaded video, or None if failed
+
+        Raises:
+            UploadError: For general upload errors
+            UploadFormatError: If file format is not supported
+            UploadSizeError: If file size exceeds limits
+            UploadPermissionError: If user lacks permission
+            UploadQuotaError: If quota is exceeded
+            UploadRateLimitError: If rate limit is hit
+            UploadTimeoutError: If upload times out
+            UploadConnectionError: If connection fails
         """
-        if not self.service:
-            logger.warning("Google Photos service not available. Cannot upload.")
-            return None
-        # Determine the album ID to use
-        album_id = target_location_hint or self.config.target_album_id
+        try:
+            # Validate file
+            self._validate_file(local_path)
 
-        # If no album ID provided and create_album_if_not_exists is True, create a default album
-        if not album_id and self.config.create_album_if_not_exists:
-            album_id = self._create_album_if_needed("MediaBridge Uploads")
+            # Check quota
+            self._check_quota()
 
-        # Determine the description to use
-        description = None
-        if self.config.rename_as_description and desired_filename:
-            description = desired_filename
+            # Determine the album ID to use
+            album_id = target_location_hint or self.config.target_album_id
 
-        # Upload the file bytes to get an upload token
-        logger.info(f"Starting Google Photos upload process for: {local_path.name}")
-        upload_token = self._upload_bytes(local_path)
-        if not upload_token:
-            logger.error(
-                f"Failed to get upload token for {local_path.name}. Aborting Google Photos upload."
-            )
-            return None
+            # If no album ID provided and create_album_if_not_exists is True, create a default album
+            if not album_id and self.config.create_album_if_not_exists:
+                album_id = self._create_album_if_needed("MediaBridge Uploads")
 
-        # Create the media item
-        media_item_id = self._create_media_item(upload_token, description, album_id)
-        if not media_item_id:
-            logger.error(
-                f"Failed to create Google Photos media item for {local_path.name}. Aborting upload."
-            )
-            return None
+            # Determine the description to use
+            description = None
+            if self.config.rename_as_description and desired_filename:
+                description = desired_filename
 
-        # Archive the media item if configured
-        if self.config.archive_after_upload:
-            logger.info(
-                f"Archiving configured for Google Photos item {media_item_id}..."
-            )
-            archived = self._archive_media_item(media_item_id)
-            if not archived:
-                logger.warning(
-                    f"Failed to archive Google Photos media item {media_item_id}. It remains in the library."
-                )
-            else:
+            # Upload the file bytes to get an upload token
+            logger.info(f"Starting Google Photos upload process for: {local_path.name}")
+            upload_token = self._upload_bytes(local_path)
+            if not upload_token:
+                raise UploadError(f"Failed to get upload token for {local_path.name}")
+
+            # Create the media item
+            media_item_id = self._create_media_item(upload_token, description, album_id)
+            if not media_item_id:
+                raise UploadError(f"Failed to create media item for {local_path.name}")
+
+            # Archive the media item if configured
+            if self.config.archive_after_upload:
                 logger.info(
-                    f"Google Photos media item {media_item_id} archived successfully."
+                    f"Archiving configured for Google Photos item {media_item_id}..."
                 )
+                archived = self._archive_media_item(media_item_id)
+                if not archived:
+                    logger.warning(
+                        f"Failed to archive Google Photos media item {media_item_id}. It remains in the library."
+                    )
+                else:
+                    logger.info(
+                        f"Google Photos media item {media_item_id} archived successfully."
+                    )
 
-        return media_item_id
+            return media_item_id
+
+        except Exception as e:
+            if isinstance(
+                e,
+                (
+                    UploadError,
+                    UploadFormatError,
+                    UploadSizeError,
+                    UploadPermissionError,
+                    UploadQuotaError,
+                    UploadRateLimitError,
+                    UploadTimeoutError,
+                    UploadConnectionError,
+                ),
+            ):
+                raise
+            raise UploadError(f"Failed to upload video to Google Photos: {str(e)}")
