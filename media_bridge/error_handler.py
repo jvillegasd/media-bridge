@@ -55,6 +55,55 @@ class ValidationError(NonRetryableError):
     pass
 
 
+# Upload-specific error types
+class UploadError(RetryableError):
+    """Base class for upload-related errors."""
+
+    pass
+
+
+class UploadQuotaError(NonRetryableError):
+    """Error when upload quota is exceeded."""
+
+    pass
+
+
+class UploadSizeError(NonRetryableError):
+    """Error when file size exceeds limits."""
+
+    pass
+
+
+class UploadFormatError(NonRetryableError):
+    """Error when file format is not supported."""
+
+    pass
+
+
+class UploadPermissionError(NonRetryableError):
+    """Error when user lacks permission to upload."""
+
+    pass
+
+
+class UploadTimeoutError(UploadError):
+    """Error when upload times out."""
+
+    pass
+
+
+class UploadConnectionError(UploadError):
+    """Error when upload connection fails."""
+
+    pass
+
+
+class UploadRateLimitError(UploadError):
+    """Error when upload rate limit is hit."""
+
+    pass
+
+
 T = TypeVar("T")
 
 
