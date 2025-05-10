@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from media_bridge.state_manager import StateManager
@@ -13,29 +15,33 @@ def state_manager(tmp_path):
 
 
 def test_media_status_enum():
-    """Test MediaStatus enum functionality."""
-    # Test valid status values
+    """Test MediaStatus enum values and conversion."""
     assert MediaStatus.PENDING_DOWNLOAD.value == "PENDING_DOWNLOAD"
+    assert MediaStatus.DOWNLOADING.value == "DOWNLOADING"
     assert MediaStatus.DOWNLOADED.value == "DOWNLOADED"
-    assert MediaStatus.UPLOAD_PENDING.value == "UPLOAD_PENDING"
-    assert MediaStatus.COMPLETED.value == "COMPLETED"
     assert MediaStatus.FAILED_DOWNLOAD.value == "FAILED_DOWNLOAD"
+    assert MediaStatus.PENDING_UPLOAD.value == "PENDING_UPLOAD"
+    assert MediaStatus.UPLOADING.value == "UPLOADING"
     assert MediaStatus.FAILED_UPLOAD.value == "FAILED_UPLOAD"
+    assert MediaStatus.COMPLETED.value == "COMPLETED"
 
     # Test from_str method
     assert MediaStatus.from_str("PENDING_DOWNLOAD") == MediaStatus.PENDING_DOWNLOAD
+    assert MediaStatus.from_str("DOWNLOADING") == MediaStatus.DOWNLOADING
     assert MediaStatus.from_str("DOWNLOADED") == MediaStatus.DOWNLOADED
-    assert MediaStatus.from_str("INVALID") is None
-    assert MediaStatus.from_str(None) is None
+    assert MediaStatus.from_str("FAILED_DOWNLOAD") == MediaStatus.FAILED_DOWNLOAD
+    assert MediaStatus.from_str("PENDING_UPLOAD") == MediaStatus.PENDING_UPLOAD
+    assert MediaStatus.from_str("UPLOADING") == MediaStatus.UPLOADING
+    assert MediaStatus.from_str("FAILED_UPLOAD") == MediaStatus.FAILED_UPLOAD
+    assert MediaStatus.from_str("COMPLETED") == MediaStatus.COMPLETED
 
-    # Test enum comparison
-    assert MediaStatus.PENDING_DOWNLOAD != MediaStatus.DOWNLOADED
-    assert MediaStatus.PENDING_DOWNLOAD == MediaStatus.PENDING_DOWNLOAD
+    # Test invalid status
+    with pytest.raises(ValueError):
+        MediaStatus.from_str("INVALID_STATUS")
 
 
 def test_upload_status_enum():
-    """Test UploadStatus enum functionality."""
-    # Test valid status values
+    """Test UploadStatus enum values and conversion."""
     assert UploadStatus.PENDING.value == "PENDING"
     assert UploadStatus.SUCCESS.value == "SUCCESS"
     assert UploadStatus.FAILED.value == "FAILED"
@@ -43,183 +49,186 @@ def test_upload_status_enum():
     # Test from_str method
     assert UploadStatus.from_str("PENDING") == UploadStatus.PENDING
     assert UploadStatus.from_str("SUCCESS") == UploadStatus.SUCCESS
-    assert UploadStatus.from_str("INVALID") is None
-    assert UploadStatus.from_str(None) is None
+    assert UploadStatus.from_str("FAILED") == UploadStatus.FAILED
 
-    # Test enum comparison
-    assert UploadStatus.PENDING != UploadStatus.SUCCESS
-    assert UploadStatus.PENDING == UploadStatus.PENDING
+    # Test invalid status
+    with pytest.raises(ValueError):
+        UploadStatus.from_str("INVALID_STATUS")
 
 
 def test_state_manager_with_enums(state_manager):
-    """Test StateManager with enum status values."""
-    # Test adding a media item with enum status
+    """Test StateManager with enum statuses."""
+    # Test adding a media item
     video_url = "https://example.com/video1"
     state_manager.add_or_update_media_item(
-        video_url=video_url, status=MediaStatus.PENDING_DOWNLOAD
+        video_url=video_url,
+        title="Test Video",
+        status=MediaStatus.PENDING_DOWNLOAD,
+        metadata={"source": "test", "quality": "720p"},
     )
 
-    # Verify the status was stored correctly
+    # Verify the item was added
     details = state_manager.get_media_item_details(video_url)
     assert details is not None
+    assert details["video_url"] == video_url
+    assert details["title"] == "Test Video"
     assert details["status"] == MediaStatus.PENDING_DOWNLOAD
+    assert details["retry_count"] == 0
+    assert details["metadata"] == {"source": "test", "quality": "720p"}
+    assert "created_at" in details
+    assert "updated_at" in details
 
-    # Test updating status
+    # Test updating status with error
     state_manager.add_or_update_media_item(
-        video_url=video_url, status=MediaStatus.DOWNLOADED
-    )
-    details = state_manager.get_media_item_details(video_url)
-    assert details["status"] == MediaStatus.DOWNLOADED
-
-    # Test upload status
-    uploader_id = "test_uploader"
-    state_manager.update_upload_status(
-        video_url=video_url, uploader_id=uploader_id, status=UploadStatus.PENDING
+        video_url=video_url,
+        status=MediaStatus.FAILED_DOWNLOAD,
+        error_message="Download failed",
     )
 
+    # Verify the update
     details = state_manager.get_media_item_details(video_url)
-    assert details["uploads"][uploader_id]["status"] == UploadStatus.PENDING
+    assert details["status"] == MediaStatus.FAILED_DOWNLOAD
+    assert details["error_message"] == "Download failed"
+    assert details["retry_count"] == 1
+    assert details["last_error_timestamp"] is not None
 
-    # Test successful upload
+    # Test adding upload status
     state_manager.update_upload_status(
         video_url=video_url,
-        uploader_id=uploader_id,
-        status=UploadStatus.SUCCESS,
-        uploaded_id="test_id",
+        uploader_id="test_uploader",
+        status=UploadStatus.PENDING,
+        metadata={"platform": "test", "format": "mp4"},
     )
 
+    # Verify upload status
     details = state_manager.get_media_item_details(video_url)
-    assert details["uploads"][uploader_id]["status"] == UploadStatus.SUCCESS
-    assert details["uploads"][uploader_id]["id"] == "test_id"
+    assert "test_uploader" in details["uploads"]
+    upload_info = details["uploads"]["test_uploader"]
+    assert upload_info["status"] == UploadStatus.PENDING
+    assert upload_info["retry_count"] == 0
+    assert upload_info["metadata"] == {"platform": "test", "format": "mp4"}
+
+    # Test updating upload status with error
+    state_manager.update_upload_status(
+        video_url=video_url,
+        uploader_id="test_uploader",
+        status=UploadStatus.FAILED,
+        error_message="Upload failed",
+    )
+
+    # Verify upload status update
+    details = state_manager.get_media_item_details(video_url)
+    upload_info = details["uploads"]["test_uploader"]
+    assert upload_info["status"] == UploadStatus.FAILED
+    assert upload_info["retry_count"] == 1
+    assert upload_info["last_error_timestamp"] is not None
 
 
 def test_state_manager_status_transitions(state_manager):
-    """Test status transitions in StateManager."""
+    """Test status transitions and retry counting."""
     video_url = "https://example.com/video2"
-    uploader_id = "test_uploader"
 
-    # Start with pending download
+    # Initial state
     state_manager.add_or_update_media_item(
         video_url=video_url, status=MediaStatus.PENDING_DOWNLOAD
     )
 
-    # Simulate download completion
+    # Simulate download failure
     state_manager.add_or_update_media_item(
-        video_url=video_url, status=MediaStatus.DOWNLOADED
-    )
-
-    # Start upload
-    state_manager.update_upload_status(
-        video_url=video_url, uploader_id=uploader_id, status=UploadStatus.PENDING
-    )
-
-    # Verify upload pending status
-    state_manager.update_item_status_if_all_uploads_done(video_url, [uploader_id])
-    details = state_manager.get_media_item_details(video_url)
-    assert details["status"] == MediaStatus.UPLOAD_PENDING
-
-    # Complete upload
-    state_manager.update_upload_status(
         video_url=video_url,
-        uploader_id=uploader_id,
-        status=UploadStatus.SUCCESS,
-        uploaded_id="test_id",
+        status=MediaStatus.FAILED_DOWNLOAD,
+        error_message="First failure",
     )
 
-    # Verify completed status
-    state_manager.update_item_status_if_all_uploads_done(video_url, [uploader_id])
+    # Verify retry count
     details = state_manager.get_media_item_details(video_url)
-    assert details["status"] == MediaStatus.COMPLETED
+    assert details["retry_count"] == 1
+    assert details["last_error_timestamp"] is not None
 
-
-def test_state_manager_error_handling(state_manager):
-    """Test error handling in StateManager."""
-    video_url = "https://example.com/video3"
-    uploader_id = "test_uploader"
-
-    # Test with invalid status string in database
-    with state_manager._conn:
-        state_manager._conn.execute(
-            """
-            INSERT INTO media_items (video_url, status)
-            VALUES (?, ?)
-            """,
-            (video_url, "INVALID_STATUS"),
-        )
-
-    # Should handle invalid status gracefully
-    details = state_manager.get_media_item_details(video_url)
-    assert details is not None
-    assert details["status"] is None
-
-    # Test with invalid upload status
-    with state_manager._conn:
-        state_manager._conn.execute(
-            """
-            INSERT INTO upload_status (video_url, uploader_id, status)
-            VALUES (?, ?, ?)
-            """,
-            (video_url, uploader_id, "INVALID_UPLOAD_STATUS"),
-        )
-
-    details = state_manager.get_media_item_details(video_url)
-    assert details["uploads"][uploader_id]["status"] is None
-
-
-def test_state_manager_edge_cases(state_manager):
-    """Test edge cases in StateManager."""
-    video_url = "https://example.com/video4"
-
-    # Test with empty uploader list
+    # Simulate another failure
     state_manager.add_or_update_media_item(
-        video_url=video_url, status=MediaStatus.DOWNLOADED
+        video_url=video_url,
+        status=MediaStatus.FAILED_DOWNLOAD,
+        error_message="Second failure",
     )
-    state_manager.update_item_status_if_all_uploads_done(video_url, [])
+
+    # Verify retry count increased
     details = state_manager.get_media_item_details(video_url)
-    assert details["status"] == MediaStatus.COMPLETED
+    assert details["retry_count"] == 2
 
-    # Test with multiple uploaders
-    uploader_ids = ["uploader1", "uploader2", "uploader3"]
-    for u_id in uploader_ids:
-        state_manager.update_upload_status(
-            video_url=video_url, uploader_id=u_id, status=UploadStatus.PENDING
-        )
-
-    # Verify all uploaders are tracked
-    details = state_manager.get_media_item_details(video_url)
-    assert len(details["uploads"]) == len(uploader_ids)
-
-    # Test partial success
-    state_manager.update_upload_status(
-        video_url=video_url, uploader_id=uploader_ids[0], status=UploadStatus.SUCCESS
-    )
-    state_manager.update_item_status_if_all_uploads_done(video_url, uploader_ids)
-    details = state_manager.get_media_item_details(video_url)
-    assert details["status"] == MediaStatus.UPLOAD_PENDING
-
-
-def test_state_manager_status_validation(state_manager):
-    """Test status validation in StateManager."""
-    video_url = "https://example.com/video5"
-    uploader_id = "test_uploader"
-
-    # Test invalid status transitions
+    # Simulate successful download
     state_manager.add_or_update_media_item(
-        video_url=video_url, status=MediaStatus.FAILED_DOWNLOAD
+        video_url=video_url,
+        status=MediaStatus.DOWNLOADED,
+        local_path=Path("/tmp/test.mp4"),
     )
-    state_manager.update_item_status_if_all_uploads_done(video_url, [uploader_id])
-    details = state_manager.get_media_item_details(video_url)
-    assert details["status"] == MediaStatus.FAILED_DOWNLOAD  # Should not change
 
-    # Test failed upload handling
-    state_manager.add_or_update_media_item(
-        video_url=video_url, status=MediaStatus.DOWNLOADED
-    )
-    state_manager.update_upload_status(
-        video_url=video_url, uploader_id=uploader_id, status=UploadStatus.FAILED
-    )
-    state_manager.update_item_status_if_all_uploads_done(video_url, [uploader_id])
+    # Verify retry count remains the same
     details = state_manager.get_media_item_details(video_url)
+    assert details["retry_count"] == 2
     assert (
-        details["status"] == MediaStatus.UPLOAD_PENDING
-    )  # Should be pending for retry
+        details["last_error_timestamp"] is not None
+    )  # Should keep last error timestamp
+
+
+def test_get_items_by_status(state_manager):
+    """Test getting items by status with retry count filtering."""
+    # Add items with different statuses
+    for i in range(3):
+        state_manager.add_or_update_media_item(
+            video_url=f"https://example.com/video{i}",
+            status=MediaStatus.PENDING_DOWNLOAD,
+        )
+
+    # Add a failed item
+    state_manager.add_or_update_media_item(
+        video_url="https://example.com/failed",
+        status=MediaStatus.FAILED_DOWNLOAD,
+        error_message="Test failure",
+    )
+
+    # Test getting pending items
+    pending_items = state_manager.get_items_by_status(MediaStatus.PENDING_DOWNLOAD)
+    assert len(pending_items) == 3
+
+    # Test getting failed items
+    failed_items = state_manager.get_failed_items()
+    assert len(failed_items) == 1
+    assert failed_items[0]["video_url"] == "https://example.com/failed"
+
+    # Test getting failed items with max retries
+    failed_items = state_manager.get_failed_items(max_retries=0)
+    assert len(failed_items) == 0  # Should be empty as retry_count is 1
+
+
+def test_cleanup_old_items(state_manager):
+    """Test cleanup of old items."""
+    # Add a completed item
+    state_manager.add_or_update_media_item(
+        video_url="https://example.com/old", status=MediaStatus.COMPLETED
+    )
+
+    # Add a failed item
+    state_manager.add_or_update_media_item(
+        video_url="https://example.com/failed",
+        status=MediaStatus.FAILED_DOWNLOAD,
+        error_message="Test failure",
+    )
+
+    # Add a pending item
+    state_manager.add_or_update_media_item(
+        video_url="https://example.com/pending", status=MediaStatus.PENDING_DOWNLOAD
+    )
+
+    # Clean up items older than 1 day (should not remove anything as items are new)
+    removed = state_manager.cleanup_old_items(days=1)
+    assert removed == 0
+
+    # Verify all items still exist
+    assert state_manager.get_media_item_details("https://example.com/old") is not None
+    assert (
+        state_manager.get_media_item_details("https://example.com/failed") is not None
+    )
+    assert (
+        state_manager.get_media_item_details("https://example.com/pending") is not None
+    )

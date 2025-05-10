@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 import sqlite3
 from pathlib import Path
@@ -24,13 +25,13 @@ class StateManager:
                 self.db_path,
                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
             )
-            self._conn.row_factory = sqlite3.Row  # Access columns by name
+            self._conn.row_factory = sqlite3.Row
             logger.info(f"Connected to state database: {self.db_path}")
         except sqlite3.Error as e:
             logger.error(
                 f"Error connecting to database {self.db_path}: {e}", exc_info=True
             )
-            self._conn = None  # Ensure conn is None if connection failed
+            self._conn = None
 
     def _create_tables(self):
         """Create necessary tables if they don't exist."""
@@ -48,7 +49,12 @@ class StateManager:
                         status TEXT DEFAULT 'PENDING_DOWNLOAD',
                         last_attempt_timestamp TIMESTAMP,
                         yt_dlp_id TEXT,
-                        error_message TEXT
+                        error_message TEXT,
+                        retry_count INTEGER DEFAULT 0,
+                        last_error_timestamp TIMESTAMP,
+                        metadata JSON,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 self._conn.execute("""
@@ -58,11 +64,29 @@ class StateManager:
                         uploaded_id TEXT,
                         upload_timestamp TIMESTAMP,
                         status TEXT,
+                        retry_count INTEGER DEFAULT 0,
+                        last_error_timestamp TIMESTAMP,
+                        metadata JSON,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (video_url, uploader_id),
                         FOREIGN KEY (video_url) REFERENCES media_items (video_url) ON DELETE CASCADE
                     )
                 """)
-                logger.info("Database tables ensured.")
+                # Create indexes if they don't exist
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_media_items_status ON media_items(status)"
+                )
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_media_items_retry_count ON media_items(retry_count)"
+                )
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_upload_status_status ON upload_status(status)"
+                )
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_upload_status_retry_count ON upload_status(retry_count)"
+                )
+                logger.info("Database tables and indexes ensured.")
         except sqlite3.Error as e:
             logger.error(f"Error creating tables: {e}", exc_info=True)
 
@@ -80,6 +104,7 @@ class StateManager:
         status: MediaStatus = MediaStatus.PENDING_DOWNLOAD,
         yt_dlp_id: Optional[str] = None,
         error_message: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         if not self._conn:
             logger.warning("No DB connection, cannot update media item.")
@@ -87,10 +112,26 @@ class StateManager:
         now = datetime.datetime.now()
         try:
             with self._conn:
+                # Get current retry count
+                cur = self._conn.execute(
+                    "SELECT retry_count FROM media_items WHERE video_url = ?",
+                    (video_url,),
+                )
+                row = cur.fetchone()
+                retry_count = (
+                    (row["retry_count"] if row else 0) + 1
+                    if error_message
+                    else (row["retry_count"] if row else 0)
+                )
+
                 self._conn.execute(
                     """
-                    INSERT INTO media_items (video_url, title, local_path, status, yt_dlp_id, download_timestamp, last_attempt_timestamp, error_message)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO media_items (
+                        video_url, title, local_path, status, yt_dlp_id,
+                        download_timestamp, last_attempt_timestamp, error_message,
+                        retry_count, last_error_timestamp, metadata, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(video_url) DO UPDATE SET
                         title = COALESCE(excluded.title, title),
                         local_path = COALESCE(excluded.local_path, local_path),
@@ -98,7 +139,11 @@ class StateManager:
                         yt_dlp_id = COALESCE(excluded.yt_dlp_id, yt_dlp_id),
                         download_timestamp = CASE excluded.status WHEN 'DOWNLOADED' THEN COALESCE(excluded.download_timestamp, download_timestamp) ELSE download_timestamp END,
                         last_attempt_timestamp = excluded.last_attempt_timestamp,
-                        error_message = excluded.error_message
+                        error_message = excluded.error_message,
+                        retry_count = excluded.retry_count,
+                        last_error_timestamp = CASE excluded.error_message WHEN NULL THEN last_error_timestamp ELSE excluded.last_attempt_timestamp END,
+                        metadata = CASE excluded.metadata WHEN NULL THEN metadata ELSE excluded.metadata END,
+                        updated_at = excluded.updated_at
                 """,
                     (
                         video_url,
@@ -109,10 +154,14 @@ class StateManager:
                         now if status == MediaStatus.DOWNLOADED else None,
                         now,
                         error_message,
+                        retry_count,
+                        now if error_message else None,
+                        json.dumps(metadata) if metadata else None,
+                        now,
                     ),
                 )
             logger.debug(
-                f"Media item {video_url} added/updated with status: {status.value}, local_path: {local_path}"
+                f"Media item {video_url} added/updated with status: {status.value}, retry_count: {retry_count}"
             )
         except sqlite3.Error as e:
             logger.error(
@@ -125,6 +174,8 @@ class StateManager:
         uploader_id: str,
         status: UploadStatus,
         uploaded_id: Optional[str] = None,
+        error_message: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         if not self._conn:
             logger.warning("No DB connection, cannot update upload status.")
@@ -133,19 +184,49 @@ class StateManager:
         upload_ts = now if status == UploadStatus.SUCCESS else None
         try:
             with self._conn:
+                # Get current retry count
+                cur = self._conn.execute(
+                    "SELECT retry_count FROM upload_status WHERE video_url = ? AND uploader_id = ?",
+                    (video_url, uploader_id),
+                )
+                row = cur.fetchone()
+                retry_count = (
+                    (row["retry_count"] if row else 0) + 1
+                    if error_message
+                    else (row["retry_count"] if row else 0)
+                )
+
                 self._conn.execute(
                     """
-                    INSERT INTO upload_status (video_url, uploader_id, status, uploaded_id, upload_timestamp)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO upload_status (
+                        video_url, uploader_id, status, uploaded_id,
+                        upload_timestamp, retry_count, last_error_timestamp,
+                        metadata, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(video_url, uploader_id) DO UPDATE SET
                         status = excluded.status,
                         uploaded_id = excluded.uploaded_id,
-                        upload_timestamp = excluded.upload_timestamp
+                        upload_timestamp = excluded.upload_timestamp,
+                        retry_count = excluded.retry_count,
+                        last_error_timestamp = CASE excluded.error_message WHEN NULL THEN last_error_timestamp ELSE excluded.updated_at END,
+                        metadata = CASE excluded.metadata WHEN NULL THEN metadata ELSE excluded.metadata END,
+                        updated_at = excluded.updated_at
                 """,
-                    (video_url, uploader_id, status.value, uploaded_id, upload_ts),
+                    (
+                        video_url,
+                        uploader_id,
+                        status.value,
+                        uploaded_id,
+                        upload_ts,
+                        retry_count,
+                        now if error_message else None,
+                        json.dumps(metadata) if metadata else None,
+                        now,
+                    ),
                 )
                 logger.debug(
-                    f"Upload status for {video_url} on {uploader_id} updated to {status.value}"
+                    f"Upload status for {video_url} on {uploader_id} updated to {status.value}, retry_count: {retry_count}"
                 )
         except sqlite3.Error as e:
             logger.error(
@@ -166,15 +247,24 @@ class StateManager:
                 details = dict(row)
                 # Convert status string to enum
                 details["status"] = MediaStatus.from_str(details["status"])
+                # Parse metadata JSON
+                if details.get("metadata"):
+                    try:
+                        details["metadata"] = json.loads(details["metadata"])
+                    except json.JSONDecodeError:
+                        details["metadata"] = {}
 
                 cur_uploads = self._conn.execute(
-                    "SELECT uploader_id, status, uploaded_id FROM upload_status WHERE video_url = ?",
+                    "SELECT * FROM upload_status WHERE video_url = ?",
                     (video_url,),
                 )
                 details["uploads"] = {
                     r["uploader_id"]: {
                         "status": UploadStatus.from_str(r["status"]),
                         "id": r["uploaded_id"],
+                        "retry_count": r["retry_count"],
+                        "last_error_timestamp": r["last_error_timestamp"],
+                        "metadata": json.loads(r["metadata"]) if r["metadata"] else {},
                     }
                     for r in cur_uploads.fetchall()
                 }
@@ -183,6 +273,71 @@ class StateManager:
         except sqlite3.Error as e:
             logger.error(f"Error fetching media item {video_url}: {e}", exc_info=True)
             return None
+
+    def get_items_by_status(
+        self, status: MediaStatus, max_retries: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get all media items with the specified status."""
+        if not self._conn:
+            return []
+        try:
+            query = "SELECT * FROM media_items WHERE status = ?"
+            params = [status.value]
+            if max_retries is not None:
+                query += " AND retry_count <= ?"
+                params.append(max_retries)
+            cur = self._conn.execute(query, params)
+            return [dict(row) for row in cur.fetchall()]
+        except sqlite3.Error as e:
+            logger.error(f"Error fetching items by status: {e}", exc_info=True)
+            return []
+
+    def get_failed_items(
+        self, max_retries: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get all media items that have failed."""
+        if not self._conn:
+            return []
+        try:
+            query = """
+                SELECT * FROM media_items
+                WHERE status IN (?, ?)
+            """
+            params = [
+                MediaStatus.FAILED_DOWNLOAD.value,
+                MediaStatus.FAILED_UPLOAD.value,
+            ]
+            if max_retries is not None:
+                query += " AND retry_count <= ?"
+                params.append(max_retries)
+            cur = self._conn.execute(query, params)
+            return [dict(row) for row in cur.fetchall()]
+        except sqlite3.Error as e:
+            logger.error(f"Error fetching failed items: {e}", exc_info=True)
+            return []
+
+    def cleanup_old_items(self, days: int = 30) -> int:
+        """Remove items older than specified days."""
+        if not self._conn:
+            return 0
+        try:
+            cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days)
+            with self._conn:
+                cur = self._conn.execute(
+                    """
+                    DELETE FROM media_items
+                    WHERE created_at < ? AND status IN (?, ?)
+                    """,
+                    (
+                        cutoff_date,
+                        MediaStatus.COMPLETED.value,
+                        MediaStatus.FAILED_DOWNLOAD.value,
+                    ),
+                )
+                return cur.rowcount
+        except sqlite3.Error as e:
+            logger.error(f"Error cleaning up old items: {e}", exc_info=True)
+            return 0
 
     def is_video_processed_for_uploaders(
         self, video_url: str, uploader_ids: List[str]
