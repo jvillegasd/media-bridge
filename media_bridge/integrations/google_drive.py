@@ -1,7 +1,9 @@
+import json
 import logging
 from pathlib import Path
 from typing import Optional
 
+from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -9,88 +11,267 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
+from media_bridge.error_handler import (
+    UploadConnectionError,
+    UploadError,
+    UploadFormatError,
+    UploadPermissionError,
+    UploadQuotaError,
+    UploadRateLimitError,
+    UploadSizeError,
+    UploadTimeoutError,
+)
 from media_bridge.integrations.base import CloudStorageUploader
-from media_bridge.schemas import GoogleDriveConfig
 
-logger = logging.getLogger("media_bridge.google_drive")
+logger = logging.getLogger("media_bridge.uploader.google_drive")
+
+# Google Drive specific constants
+MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
+SUPPORTED_FORMATS = {
+    ".mp4": "video/mp4",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+    ".wmv": "video/x-ms-wmv",
+    ".flv": "video/x-flv",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+}
 
 
 class GoogleDriveUploader(CloudStorageUploader):
-    SCOPES = ["https://www.googleapis.com/auth/drive"]
+    """Google Drive uploader implementation."""
 
-    def __init__(self, config: GoogleDriveConfig):
-        self.config = config
+    def __init__(self, config: Optional[dict] = None):
+        super().__init__(config)
         self.service = None
-        self.credentials = None
-        logger.debug(
-            "GoogleDriveUploader instance created. Attempting authentication..."
-        )
-        self.authenticate()
+        self._initialize_service()
 
-    def authenticate(self):
-        """Authenticate with Google Drive API using OAuth 2.0 flow."""
-        creds = None
-        # Determine the token file path
-        token_path = (
-            self.config.token_file
-            or Path(self.config.credentials_file).parent / "drive_token.json"
-        )
-
-        # The file token_path stores the user's access and refresh tokens, and is
-        # created automatically when the authorization flow completes for the first time.
-        if token_path.exists():
-            creds = Credentials.from_authorized_user_file(str(token_path), self.SCOPES)
-
-        # If there are no (valid) credentials available, let the user log in.
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                    logger.info("Google Drive token refreshed successfully.")
-                except Exception as e:
-                    logger.warning(
-                        f"Error refreshing Google Drive token: {e}. Need to re-authenticate.",
-                        exc_info=True,
-                    )
-                    creds = None  # Force re-authentication
-            else:
-                if not self.config.credentials_file.exists():
-                    logger.error(
-                        f"Credentials file not found: {self.config.credentials_file}"
-                    )
-                    raise FileNotFoundError(
-                        f"Credentials file not found: {self.config.credentials_file}. "
-                        "Please provide the path to your OAuth Client ID JSON file."
-                    )
-                logger.info("Performing Google Drive OAuth flow...")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(self.config.credentials_file), self.SCOPES
-                )
-                creds = flow.run_local_server(port=0)
-                logger.info("Google Drive OAuth flow completed.")
-
-            # Save the credentials for the next run
-            with open(token_path, "w") as token:
-                token.write(creds.to_json())
-            logger.info(
-                f"Google Drive authentication successful. Token saved to: {token_path}"
-            )
-
-        self.credentials = creds
+    def _save_credentials(self, creds: Credentials, token_path: Path) -> None:
+        """Save credentials to a JSON file."""
         try:
-            self.service = build("drive", "v3", credentials=self.credentials)
-            logger.info("Google Drive API service created successfully.")
-        except HttpError as error:
-            logger.error(
-                f"An error occurred building the Drive service: {error}", exc_info=True
-            )
-            self.service = None
+            token_data = {
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "token_uri": creds.token_uri,
+                "client_id": creds.client_id,
+                "client_secret": creds.client_secret,
+                "scopes": creds.scopes,
+            }
+            with open(token_path, "w") as token:
+                json.dump(token_data, token)
         except Exception as e:
-            logger.error(
-                f"An unexpected error occurred building the Drive service: {e}",
-                exc_info=True,
+            logger.warning(f"Failed to save token file: {e}")
+
+    def _load_credentials(self, token_path: Path) -> Optional[Credentials]:
+        """Load credentials from a JSON file."""
+        try:
+            with open(token_path, "r") as token:
+                token_data = json.load(token)
+                return Credentials.from_authorized_user_info(token_data)
+        except Exception as e:
+            logger.warning(f"Failed to load token file: {e}. Will re-authenticate.")
+            return None
+
+    def _initialize_service(self) -> None:
+        """Initialize Google Drive API service."""
+        try:
+            SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+
+            # Get paths from config
+            credentials_path = self.config.get("credentials_file")
+            token_path = self.config.get("token_file")
+
+            if not credentials_path:
+                raise UploadError(
+                    "Google Drive credentials file path not provided in config"
+                )
+
+            # Convert to Path objects
+            credentials_path = Path(credentials_path)
+            token_path = (
+                Path(token_path)
+                if token_path
+                else credentials_path.parent / "drive_token.json"
             )
-            self.service = None
+
+            creds = None
+            if token_path.exists():
+                creds = self._load_credentials(token_path)
+
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    try:
+                        creds.refresh(Request())
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to refresh token: {e}. Will re-authenticate."
+                        )
+                        creds = None
+
+                if not creds:
+                    if not credentials_path.exists():
+                        raise UploadError(
+                            f"Credentials file not found: {credentials_path}"
+                        )
+
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        str(credentials_path), SCOPES
+                    )
+                    creds = flow.run_local_server(port=0)
+
+                # Save the credentials
+                self._save_credentials(creds, token_path)
+
+            self.service = build("drive", "v3", credentials=creds)
+
+        except GoogleAuthError as e:
+            raise UploadPermissionError(
+                f"Failed to authenticate with Google Drive: {str(e)}"
+            )
+        except Exception as e:
+            raise UploadError(f"Failed to initialize Google Drive service: {str(e)}")
+
+    def _validate_file(self, local_path: Path) -> None:
+        """
+        Validate the file before upload.
+
+        Args:
+            local_path: Path to the file to validate
+
+        Raises:
+            UploadFormatError: If file format is not supported
+            UploadSizeError: If file size exceeds limits
+        """
+        # Check file format
+        if local_path.suffix.lower() not in SUPPORTED_FORMATS:
+            raise UploadFormatError(
+                f"Unsupported file format: {local_path.suffix}. "
+                f"Supported formats: {', '.join(SUPPORTED_FORMATS.keys())}"
+            )
+
+        # Check file size
+        file_size = local_path.stat().st_size
+        if file_size > MAX_FILE_SIZE:
+            raise UploadSizeError(
+                f"File size ({file_size / (1024*1024):.1f}MB) exceeds maximum allowed size "
+                f"({MAX_FILE_SIZE / (1024*1024):.1f}MB)"
+            )
+
+    def _check_quota(self) -> None:
+        """
+        Check if upload quota is available.
+
+        Raises:
+            UploadQuotaError: If quota is exceeded
+        """
+        try:
+            about = self.service.about().get(fields="storageQuota").execute()
+            quota = about.get("storageQuota", {})
+
+            if "limit" in quota and "usage" in quota:
+                limit = int(quota["limit"])
+                usage = int(quota["usage"])
+                if usage >= limit:
+                    raise UploadQuotaError(
+                        f"Storage quota exceeded. Usage: {usage/(1024*1024):.1f}MB, "
+                        f"Limit: {limit/(1024*1024):.1f}MB"
+                    )
+        except HttpError as e:
+            if e.resp.status == 403:
+                raise UploadQuotaError("Failed to check quota: Permission denied")
+            raise UploadError(f"Failed to check quota: {str(e)}")
+        except Exception as e:
+            raise UploadError(f"Failed to check quota: {str(e)}")
+
+    def _check_permissions(self) -> None:
+        """
+        Check if user has permission to upload.
+
+        Raises:
+            UploadPermissionError: If user lacks permission
+        """
+        try:
+            # Try to list files to check permissions
+            self.service.files().list(pageSize=1).execute()
+        except HttpError as e:
+            if e.resp.status == 403:
+                raise UploadPermissionError(
+                    "Permission denied: Cannot access Google Drive"
+                )
+            raise UploadError(f"Failed to check permissions: {str(e)}")
+        except Exception as e:
+            raise UploadError(f"Failed to check permissions: {str(e)}")
+
+    def _do_upload(
+        self,
+        local_path: Path,
+        desired_filename: str,
+        target_location_hint: Optional[str] = None,
+    ) -> str:
+        """
+        Perform the actual upload.
+
+        Args:
+            local_path: Path to the file to upload
+            desired_filename: Desired filename in cloud storage
+            target_location_hint: Optional folder ID to upload to
+
+        Returns:
+            Cloud storage ID of uploaded file
+
+        Raises:
+            UploadError: For general upload errors
+            UploadTimeoutError: If upload times out
+            UploadConnectionError: If connection fails
+            UploadRateLimitError: If rate limit is hit
+        """
+        try:
+            file_metadata = {
+                "name": desired_filename,
+                "mimeType": SUPPORTED_FORMATS[local_path.suffix.lower()],
+            }
+
+            if target_location_hint:
+                file_metadata["parents"] = [target_location_hint]
+
+            media = MediaFileUpload(
+                str(local_path),
+                mimetype=SUPPORTED_FORMATS[local_path.suffix.lower()],
+                resumable=True,
+            )
+
+            file = (
+                self.service.files()
+                .create(body=file_metadata, media_body=media, fields="id")
+                .execute()
+            )
+
+            return file.get("id")
+
+        except HttpError as e:
+            if e.resp.status == 403:
+                raise UploadPermissionError(
+                    "Permission denied: Cannot upload to Google Drive"
+                )
+            elif e.resp.status == 429:
+                raise UploadRateLimitError("Rate limit exceeded: Too many requests")
+            elif e.resp.status == 408:
+                raise UploadTimeoutError("Upload timed out")
+            elif e.resp.status in (500, 502, 503, 504):
+                raise UploadConnectionError("Google Drive service unavailable")
+            raise UploadError(f"Upload failed: {str(e)}")
+        except Exception as e:
+            if isinstance(
+                e,
+                (
+                    UploadPermissionError,
+                    UploadRateLimitError,
+                    UploadTimeoutError,
+                    UploadConnectionError,
+                ),
+            ):
+                raise
+            raise UploadError(f"Upload failed: {str(e)}")
 
     def _create_folder_if_needed(self, folder_name: str) -> Optional[str]:
         """
