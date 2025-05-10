@@ -13,14 +13,8 @@ from rich.progress import (
 
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.schemas import DownloaderParams
-from media_bridge.state_manager import (
-    STATUS_COMPLETED,
-    STATUS_DOWNLOADED,
-    STATUS_FAILED_DOWNLOAD,
-    STATUS_PENDING_DOWNLOAD,
-    STATUS_UPLOAD_PENDING,
-    StateManager,
-)
+from media_bridge.state_manager import StateManager
+from media_bridge.status import MediaStatus, UploadStatus
 
 logger = logging.getLogger("media_bridge.downloader")
 
@@ -75,7 +69,7 @@ class Downloader:
                         video_url=video_url,
                         title=video_title,
                         local_path=actual_filepath,
-                        status=STATUS_DOWNLOADED,
+                        status=MediaStatus.DOWNLOADED,
                         yt_dlp_id=video_yt_dlp_id,
                     )
                 else:
@@ -96,7 +90,7 @@ class Downloader:
                     self.state_manager.add_or_update_media_item(
                         video_url=video_url,
                         title=video_title,
-                        status=STATUS_FAILED_DOWNLOAD,
+                        status=MediaStatus.FAILED_DOWNLOAD,
                         error_message=error_msg,
                     )
 
@@ -132,7 +126,7 @@ class Downloader:
                     item_details = self.state_manager.get_media_item_details(url)
                     if (
                         item_details
-                        and item_details.get("status") == STATUS_COMPLETED
+                        and item_details.get("status") == MediaStatus.COMPLETED
                         and self.state_manager.is_video_processed_for_uploaders(
                             url, enabled_uploader_ids
                         )
@@ -151,7 +145,7 @@ class Downloader:
                         and item_details.get("local_path")
                         and Path(item_details["local_path"]).exists()
                         and item_details.get("status")
-                        in [STATUS_DOWNLOADED, STATUS_UPLOAD_PENDING]
+                        in [MediaStatus.DOWNLOADED, MediaStatus.UPLOAD_PENDING]
                     ):
                         local_file_path = Path(item_details["local_path"])
                         logger.info(
@@ -162,7 +156,7 @@ class Downloader:
                     else:
                         logger.debug(f"Marking {url} for download (or re-download).")
                         self.state_manager.add_or_update_media_item(
-                            video_url=url, status=STATUS_PENDING_DOWNLOAD
+                            video_url=url, status=MediaStatus.PENDING_DOWNLOAD
                         )
 
                     if download_needed:
@@ -186,7 +180,7 @@ class Downloader:
                             )
                             self.state_manager.add_or_update_media_item(
                                 video_url=url,
-                                status=STATUS_FAILED_DOWNLOAD,
+                                status=MediaStatus.FAILED_DOWNLOAD,
                                 error_message=str(e),
                             )
                             continue
@@ -211,11 +205,12 @@ class Downloader:
                             )
                             if not (
                                 item_details
-                                and item_details.get("status") == STATUS_FAILED_DOWNLOAD
+                                and item_details.get("status")
+                                == MediaStatus.FAILED_DOWNLOAD
                             ):
                                 self.state_manager.add_or_update_media_item(
                                     video_url=url,
-                                    status=STATUS_FAILED_DOWNLOAD,
+                                    status=MediaStatus.FAILED_DOWNLOAD,
                                     error_message="File not found post-download attempt or hook failure.",
                                 )
                             continue
@@ -250,7 +245,7 @@ class Downloader:
                                 .get("status")
                             )
 
-                            if current_upload_status_from_db == "SUCCESS":
+                            if current_upload_status_from_db == UploadStatus.SUCCESS:
                                 logger.info(
                                     f"Skipping upload to {uploader_id} for {url}: Already marked as SUCCESS in DB."
                                 )
@@ -260,7 +255,7 @@ class Downloader:
                                 f"Attempting upload with {uploader_id} for {local_file_path.name}..."
                             )
                             self.state_manager.update_upload_status(
-                                url, uploader_id, "PENDING"
+                                url, uploader_id, UploadStatus.PENDING
                             )
                             try:
                                 target_hint = None
@@ -290,7 +285,7 @@ class Downloader:
                                     self.state_manager.update_upload_status(
                                         url,
                                         uploader_id,
-                                        "SUCCESS",
+                                        UploadStatus.SUCCESS,
                                         uploaded_id=uploaded_cloud_id,
                                     )
                                 else:
@@ -300,7 +295,7 @@ class Downloader:
                                     self.state_manager.update_upload_status(
                                         url,
                                         uploader_id,
-                                        "FAILED",
+                                        UploadStatus.FAILED,
                                         uploaded_id="FAILED_NO_ID",
                                     )
                             except Exception as e:
@@ -311,7 +306,7 @@ class Downloader:
                                 self.state_manager.update_upload_status(
                                     url,
                                     uploader_id,
-                                    "FAILED",
+                                    UploadStatus.FAILED,
                                     uploaded_id=f"ERROR: {type(e).__name__}",
                                 )
                     else:
@@ -329,7 +324,7 @@ class Downloader:
                     if not self.state_manager.get_media_item_details(url):
                         self.state_manager.add_or_update_media_item(
                             url,
-                            status=STATUS_FAILED_DOWNLOAD,
+                            status=MediaStatus.FAILED_DOWNLOAD,
                             error_message=f"Outer loop error: {str(e_outer)}",
                         )
                 finally:
