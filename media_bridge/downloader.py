@@ -11,6 +11,12 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from media_bridge.error_handler import (
+    NetworkError,
+    ResourceNotFoundError,
+    ValidationError,
+    with_retry,
+)
 from media_bridge.integrations.base import CloudStorageUploader
 from media_bridge.schemas import DownloaderParams
 from media_bridge.state_manager import StateManager
@@ -25,11 +31,18 @@ class Downloader:
         params: DownloaderParams,
         uploaders: List[CloudStorageUploader],
         state_manager: StateManager,
+        output_dir: Path,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
     ):
         self.params = params
         self.uploaders = uploaders
         self.state_manager = state_manager
         self._downloaded_files_session_cache = {}
+        self.output_dir = output_dir
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         output_template_str = "%(title)s.%(ext)s"
 
@@ -95,6 +108,64 @@ class Downloader:
                     )
 
         return _hook
+
+    @with_retry(
+        max_attempts=3,
+        initial_delay=1.0,
+        max_delay=30.0,
+        retryable_exceptions=(NetworkError,),
+    )
+    def _download_video(self, video_url: str) -> Optional[Path]:
+        """Download a single video with retry logic."""
+        try:
+            ydl_opts = {
+                "format": "best",
+                "outtmpl": str(self.output_dir / "%(title)s.%(ext)s"),
+                "progress_hooks": [self._make_progress_hook()],
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # First try to extract info to validate the URL
+                try:
+                    info = ydl.extract_info(video_url, download=False)
+                    if not info:
+                        raise ResourceNotFoundError(
+                            f"Could not find video: {video_url}"
+                        )
+                except Exception as e:
+                    if "Video unavailable" in str(e):
+                        raise ResourceNotFoundError(f"Video unavailable: {video_url}")
+                    elif "Private video" in str(e):
+                        raise ValidationError(f"Private video: {video_url}")
+                    else:
+                        raise NetworkError(f"Failed to get video info: {str(e)}")
+
+                # Update state to downloading
+                self.state_manager.add_or_update_media_item(
+                    video_url=video_url,
+                    title=info.get("title"),
+                    status=MediaStatus.DOWNLOADING,
+                    yt_dlp_id=info.get("id"),
+                )
+
+                # Download the video
+                ydl.download([video_url])
+
+                # Get the local path from state manager
+                return self.state_manager.get_local_path(video_url)
+
+        except yt_dlp.utils.DownloadError as e:
+            error_msg = str(e)
+            if "Video unavailable" in error_msg:
+                raise ResourceNotFoundError(f"Video unavailable: {video_url}")
+            elif "Private video" in error_msg:
+                raise ValidationError(f"Private video: {video_url}")
+            else:
+                raise NetworkError(f"Download failed: {error_msg}")
+        except Exception as e:
+            if isinstance(e, (ResourceNotFoundError, ValidationError)):
+                raise
+            raise NetworkError(f"Unexpected error during download: {str(e)}")
 
     def download_videos(self):
         urls_to_process = self.params.get_urls()
@@ -171,11 +242,10 @@ class Downloader:
                         )
 
                         try:
-                            with yt_dlp.YoutubeDL(current_dl_options) as ydl:
-                                ydl.download([url])
+                            self._download_video(url)
                         except Exception as e:
                             logger.error(
-                                f"Critical error during yt-dlp execution for {url}: {e}",
+                                f"Critical error during download for {url}: {e}",
                                 exc_info=True,
                             )
                             self.state_manager.add_or_update_media_item(
