@@ -50,3 +50,20 @@ export function getBaseUrl(url: string): string {
   }
 }
 
+/**
+ * Normalize URL by removing hash fragments and trailing slashes
+ * Hash fragments don't affect the actual resource being downloaded
+ */
+export function normalizeUrl(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    // Remove hash fragment (it doesn't affect the downloaded content)
+    urlObj.hash = '';
+    return urlObj.href;
+  } catch {
+    // If URL parsing fails, just remove hash manually
+    const hashIndex = url.indexOf('#');
+    return hashIndex >= 0 ? url.substring(0, hashIndex) : url;
+  }
+}
+

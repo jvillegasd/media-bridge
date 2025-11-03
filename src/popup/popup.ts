@@ -15,21 +15,14 @@ const settingsLink = document.getElementById('settingsLink') as HTMLAnchorElemen
 const tabs = document.querySelectorAll('.tab');
 const tabContents = {
   detected: document.getElementById('detectedTab') as HTMLDivElement,
-  downloads: document.getElementById('downloadsTab') as HTMLDivElement,
   errors: document.getElementById('errorsTab') as HTMLDivElement,
 };
 
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
-const downloadsList = document.getElementById('downloadsList') as HTMLDivElement;
 const errorsList = document.getElementById('errorsList') as HTMLDivElement;
 
 // Pagination elements
-const downloadsPagination = document.getElementById('downloadsPagination') as HTMLDivElement;
-const downloadsPrevBtn = document.getElementById('downloadsPrevBtn') as HTMLButtonElement;
-const downloadsNextBtn = document.getElementById('downloadsNextBtn') as HTMLButtonElement;
-const downloadsPageInfo = document.getElementById('downloadsPageInfo') as HTMLSpanElement;
-
 const errorsPagination = document.getElementById('errorsPagination') as HTMLDivElement;
 const errorsPrevBtn = document.getElementById('errorsPrevBtn') as HTMLButtonElement;
 const errorsNextBtn = document.getElementById('errorsNextBtn') as HTMLButtonElement;
@@ -38,10 +31,10 @@ const clearErrorsBtn = document.getElementById('clearErrorsBtn') as HTMLButtonEl
 
 // Detected videos storage
 let detectedVideos: VideoMetadata[] = [];
+let downloadStates: DownloadState[] = [];
 
 // Pagination state
 const ITEMS_PER_PAGE = 10;
-let downloadsCurrentPage = 1;
 let errorsCurrentPage = 1;
 
 /**
@@ -70,18 +63,6 @@ async function init() {
   });
 
   // Setup pagination button handlers
-  downloadsPrevBtn.addEventListener('click', () => {
-    if (downloadsCurrentPage > 1) {
-      downloadsCurrentPage--;
-      loadDownloads();
-    }
-  });
-
-  downloadsNextBtn.addEventListener('click', () => {
-    downloadsCurrentPage++;
-    loadDownloads();
-  });
-
   errorsPrevBtn.addEventListener('click', () => {
     if (errorsCurrentPage > 1) {
       errorsCurrentPage--;
@@ -99,17 +80,28 @@ async function init() {
   // Listen for messages
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === MessageType.DOWNLOAD_PROGRESS) {
-      loadDownloads();
+      loadDownloadStates();
+      renderDetectedVideos();
       loadErrors();
     }
     if (message.type === MessageType.VIDEO_DETECTED) {
       addDetectedVideo(message.payload);
     }
+    if (message.type === MessageType.DOWNLOAD_FAILED) {
+      loadDownloadStates();
+      renderDetectedVideos();
+      loadErrors();
+      // Show error notification if it's a user-initiated download
+      if (message.payload && message.payload.error) {
+        // Error will be shown in the error tab, but we can also show a brief notification
+        console.warn('Download failed:', message.payload.error);
+      }
+    }
   });
 
   // Load data
   await loadDetectedVideos();
-  await loadDownloads();
+  await loadDownloadStates();
   await loadErrors();
 
   // Get detected videos from current tab
@@ -117,7 +109,8 @@ async function init() {
 
   // Refresh data periodically
   setInterval(async () => {
-    await loadDownloads();
+    await loadDownloadStates();
+    renderDetectedVideos();
     await loadErrors();
     await requestDetectedVideos();
   }, 2000);
@@ -144,9 +137,7 @@ function switchTab(tabName: string) {
   });
 
   // Reset pagination when switching tabs
-  if (tabName === 'downloads') {
-    downloadsCurrentPage = 1;
-  } else if (tabName === 'errors') {
+  if (tabName === 'errors') {
     errorsCurrentPage = 1;
   }
 }
@@ -204,7 +195,26 @@ async function loadDetectedVideos() {
 }
 
 /**
- * Render detected videos
+ * Load download states
+ */
+async function loadDownloadStates() {
+  downloadStates = await DownloadStateManager.getAllDownloads();
+}
+
+/**
+ * Get download state for a video URL
+ */
+function getDownloadStateForVideo(url: string): DownloadState | undefined {
+  return downloadStates.find(d => {
+    // Normalize URLs for comparison (remove hash fragments)
+    const normalizedVideoUrl = url.split('#')[0];
+    const normalizedDownloadUrl = d.url.split('#')[0];
+    return normalizedVideoUrl === normalizedDownloadUrl;
+  });
+}
+
+/**
+ * Render detected videos with download status
  */
 function renderDetectedVideos() {
   if (detectedVideos.length === 0) {
@@ -217,7 +227,46 @@ function renderDetectedVideos() {
     return;
   }
 
-  detectedVideosList.innerHTML = detectedVideos.map(video => `
+  detectedVideosList.innerHTML = detectedVideos.map(video => {
+    const downloadState = getDownloadStateForVideo(video.url);
+    const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
+    const isCompleted = downloadState && downloadState.progress.stage === 'completed';
+    const isFailed = downloadState && downloadState.progress.stage === 'failed';
+    
+    let statusBadge = '';
+    let progressBar = '';
+    let speedInfo = '';
+    let buttonText = 'Download';
+    let buttonDisabled = false;
+    
+    if (isDownloading) {
+      const stage = downloadState.progress.stage;
+      statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
+      
+      if (downloadState.progress.percentage !== undefined) {
+        progressBar = `
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: ${downloadState.progress.percentage}%"></div>
+          </div>
+        `;
+      }
+      
+      if (downloadState.progress.speed) {
+        speedInfo = `<div class="download-speed">${formatSpeed(downloadState.progress.speed)}</div>`;
+      }
+      
+      buttonText = getStatusText(stage);
+      buttonDisabled = true;
+    } else if (isCompleted) {
+      statusBadge = `<span class="video-status status-completed">Completed</span>`;
+      buttonText = 'Downloaded';
+      buttonDisabled = true;
+    } else if (isFailed) {
+      statusBadge = `<span class="video-status status-failed">Failed</span>`;
+      buttonText = 'Retry';
+    }
+    
+    return `
     <div class="video-item">
       <div class="video-item-preview">
         ${video.thumbnail ? `
@@ -234,6 +283,7 @@ function renderDetectedVideos() {
           <div class="video-item-title" title="${escapeHtml(video.url)}">
             ${escapeHtml(video.title || getVideoTitleFromUrl(video.url))}
           </div>
+          ${statusBadge}
         </div>
         <div class="video-meta">
           ${video.resolution ? `<span class="video-resolution">${escapeHtml(video.resolution)}</span>` : ''}
@@ -246,86 +296,39 @@ function renderDetectedVideos() {
             From: ${escapeHtml(new URL(video.pageUrl).hostname)}
           </div>
         ` : ''}
-        <button class="video-btn" data-url="${escapeHtml(video.url)}">
-          Download
+        ${progressBar}
+        ${speedInfo}
+        ${downloadState && downloadState.progress.message ? `
+          <div style="font-size: 11px; color: #666; margin-top: 4px;">
+            ${escapeHtml(downloadState.progress.message)}
+          </div>
+        ` : ''}
+        ${isFailed && downloadState.progress.error ? `
+          <div style="font-size: 11px; color: #d32f2f; margin-top: 4px;">
+            ${escapeHtml(downloadState.progress.error)}
+          </div>
+        ` : ''}
+        <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
+                data-url="${escapeHtml(video.url)}" 
+                ${buttonDisabled ? 'disabled' : ''}>
+          ${buttonText}
         </button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   // Add click handlers for download buttons
   detectedVideosList.querySelectorAll('.video-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      const url = (e.target as HTMLButtonElement).getAttribute('data-url')!;
+      const button = e.target as HTMLButtonElement;
+      if (button.disabled) return;
+      const url = button.getAttribute('data-url')!;
       startDownload(url);
     });
   });
 }
 
-/**
- * Load and display downloads
- */
-async function loadDownloads() {
-  const downloads = await DownloadStateManager.getAllDownloads();
-  const activeDownloads = downloads.filter(d => d.progress.stage !== 'completed' && d.progress.stage !== 'failed');
-  
-  // Sort by creation date (newest first)
-  activeDownloads.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  
-  if (activeDownloads.length === 0) {
-    downloadsList.innerHTML = '<div class="empty-state">No active downloads</div>';
-    downloadsPagination.style.display = 'none';
-    return;
-  }
-
-  // Calculate pagination
-  const totalPages = Math.ceil(activeDownloads.length / ITEMS_PER_PAGE);
-  if (downloadsCurrentPage > totalPages) {
-    downloadsCurrentPage = totalPages || 1;
-  }
-  
-  const startIndex = (downloadsCurrentPage - 1) * ITEMS_PER_PAGE;
-  const endIndex = startIndex + ITEMS_PER_PAGE;
-  const paginatedDownloads = activeDownloads.slice(startIndex, endIndex);
-
-  // Render downloads
-  if (paginatedDownloads.length === 0) {
-    downloadsList.innerHTML = '<div class="empty-state">No downloads on this page</div>';
-  } else {
-    downloadsList.innerHTML = paginatedDownloads.map(download => `
-      <div class="download-item">
-        <div class="download-item-header">
-          <div class="download-item-title" title="${escapeHtml(download.url)}">
-            ${escapeHtml(getDownloadTitle(download))}
-          </div>
-          <span class="download-item-status status-${download.progress.stage}">
-            ${getStatusText(download.progress.stage)}
-          </span>
-        </div>
-        ${download.progress.percentage !== undefined ? `
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: ${download.progress.percentage}%"></div>
-          </div>
-        ` : ''}
-        ${download.progress.message ? `
-          <div style="font-size: 12px; color: #666; margin-top: 4px;">
-            ${escapeHtml(download.progress.message)}
-          </div>
-        ` : ''}
-      </div>
-    `).join('');
-  }
-
-  // Update pagination controls
-  if (totalPages > 1) {
-    downloadsPagination.style.display = 'flex';
-    downloadsPageInfo.textContent = `Page ${downloadsCurrentPage} of ${totalPages} (${activeDownloads.length} total)`;
-    downloadsPrevBtn.disabled = downloadsCurrentPage === 1;
-    downloadsNextBtn.disabled = downloadsCurrentPage === totalPages;
-  } else {
-    downloadsPagination.style.display = 'none';
-  }
-}
 
 /**
  * Handle clear errors button click
@@ -558,9 +561,8 @@ async function startDownload(url: string) {
     });
 
     if (response && response.success) {
-      // Switch to downloads tab
-      switchTab('downloads');
-      await loadDownloads();
+      await loadDownloadStates();
+      renderDetectedVideos();
     } else {
       alert(response?.error || 'Download failed');
     }
@@ -634,6 +636,21 @@ function formatDuration(seconds: number): string {
     return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Format speed in bytes per second to readable format
+ */
+function formatSpeed(bytesPerSecond: number): string {
+  if (bytesPerSecond < 1024) {
+    return `${bytesPerSecond.toFixed(0)} B/s`;
+  } else if (bytesPerSecond < 1024 * 1024) {
+    return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  } else if (bytesPerSecond < 1024 * 1024 * 1024) {
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+  } else {
+    return `${(bytesPerSecond / (1024 * 1024 * 1024)).toFixed(2)} GB/s`;
+  }
 }
 
 /**

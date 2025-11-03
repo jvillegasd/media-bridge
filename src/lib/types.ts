@@ -25,6 +25,7 @@ export interface DownloadProgress {
   percentage?: number;
   message?: string;
   error?: string;
+  speed?: number; // Download speed in bytes per second
 }
 
 export interface DownloadState {

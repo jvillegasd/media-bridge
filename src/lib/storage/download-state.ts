@@ -5,6 +5,7 @@
 import { ChromeStorage } from './chrome-storage';
 import { DownloadState, DownloadProgress } from '../types';
 import { logger } from '../utils/logger';
+import { normalizeUrl } from '../utils/url-utils';
 
 const STORAGE_KEY_DOWNLOADS = 'downloads';
 const STORAGE_KEY_DOWNLOAD_QUEUE = 'download_queue';
@@ -28,10 +29,12 @@ export class DownloadStateManager {
 
   /**
    * Get download state by URL
+   * Uses normalized URLs (removes hash fragments) for comparison
    */
   static async getDownloadByUrl(url: string): Promise<DownloadState | null> {
     const downloads = await this.getAllDownloads();
-    return downloads.find(d => d.url === url) ?? null;
+    const normalizedUrl = normalizeUrl(url);
+    return downloads.find(d => normalizeUrl(d.url) === normalizedUrl) ?? null;
   }
 
   /**

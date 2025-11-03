@@ -9,6 +9,7 @@ import { ChromeStorage } from '../lib/storage/chrome-storage';
 import { MessageType } from '../shared/messages';
 import { DownloadState, StorageConfig } from '../lib/types';
 import { logger } from '../lib/utils/logger';
+import { normalizeUrl } from '../lib/utils/url-utils';
 
 // Configuration keys
 const CONFIG_KEY = 'storage_config';
@@ -52,8 +53,12 @@ async function handleMessage(
   try {
     switch (message.type) {
       case MessageType.DOWNLOAD_REQUEST:
-        await handleDownloadRequest(message.payload);
-        sendResponse({ success: true });
+        const downloadResult = await handleDownloadRequest(message.payload);
+        if (downloadResult && downloadResult.error) {
+          sendResponse({ success: false, error: downloadResult.error });
+        } else {
+          sendResponse({ success: true });
+        }
         return true;
 
       case MessageType.GET_DOWNLOADS:
@@ -75,6 +80,21 @@ async function handleMessage(
         await ChromeStorage.set(CONFIG_KEY, message.payload);
         sendResponse({ success: true });
         return true;
+
+      case MessageType.VIDEO_DETECTED:
+        // Video detection messages are sent from content scripts to popup
+        // Service worker doesn't need to handle these, but we'll acknowledge receipt
+        // The popup will request detected videos via GET_DETECTED_VIDEOS when needed
+        sendResponse({ success: true });
+        return false; // Don't keep channel open, popup handles this directly
+
+      case MessageType.GET_DETECTED_VIDEOS:
+      case MessageType.CLEAR_DETECTED_VIDEOS:
+      case MessageType.START_DOWNLOAD:
+        // These messages are handled by content scripts or popup directly
+        // Service worker doesn't need to handle them
+        sendResponse({ success: true });
+        return false;
 
       default:
         logger.warn(`Unknown message type: ${message.type}`);
@@ -98,14 +118,31 @@ async function handleDownloadRequest(payload: {
   url: string;
   filename?: string;
   uploadToDrive?: boolean;
-}) {
+}): Promise<{ error?: string } | void> {
   const { url, filename, uploadToDrive } = payload;
   
-  // Check if download already exists
-  const existing = await DownloadStateManager.getDownloadByUrl(url);
+  // Normalize URL for comparison (remove hash fragments)
+  const normalizedUrl = normalizeUrl(url);
+  
+  // Check if download is already in progress (check both original and normalized URL)
+  for (const [activeUrl] of activeDownloads) {
+    if (normalizeUrl(activeUrl) === normalizedUrl) {
+      logger.info(`Download already in progress for ${url} (normalized: ${normalizedUrl})`);
+      return { error: 'Download is already in progress. Please wait for it to complete.' };
+    }
+  }
+  
+  // Check if download already exists and is completed
+  const existing = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
   if (existing && existing.progress.stage === 'completed') {
-    logger.info(`Download already exists for ${url}`);
-    return;
+    logger.info(`Download already exists for ${url} (normalized: ${normalizedUrl})`);
+    return { error: 'Download already completed. If you want to download again, please remove the existing download from the downloads list first.' };
+  }
+  
+  // If download exists but failed, allow retry by removing old state
+  if (existing && existing.progress.stage === 'failed') {
+    logger.info(`Retrying failed download for ${url} (normalized: ${normalizedUrl})`);
+    await DownloadStateManager.removeDownload(existing.id);
   }
 
   // Get configuration
@@ -138,18 +175,18 @@ async function handleDownloadRequest(payload: {
   // For now, uploads would need to be handled separately or we'd need to modify
   // the download flow to upload before saving to disk
   
-  // Start download
+  // Start download (use normalized URL as key to prevent duplicates with different hash fragments)
   const downloadPromise = startDownload(downloadManager, undefined, url, filename);
-  activeDownloads.set(url, downloadPromise);
+  activeDownloads.set(normalizedUrl, downloadPromise);
 
   // Clean up when done
   downloadPromise
     .then(() => {
-      activeDownloads.delete(url);
+      activeDownloads.delete(normalizedUrl);
     })
     .catch((error) => {
       logger.error(`Download failed for ${url}:`, error);
-      activeDownloads.delete(url);
+      activeDownloads.delete(normalizedUrl);
     });
 }
 
@@ -210,8 +247,9 @@ async function handleCancelDownload(id: string) {
     return;
   }
 
-  // Remove from active downloads
-  activeDownloads.delete(download.url);
+  // Remove from active downloads (use normalized URL)
+  const normalizedUrl = normalizeUrl(download.url);
+  activeDownloads.delete(normalizedUrl);
 
   // Update state
   download.progress.stage = 'failed';
