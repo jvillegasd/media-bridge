@@ -7,10 +7,10 @@ import { FormatDetector } from './format-detector';
 import { HLSDownloader } from './hls-downloader';
 import { DASHDownloader } from './dash-downloader';
 import { DirectDownloader } from './direct-downloader';
-import { SegmentMerger } from '../merger/segment-merger';
 import { DownloadStateManager } from '../storage/download-state';
 import { DownloadError } from '../utils/errors';
 import { logger } from '../utils/logger';
+import { mergeHLSOffscreen, mergeDASHOffscreen } from '../../background/offscreen-merger-client';
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
@@ -265,14 +265,7 @@ export class DownloadManager {
 
     const segments = await hlsDownloader.download(url);
 
-    // Merge segments
-    const merger = new SegmentMerger({
-      onProgress: (progress) => {
-        logger.debug('HLS merge progress:', progress);
-      },
-    });
-
-    return await merger.mergeHLS(segments);
+    return await mergeHLSOffscreen(segments);
   }
 
   /**
@@ -288,14 +281,7 @@ export class DownloadManager {
 
     const dashResult = await dashDownloader.download(url);
 
-    // Merge segments
-    const merger = new SegmentMerger({
-      onProgress: (progress) => {
-        logger.debug('DASH merge progress:', progress);
-      },
-    });
-
-    return await merger.mergeDASH(dashResult);
+    return await mergeDASHOffscreen(dashResult);
   }
 
   /**

@@ -11,6 +11,7 @@ module.exports = (env, argv) => {
       'content/content-script': './src/content/content-script.ts',
       'popup/popup': './src/popup/popup.ts',
       'options/options': './src/options/options.ts',
+      'offscreen/offscreen': './src/offscreen/offscreen.ts',
     },
     output: {
       path: path.resolve(__dirname, 'dist'),
@@ -41,6 +42,7 @@ module.exports = (env, argv) => {
         patterns: [
           { from: 'public/icons', to: 'icons' },
           { from: 'manifest.json', to: 'manifest.json' },
+          { from: 'public/ffmpeg', to: 'ffmpeg' },
         ],
       }),
       new HtmlWebpackPlugin({
@@ -52,6 +54,12 @@ module.exports = (env, argv) => {
         template: './src/options/options.html',
         filename: 'options/options.html',
         chunks: ['options/options'],
+      }),
+      new HtmlWebpackPlugin({
+        template: './src/offscreen/offscreen.html',
+        filename: 'offscreen/offscreen.html',
+        chunks: ['offscreen/offscreen'],
+        minify: false,
       }),
     ],
     devtool: isProduction ? false : 'source-map',

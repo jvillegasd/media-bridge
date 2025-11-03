@@ -96,6 +96,10 @@ async function handleMessage(
         sendResponse({ success: true });
         return false;
 
+      case MessageType.OFFSCREEN_MERGE_REQUEST:
+        // Forward to offscreen document; service worker does not process this request
+        return false;
+
       default:
         logger.warn(`Unknown message type: ${message.type}`);
         sendResponse({ success: false, error: 'Unknown message type' });

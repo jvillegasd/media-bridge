@@ -2,7 +2,7 @@
  * Unified segment merger interface
  */
 
-import { FFmpegMerger, MergeProgress } from './ffmpeg-merger';
+import { DirectFFmpegMerger, MergeProgress } from './direct-ffmpeg-merger';
 import { MergeError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { DASHDownloadResult } from '../downloader/dash-downloader';
@@ -13,10 +13,10 @@ export interface MergeOptions {
 }
 
 export class SegmentMerger {
-  private ffmpegMerger: FFmpegMerger;
+  private merger: DirectFFmpegMerger;
 
   constructor(options: MergeOptions = {}) {
-    this.ffmpegMerger = new FFmpegMerger(options.onProgress);
+    this.merger = new DirectFFmpegMerger(options.onProgress);
   }
 
   /**
@@ -24,12 +24,12 @@ export class SegmentMerger {
    */
   async mergeHLS(segments: Blob[], options: MergeOptions = {}): Promise<Blob> {
     try {
-      if (!this.ffmpegMerger) {
-        this.ffmpegMerger = new FFmpegMerger(options.onProgress);
+      if (!this.merger) {
+        this.merger = new DirectFFmpegMerger(options.onProgress);
       }
 
       const outputFilename = options.outputFilename || 'merged_hls.mp4';
-      return await this.ffmpegMerger.mergeHLS(segments, outputFilename);
+      return await this.merger.mergeHLS(segments, outputFilename);
     } catch (error) {
       logger.error('HLS merge failed:', error);
       throw error instanceof MergeError ? error : new MergeError(`HLS merge failed: ${error}`);
@@ -41,8 +41,8 @@ export class SegmentMerger {
    */
   async mergeDASH(dashResult: DASHDownloadResult, options: MergeOptions = {}): Promise<Blob> {
     try {
-      if (!this.ffmpegMerger) {
-        this.ffmpegMerger = new FFmpegMerger(options.onProgress);
+      if (!this.merger) {
+        this.merger = new DirectFFmpegMerger(options.onProgress);
       }
 
       const outputFilename = options.outputFilename || 'merged_dash.mp4';
@@ -63,7 +63,7 @@ export class SegmentMerger {
         }
       }
 
-      return await this.ffmpegMerger.muxDASH(videoSegments, audioSegments, outputFilename);
+      return await this.merger.muxDASH(videoSegments, audioSegments, outputFilename);
     } catch (error) {
       logger.error('DASH merge failed:', error);
       throw error instanceof MergeError ? error : new MergeError(`DASH merge failed: ${error}`);
@@ -71,11 +71,11 @@ export class SegmentMerger {
   }
 
   /**
-   * Initialize merger (load FFmpeg)
+   * Initialize merger
    */
   async initialize(): Promise<void> {
-    if (this.ffmpegMerger) {
-      await this.ffmpegMerger.initialize();
+    if (this.merger) {
+      await this.merger.initialize();
     }
   }
 
@@ -83,8 +83,8 @@ export class SegmentMerger {
    * Dispose of merger resources
    */
   async dispose(): Promise<void> {
-    if (this.ffmpegMerger) {
-      await this.ffmpegMerger.dispose();
+    if (this.merger) {
+      await this.merger.dispose();
     }
   }
 }

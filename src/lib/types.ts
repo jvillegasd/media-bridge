@@ -17,6 +17,7 @@ export interface VideoMetadata {
   thumbnail?: string; // Thumbnail/preview image URL
   videoId?: string; // Unique identifier for this video instance
   availableQualities?: VideoQuality[]; // Available quality options (for HLS/DASH)
+  selectedQualityUrl?: string; // Persisted quality selection in popup UI
 }
 
 export interface VideoQuality {

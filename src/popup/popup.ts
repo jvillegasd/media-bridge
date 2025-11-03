@@ -2,7 +2,7 @@
  * Popup UI logic with tabs for Detected Videos, Downloads, and Errors
  */
 
-import { DownloadState, VideoMetadata, VideoFormat } from '../lib/types';
+import { DownloadState, VideoMetadata, VideoFormat, VideoQuality } from '../lib/types';
 import { DownloadStateManager } from '../lib/storage/download-state';
 import { MessageType } from '../shared/messages';
 import { normalizeUrl } from '../lib/utils/url-utils';
@@ -37,6 +37,9 @@ const clearErrorsBtn = document.getElementById('clearErrorsBtn') as HTMLButtonEl
 // Detected videos storage
 let detectedVideos: VideoMetadata[] = [];
 let downloadStates: DownloadState[] = [];
+
+// Persist quality selections between renders and detection refreshes
+const qualitySelectionBySourceUrl = new Map<string, string>();
 
 // Pagination state
 const ITEMS_PER_PAGE = 10;
@@ -288,6 +291,9 @@ async function requestDetectedVideos() {
         
         // Add all videos from content script with improved deduplication
         response.videos.forEach((video: VideoMetadata) => {
+          getOrCreateVideoId(video);
+          applyStoredQualitySelection(video);
+
           // Use normalized URLs for comparison to prevent duplicates
           const normalizedVideoUrl = normalizeUrl(video.url);
           const existingIndex = detectedVideos.findIndex(v => normalizeUrl(v.url) === normalizedVideoUrl);
@@ -297,6 +303,10 @@ async function requestDetectedVideos() {
           } else {
             // Update existing entry with latest metadata if needed
             const existing = detectedVideos[existingIndex];
+            if (video.availableQualities && video.availableQualities.length > 0) {
+              existing.availableQualities = video.availableQualities;
+            }
+            applyStoredQualitySelection(existing);
             if (video.title && !existing.title) {
               existing.title = video.title;
             }
@@ -317,6 +327,8 @@ async function requestDetectedVideos() {
             }
           }
         });
+
+        cleanupQualitySelections();
         
         renderDetectedVideos();
       }
@@ -332,8 +344,11 @@ async function requestDetectedVideos() {
  */
 function addDetectedVideo(video: VideoMetadata) {
   // Check if video already exists
-  if (!detectedVideos.find(v => v.url === video.url)) {
+  if (!detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(video.url))) {
+    getOrCreateVideoId(video);
+    applyStoredQualitySelection(video);
     detectedVideos.push(video);
+    cleanupQualitySelections();
     renderDetectedVideos();
   }
 }
@@ -383,10 +398,92 @@ function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefin
   return downloadStates.find(d => d.metadata?.videoId === videoId);
 }
 
+function getQualitySelectionKey(video: VideoMetadata): string {
+  return normalizeUrl(video.url);
+}
+
+function getSortedQualities(video: VideoMetadata): VideoQuality[] {
+  if (!video.availableQualities || video.availableQualities.length === 0) {
+    return [];
+  }
+  return [...video.availableQualities].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
+}
+
+function applyStoredQualitySelection(video: VideoMetadata): void {
+  if (!video.availableQualities || video.availableQualities.length === 0) {
+    video.selectedQualityUrl = undefined;
+    return;
+  }
+
+  const key = getQualitySelectionKey(video);
+  const storedUrl = qualitySelectionBySourceUrl.get(key);
+
+  if (storedUrl && video.availableQualities.some(q => q.url === storedUrl)) {
+    video.selectedQualityUrl = storedUrl;
+  } else if (video.selectedQualityUrl && video.availableQualities.some(q => q.url === video.selectedQualityUrl)) {
+    qualitySelectionBySourceUrl.set(key, video.selectedQualityUrl);
+  } else {
+    qualitySelectionBySourceUrl.delete(key);
+    video.selectedQualityUrl = undefined;
+  }
+}
+
+function cleanupQualitySelections(): void {
+  const activeKeys = new Set<string>();
+  detectedVideos.forEach(video => {
+    activeKeys.add(getQualitySelectionKey(video));
+  });
+
+  for (const key of Array.from(qualitySelectionBySourceUrl.keys())) {
+    if (!activeKeys.has(key)) {
+      qualitySelectionBySourceUrl.delete(key);
+    }
+  }
+}
+
+function handleQualitySelectionChange(event: Event): void {
+  const select = event.target as HTMLSelectElement;
+  const videoId = select.dataset.videoId;
+  if (!videoId) {
+    return;
+  }
+
+  const video = detectedVideos.find(v => (v.videoId || getOrCreateVideoId(v)) === videoId);
+  if (!video || !video.availableQualities || video.availableQualities.length === 0) {
+    return;
+  }
+
+  const sortedQualities = getSortedQualities(video);
+  const selectedIndex = parseInt(select.value, 10);
+  const selectedQuality = sortedQualities[selectedIndex];
+  const key = getQualitySelectionKey(video);
+
+  if (selectedQuality && selectedQuality.url) {
+    video.selectedQualityUrl = selectedQuality.url;
+    qualitySelectionBySourceUrl.set(key, selectedQuality.url);
+
+    if (selectedQuality.resolution) {
+      video.resolution = selectedQuality.resolution;
+    }
+    if (selectedQuality.width) {
+      video.width = selectedQuality.width;
+    }
+    if (selectedQuality.height) {
+      video.height = selectedQuality.height;
+    }
+  } else {
+    video.selectedQualityUrl = undefined;
+    qualitySelectionBySourceUrl.delete(key);
+  }
+
+  renderDetectedVideos();
+}
+
 /**
  * Render detected videos with download status
  */
 function renderDetectedVideos() {
+  cleanupQualitySelections();
   // Deduplicate videos before rendering using normalized URLs
   const seenUrls = new Set<string>();
   const uniqueVideos = detectedVideos.filter(video => {
@@ -409,6 +506,7 @@ function renderDetectedVideos() {
   }
 
   detectedVideosList.innerHTML = uniqueVideos.map(video => {
+    applyStoredQualitySelection(video);
     const videoId = video.videoId || getOrCreateVideoId(video);
     const downloadState = getDownloadStateForVideo(video);
     const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
@@ -417,6 +515,26 @@ function renderDetectedVideos() {
     
     // Get actual file format for display (from download state or video URL)
     const actualFormat = getActualFileFormat(video, downloadState);
+
+    const sortedQualities = getSortedQualities(video);
+    let selectedIndex = 0;
+    if (sortedQualities.length > 0 && video.selectedQualityUrl) {
+      const storedIndex = sortedQualities.findIndex(q => q.url === video.selectedQualityUrl);
+      if (storedIndex >= 0) {
+        selectedIndex = storedIndex;
+      }
+    }
+    if (selectedIndex === 0 && sortedQualities.length > 0) {
+      const currentUrlIndex = sortedQualities.findIndex(q => q.url === video.url);
+      if (currentUrlIndex >= 0) {
+        selectedIndex = currentUrlIndex;
+      }
+    }
+    const selectedQuality = sortedQualities.length > 0 ? sortedQualities[selectedIndex] : undefined;
+    const displayResolution = (selectedQuality?.quality || selectedQuality?.resolution || video.resolution || '').trim();
+    const displayWidth = selectedQuality?.width ?? video.width;
+    const displayHeight = selectedQuality?.height ?? video.height;
+    const displayDimensions = (!displayResolution && displayWidth && displayHeight) ? `${displayWidth}x${displayHeight}` : '';
     
     let statusBadge = '';
     let progressBar = '';
@@ -451,6 +569,21 @@ function renderDetectedVideos() {
       buttonText = 'Retry';
     }
     
+    const qualitySelectMarkup = sortedQualities.length > 1
+      ? `
+          <select class="video-quality-select" 
+                  data-video-id="${escapeHtml(videoId)}"
+                  ${buttonDisabled ? 'disabled' : ''}>
+            ${sortedQualities.map((quality, index) => {
+              const sizeEstimate = calculateEstimatedSize(quality.bandwidth, video.duration);
+              const qualityLabel = quality.quality || quality.resolution || 'Auto';
+              const sizeText = sizeEstimate ? ` (~${sizeEstimate})` : '';
+              return `<option value="${index}" ${index === selectedIndex ? 'selected' : ''}>${escapeHtml(qualityLabel)}${sizeText}</option>`;
+            }).join('')}
+          </select>
+        `
+      : '';
+
     return `
     <div class="video-item">
       <div class="video-item-preview">
@@ -471,8 +604,9 @@ function renderDetectedVideos() {
           ${statusBadge}
         </div>
         <div class="video-meta">
-          ${video.resolution ? `<span class="video-resolution">${escapeHtml(video.resolution)}</span>` : ''}
-          ${video.width && video.height && !video.resolution ? `<span class="video-resolution">${video.width}x${video.height}</span>` : ''}
+          ${displayResolution ? `<span class="video-resolution">${escapeHtml(displayResolution)}</span>` : ''}
+          ${displayDimensions ? `<span class="video-resolution">${displayDimensions}</span>` : ''}
+          <span class="video-link-type">${escapeHtml(getLinkTypeDisplayName(video.format))}</span>
           <span class="video-format">${escapeHtml(getFormatDisplayName(video.format, actualFormat))}</span>
           ${video.duration ? `<span style="color: #666; margin-left: 4px;">⏱ ${formatDuration(video.duration)}</span>` : ''}
         </div>
@@ -493,6 +627,7 @@ function renderDetectedVideos() {
             ${escapeHtml(downloadState.progress.error)}
           </div>
         ` : ''}
+        ${qualitySelectMarkup}
         <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
                 data-url="${escapeHtml(video.url)}" 
                 data-video-id="${escapeHtml(videoId)}"
@@ -503,6 +638,10 @@ function renderDetectedVideos() {
     </div>
   `;
   }).join('');
+
+  detectedVideosList.querySelectorAll('.video-quality-select').forEach(select => {
+    select.addEventListener('change', handleQualitySelectionChange);
+  });
 
   // Add click handlers for download buttons
   detectedVideosList.querySelectorAll('.video-btn').forEach(btn => {
@@ -521,7 +660,38 @@ function renderDetectedVideos() {
         videoMetadata = detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(url));
       }
 
-      startDownload(url, videoMetadata ? { ...videoMetadata } : undefined, { triggerButton: button });
+      // Get selected quality if available
+      let downloadUrl = url;
+      if (videoMetadata && videoMetadata.availableQualities && videoMetadata.availableQualities.length > 1 && videoId) {
+        const qualitySelect = detectedVideosList.querySelector(`select.video-quality-select[data-video-id="${videoId}"]`) as HTMLSelectElement;
+        if (qualitySelect) {
+          const selectedIndex = parseInt(qualitySelect.value);
+          const sortedQualities = getSortedQualities(videoMetadata);
+          const selectedQuality = sortedQualities[selectedIndex];
+          if (selectedQuality && selectedQuality.url) {
+            downloadUrl = selectedQuality.url;
+            // Update metadata to reflect selected quality
+            videoMetadata = {
+              ...videoMetadata,
+              url: downloadUrl,
+              selectedQualityUrl: selectedQuality.url,
+              quality: selectedQuality.quality,
+              resolution: selectedQuality.resolution,
+              width: selectedQuality.width,
+              height: selectedQuality.height,
+            };
+          }
+        } else if (videoMetadata.selectedQualityUrl) {
+          downloadUrl = videoMetadata.selectedQualityUrl;
+          videoMetadata = {
+            ...videoMetadata,
+            url: downloadUrl,
+            selectedQualityUrl: downloadUrl,
+          };
+        }
+      }
+
+      startDownload(downloadUrl, videoMetadata, { triggerButton: button });
     });
   });
 }
@@ -899,6 +1069,22 @@ function getFormatDisplayName(format: VideoFormat, actualFormat?: string | null)
 }
 
 /**
+ * Get link type display name (delivery method: direct, HLS, DASH)
+ */
+function getLinkTypeDisplayName(format: VideoFormat): string {
+  switch (format) {
+    case 'hls':
+      return 'HLS';
+    case 'dash':
+      return 'DASH';
+    case 'direct':
+      return 'Direct';
+    default:
+      return format.toUpperCase();
+  }
+}
+
+/**
  * Format duration in seconds to readable format
  */
 function formatDuration(seconds: number): string {
@@ -967,6 +1153,31 @@ function formatDateTime(timestamp: number): string {
   }
   
   return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+/**
+ * Calculate estimated video size from bandwidth and duration
+ */
+function calculateEstimatedSize(bandwidth: number, duration?: number): string {
+  if (!bandwidth || bandwidth === 0 || !duration) {
+    return '';
+  }
+  
+  // bandwidth is in bits per second, convert to bytes per second
+  const bytesPerSecond = bandwidth / 8;
+  // Estimate total size
+  const estimatedBytes = bytesPerSecond * duration;
+  
+  // Format size
+  if (estimatedBytes < 1024) {
+    return `${estimatedBytes.toFixed(0)} B`;
+  } else if (estimatedBytes < 1024 * 1024) {
+    return `${(estimatedBytes / 1024).toFixed(1)} KB`;
+  } else if (estimatedBytes < 1024 * 1024 * 1024) {
+    return `${(estimatedBytes / (1024 * 1024)).toFixed(1)} MB`;
+  } else {
+    return `${(estimatedBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
 }
 
 /**
