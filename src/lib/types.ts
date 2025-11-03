@@ -16,7 +16,7 @@ export interface VideoMetadata {
 
 export interface DownloadProgress {
   url: string;
-  stage: 'detecting' | 'downloading' | 'merging' | 'uploading' | 'completed' | 'failed';
+  stage: 'detecting' | 'downloading' | 'merging' | 'saving' | 'uploading' | 'completed' | 'failed';
   downloaded?: number;
   total?: number;
   percentage?: number;

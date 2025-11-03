@@ -74,7 +74,18 @@ export class FFmpegMerger {
    */
   private async readFile(filename: string): Promise<Blob> {
     const data = await this.ffmpeg.readFile(filename);
-    return new Blob([data], { type: 'video/mp4' });
+    // FFmpeg returns Uint8Array (FileData type)
+    // Convert to ArrayBuffer by copying the data to ensure compatibility
+    if (data instanceof Uint8Array) {
+      // Create a copy to ensure we have a regular ArrayBuffer (not SharedArrayBuffer)
+      const arrayBuffer = new Uint8Array(data).buffer;
+      return new Blob([arrayBuffer], { type: 'video/mp4' });
+    } else {
+      // Fallback: treat as Uint8Array and convert
+      const uint8Array = data as unknown as Uint8Array;
+      const arrayBuffer = new Uint8Array(uint8Array).buffer;
+      return new Blob([arrayBuffer], { type: 'video/mp4' });
+    }
   }
 
   /**

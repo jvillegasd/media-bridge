@@ -43,7 +43,7 @@ export class DirectDownloader {
       }
 
       const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
+      const chunks: BlobPart[] = [];
       let loaded = 0;
 
       while (true) {
@@ -116,7 +116,7 @@ export class DirectDownloader {
       }
 
       const reader = response.body.getReader();
-      const chunks: Uint8Array[] = existingBlob ? [new Uint8Array(await existingBlob.arrayBuffer())] : [];
+      const chunks: BlobPart[] = existingBlob ? [new Uint8Array(await existingBlob.arrayBuffer())] : [];
       let loaded = existingSize;
 
       while (true) {

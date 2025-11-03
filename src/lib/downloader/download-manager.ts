@@ -93,7 +93,7 @@ export class DownloadManager {
       this.notifyProgress(state);
 
       // Use Chrome downloads API to save file
-      const downloadId = await new Promise<number>((resolve, reject) => {
+      const chromeDownloadId = await new Promise<number>((resolve, reject) => {
         chrome.downloads.download({
           url: blobUrl,
           filename: downloadFilename,
@@ -108,11 +108,11 @@ export class DownloadManager {
       });
 
       // Wait for download to complete
-      await this.waitForDownload(downloadId);
+      await this.waitForDownload(chromeDownloadId);
 
       // Get final download path
       const downloadItem = await new Promise<chrome.downloads.DownloadItem>((resolve, reject) => {
-        chrome.downloads.search({ id: downloadId }, (results) => {
+        chrome.downloads.search({ id: chromeDownloadId }, (results) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
           } else if (results && results[0]) {
