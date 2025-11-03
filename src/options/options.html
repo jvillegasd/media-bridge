@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Media Bridge Settings</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .header {
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .section {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 16px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: #4285f4;
+    }
+
+    .form-checkbox {
+      margin-right: 8px;
+    }
+
+    .form-help {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-primary {
+      background: #4285f4;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #3367d6;
+    }
+
+    .btn-secondary {
+      background: #f5f5f5;
+      color: #333;
+      margin-left: 8px;
+    }
+
+    .btn-secondary:hover {
+      background: #e0e0e0;
+    }
+
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    .status-success {
+      background: #e8f5e9;
+      color: #388e3c;
+    }
+
+    .status-error {
+      background: #ffebee;
+      color: #d32f2f;
+    }
+
+    .status-info {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    .auth-section {
+      margin-top: 20px;
+    }
+
+    .auth-status {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+
+    .auth-status.authenticated {
+      background: #e8f5e9;
+      color: #388e3c;
+    }
+
+    .auth-status.not-authenticated {
+      background: #ffebee;
+      color: #d32f2f;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Media Bridge Settings</h1>
+    <p>Configure Google Drive integration and download preferences</p>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">Google Drive Integration</h2>
+    
+    <div class="form-group">
+      <label class="form-label">
+        <input type="checkbox" id="driveEnabled" class="form-checkbox">
+        Enable Google Drive uploads
+      </label>
+      <div class="form-help">
+        Automatically upload downloaded videos to Google Drive
+      </div>
+    </div>
+
+    <div id="driveSettings" style="display: none;">
+      <div class="form-group">
+        <label class="form-label" for="folderName">Folder Name</label>
+        <input 
+          type="text" 
+          id="folderName" 
+          class="form-input" 
+          placeholder="MediaBridge Uploads"
+        />
+        <div class="form-help">
+          Name of the folder to store uploads. Will be created if it doesn't exist.
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="folderId">Target Folder ID (Optional)</label>
+        <input 
+          type="text" 
+          id="folderId" 
+          class="form-input" 
+          placeholder="Enter Google Drive folder ID"
+        />
+        <div class="form-help">
+          Upload to a specific folder. Leave empty to use the folder name above.
+        </div>
+      </div>
+
+      <div class="auth-section">
+        <label class="form-label">
+          Authentication
+          <span id="authStatus" class="auth-status not-authenticated">Not Authenticated</span>
+        </label>
+        <button id="authBtn" class="btn btn-primary">Sign in with Google</button>
+        <button id="signOutBtn" class="btn btn-secondary">Sign Out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">Download Settings</h2>
+    
+    <div class="form-group">
+      <label class="form-label" for="maxConcurrent">Max Concurrent Downloads</label>
+      <input 
+        type="number" 
+        id="maxConcurrent" 
+        class="form-input" 
+        min="1" 
+        max="10" 
+        value="3"
+      />
+      <div class="form-help">
+        Number of segments to download simultaneously (1-10)
+      </div>
+    </div>
+  </div>
+
+  <div id="statusMessage"></div>
+
+  <button id="saveBtn" class="btn btn-primary">Save Settings</button>
+
+  <script src="options.js"></script>
+</body>
+</html>
+

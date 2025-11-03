@@ -1,0 +1,36 @@
+{
+  "name": "media-bridge-extension",
+  "version": "2.0.0",
+  "description": "Download videos (HLS/DASH/direct) and upload to Google Drive",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "browser-extension",
+    "video-downloader",
+    "hls",
+    "dash",
+    "google-drive"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/node": "^20.14.15",
+    "copy-webpack-plugin": "^12.0.2",
+    "css-loader": "^7.1.2",
+    "html-webpack-plugin": "^5.6.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.5.4",
+    "webpack": "^5.92.1",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1"
+  }
+}
+
