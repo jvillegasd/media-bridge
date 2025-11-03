@@ -45,6 +45,7 @@ export class DirectDownloader {
       const reader = response.body.getReader();
       const chunks: BlobPart[] = [];
       let loaded = 0;
+      const startTime = Date.now();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -56,9 +57,16 @@ export class DirectDownloader {
         chunks.push(value);
         loaded += value.length;
 
-        if (this.onProgress && total > 0) {
-          const percentage = (loaded / total) * 100;
-          this.onProgress(loaded, total, percentage);
+        // Report progress even if total is unknown (estimate based on loaded bytes)
+        if (this.onProgress) {
+          if (total > 0) {
+            const percentage = (loaded / total) * 100;
+            this.onProgress(loaded, total, percentage);
+          } else {
+            // If total is unknown, still report progress with estimated percentage
+            // Show as indeterminate or use a placeholder
+            this.onProgress(loaded, 0, 0);
+          }
         }
       }
 

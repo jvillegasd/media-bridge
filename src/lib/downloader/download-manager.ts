@@ -87,18 +87,18 @@ export class DownloadManager {
 
       switch (format) {
         case 'hls':
-          finalBlob = await this.downloadHLS(url);
+          finalBlob = await this.downloadHLS(url, state.id);
           break;
         case 'dash':
-          finalBlob = await this.downloadDASH(url);
+          finalBlob = await this.downloadDASH(url, state.id);
           break;
         case 'direct':
-          finalBlob = await this.downloadDirect(url);
+          finalBlob = await this.downloadDirect(url, state.id);
           break;
         default:
           // Last resort: try as direct video
           logger.warn(`Unknown format ${format}, attempting as direct video download`);
-          finalBlob = await this.downloadDirect(url);
+          finalBlob = await this.downloadDirect(url, state.id);
       }
 
       // Save file locally (using Chrome downloads API)
@@ -230,7 +230,7 @@ export class DownloadManager {
   /**
    * Download HLS stream
    */
-  private async downloadHLS(url: string): Promise<Blob> {
+  private async downloadHLS(url: string, stateId: string): Promise<Blob> {
     const hlsDownloader = new HLSDownloader({
       maxConcurrent: this.maxConcurrent,
       onProgress: (stage, progress) => {
@@ -254,7 +254,7 @@ export class DownloadManager {
   /**
    * Download DASH stream
    */
-  private async downloadDASH(url: string): Promise<Blob> {
+  private async downloadDASH(url: string, stateId: string): Promise<Blob> {
     const dashDownloader = new DASHDownloader({
       maxConcurrent: this.maxConcurrent,
       onProgress: (stage, stream, progress) => {
@@ -277,10 +277,41 @@ export class DownloadManager {
   /**
    * Download direct video
    */
-  private async downloadDirect(url: string): Promise<Blob> {
+  private async downloadDirect(url: string, stateId: string): Promise<Blob> {
     const directDownloader = new DirectDownloader({
-      onProgress: (loaded, total, percentage) => {
+      onProgress: async (loaded, total, percentage) => {
         logger.debug(`Direct download: ${percentage.toFixed(2)}%`);
+        
+        // Get current download state by ID to update progress
+        const currentState = await DownloadStateManager.getDownload(stateId);
+        if (currentState) {
+          currentState.progress.downloaded = loaded;
+          currentState.progress.total = total;
+          currentState.progress.percentage = percentage;
+          currentState.progress.stage = 'downloading';
+          
+          // Calculate speed (bytes per second) - use a rolling window
+          const now = Date.now();
+          if (currentState.progress.lastUpdateTime && currentState.progress.lastDownloaded !== undefined) {
+            const elapsed = (now - currentState.progress.lastUpdateTime) / 1000;
+            if (elapsed > 0.5) { // Only update speed every 0.5 seconds to avoid too frequent updates
+              const bytesDelta = loaded - currentState.progress.lastDownloaded;
+              if (bytesDelta > 0) {
+                currentState.progress.speed = bytesDelta / elapsed;
+                currentState.progress.lastUpdateTime = now;
+                currentState.progress.lastDownloaded = loaded;
+              }
+            }
+          } else {
+            // First update - initialize tracking
+            currentState.progress.lastUpdateTime = now;
+            currentState.progress.lastDownloaded = loaded;
+            currentState.progress.speed = 0;
+          }
+          
+          await DownloadStateManager.saveDownload(currentState);
+          this.notifyProgress(currentState);
+        }
       },
     });
 

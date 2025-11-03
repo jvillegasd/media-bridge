@@ -26,6 +26,8 @@ export interface DownloadProgress {
   message?: string;
   error?: string;
   speed?: number; // Download speed in bytes per second
+  lastUpdateTime?: number; // Timestamp for speed calculation
+  lastDownloaded?: number; // Last downloaded bytes for speed calculation
 }
 
 export interface DownloadState {

@@ -5,6 +5,7 @@
 import { DownloadState, VideoMetadata } from '../lib/types';
 import { DownloadStateManager } from '../lib/storage/download-state';
 import { MessageType } from '../shared/messages';
+import { normalizeUrl } from '../lib/utils/url-utils';
 
 // DOM elements
 const urlInput = document.getElementById('urlInput') as HTMLInputElement;
@@ -203,13 +204,40 @@ async function loadDownloadStates() {
 
 /**
  * Get download state for a video URL
+ * Only matches if the URLs are actually the same video (exact match after normalization)
+ * Additional validation to prevent false matches between page URLs and actual video files
  */
 function getDownloadStateForVideo(url: string): DownloadState | undefined {
   return downloadStates.find(d => {
-    // Normalize URLs for comparison (remove hash fragments)
-    const normalizedVideoUrl = url.split('#')[0];
-    const normalizedDownloadUrl = d.url.split('#')[0];
-    return normalizedVideoUrl === normalizedDownloadUrl;
+    // Use the normalizeUrl utility for consistent comparison
+    const normalizedVideoUrl = normalizeUrl(url);
+    const normalizedDownloadUrl = normalizeUrl(d.url);
+    
+    // Only match if URLs are exactly the same after normalization
+    if (normalizedVideoUrl !== normalizedDownloadUrl) {
+      return false;
+    }
+    
+    // Additional validation: Check if one is a page URL pattern and the other is a direct video file
+    // This prevents false matches when multiple videos on the same page all use the page URL as identifier
+    const videoUrlIsPagePattern = /(view_video|watch|video|embed|\.php|\.html)(\?|#|$)/i.test(normalizedVideoUrl);
+    const downloadUrlIsVideoFile = /\.(mp4|webm|m3u8|mpd|flv|mov|avi|mkv|ts)(\?|#|$)/i.test(normalizedDownloadUrl);
+    const videoUrlIsVideoFile = /\.(mp4|webm|m3u8|mpd|flv|mov|avi|mkv|ts)(\?|#|$)/i.test(normalizedVideoUrl);
+    const downloadUrlIsPagePattern = /(view_video|watch|video|embed|\.php|\.html)(\?|#|$)/i.test(normalizedDownloadUrl);
+    
+    // If detected video is a page URL but download was a direct video file, don't match
+    // (This means multiple videos might share the same page URL, but we only downloaded one specific video file)
+    if (videoUrlIsPagePattern && downloadUrlIsVideoFile) {
+      return false;
+    }
+    
+    // If detected video is a direct video file but download was a page URL, don't match
+    // (This means the download might have been from a page, but this specific video file wasn't downloaded)
+    if (videoUrlIsVideoFile && downloadUrlIsPagePattern) {
+      return false;
+    }
+    
+    return true;
   });
 }
 
@@ -563,8 +591,18 @@ async function startDownload(url: string) {
     if (response && response.success) {
       await loadDownloadStates();
       renderDetectedVideos();
-    } else {
-      alert(response?.error || 'Download failed');
+      // Don't show error popup if download started successfully
+      // Progress will be updated via DOWNLOAD_PROGRESS messages
+    } else if (response && response.error) {
+      // Only show error if there's actually an error (like duplicate download)
+      // Don't show errors for warnings that don't prevent the download
+      const errorMessage = response.error;
+      if (!errorMessage.includes('already') && !errorMessage.includes('in progress')) {
+        alert(response.error);
+      }
+      // Still refresh the UI in case download state changed
+      await loadDownloadStates();
+      renderDetectedVideos();
     }
   } catch (error) {
     console.error('Download request failed:', error);
