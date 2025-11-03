@@ -54,7 +54,23 @@ export class DownloadManager {
 
       // Detect format
       logger.info(`Detecting format for ${url}`);
-      const format = await FormatDetector.detectWithInspection(url);
+      let format = await FormatDetector.detectWithInspection(url);
+      
+      // If format is unknown, try additional detection methods
+      if (format === 'unknown') {
+        logger.warn(`Format detection returned unknown for ${url}, attempting fallback methods`);
+        
+        // Try URL-based detection as fallback
+        format = FormatDetector.detectFromUrl(url);
+        
+        // If still unknown, log warning and attempt as direct video
+        if (format === 'unknown') {
+          logger.warn(`Could not determine format for ${url}, attempting as direct video download`);
+          format = 'direct';
+        }
+      }
+      
+      logger.info(`Detected format: ${format} for URL: ${url}`);
       
       state.metadata = {
         url,
@@ -80,17 +96,59 @@ export class DownloadManager {
           finalBlob = await this.downloadDirect(url);
           break;
         default:
-          throw new DownloadError(`Unsupported format: ${format}`);
+          // Last resort: try as direct video
+          logger.warn(`Unknown format ${format}, attempting as direct video download`);
+          finalBlob = await this.downloadDirect(url);
       }
 
       // Save file locally (using Chrome downloads API)
-      const blobUrl = URL.createObjectURL(finalBlob);
       const downloadFilename = filename || this.generateFilename(url, format);
       
       state.progress.stage = 'saving';
       state.progress.message = 'Saving file...';
       await DownloadStateManager.saveDownload(state);
       this.notifyProgress(state);
+
+      // Create blob URL with fallback for service worker contexts
+      let blobUrl: string;
+      try {
+        // Check if URL.createObjectURL is available
+        if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+          blobUrl = URL.createObjectURL(finalBlob);
+          logger.debug('Created blob URL using URL.createObjectURL');
+        } else {
+          // Fallback: convert to data URL (for small files only)
+          // Note: This has size limitations, but works when URL.createObjectURL isn't available
+          const MAX_DATA_URL_SIZE = 100 * 1024 * 1024; // 100MB limit for data URLs
+          if (finalBlob.size > MAX_DATA_URL_SIZE) {
+            throw new Error(
+              `File too large (${(finalBlob.size / 1024 / 1024).toFixed(2)}MB) for data URL conversion. ` +
+              `URL.createObjectURL is not available in this context.`
+            );
+          }
+          
+          // Convert blob to base64 using chunked approach for large files
+          const arrayBuffer = await finalBlob.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          // Convert in chunks to avoid stack overflow
+          let binaryString = '';
+          const chunkSize = 8192; // Process 8KB at a time
+          for (let i = 0; i < uint8Array.length; i += chunkSize) {
+            const chunk = uint8Array.slice(i, i + chunkSize);
+            binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+          }
+          
+          const base64 = btoa(binaryString);
+          const mimeType = finalBlob.type || 'video/mp4';
+          blobUrl = `data:${mimeType};base64,${base64}`;
+          logger.warn('Using data URL fallback for blob saving (URL.createObjectURL not available)');
+        }
+      } catch (error) {
+        logger.error('Failed to create blob URL:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to create blob URL for download: ${errorMessage}`);
+      }
 
       // Use Chrome downloads API to save file
       const chromeDownloadId = await new Promise<number>((resolve, reject) => {
@@ -136,7 +194,15 @@ export class DownloadManager {
       // The blob is available in finalBlob, but it's already saved
       // A better approach would be to upload first, then save, or store blob for upload
 
-      URL.revokeObjectURL(blobUrl);
+      // Revoke blob URL if it was created with URL.createObjectURL
+      try {
+        if (typeof URL !== 'undefined' && URL.revokeObjectURL && blobUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(blobUrl);
+        }
+      } catch (error) {
+        // Ignore errors when revoking
+        logger.debug('Error revoking blob URL:', error);
+      }
 
       return state;
     } catch (error) {

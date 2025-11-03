@@ -41,6 +41,15 @@ export class DASHDownloader {
    */
   async download(mpdUrl: string): Promise<DASHDownloadResult> {
     try {
+      // Check if this is a YouTube URL - YouTube doesn't use standard MPD files
+      const urlObj = new URL(mpdUrl);
+      if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+        throw new DownloadError(
+          'YouTube URLs require special handling. YouTube uses adaptive formats, not standard MPD manifests. ' +
+          'Please use the extension popup on the YouTube video page to download videos.'
+        );
+      }
+      
       // Parse MPD manifest
       this.onProgress?.('parsing', undefined);
       logger.info(`Fetching DASH manifest from ${mpdUrl}`);

@@ -12,6 +12,9 @@ export interface VideoMetadata {
   quality?: string;
   width?: number;
   height?: number;
+  resolution?: string; // e.g., "1920x1080", "1080p"
+  pageUrl?: string; // URL of the page where video was detected
+  thumbnail?: string; // Thumbnail/preview image URL
 }
 
 export interface DownloadProgress {

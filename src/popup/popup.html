@@ -12,8 +12,8 @@
     }
 
     body {
-      width: 400px;
-      min-height: 300px;
+      width: 500px;
+      max-height: 700px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #f5f5f5;
     }
@@ -30,8 +30,63 @@
       font-weight: 500;
     }
 
-    .content {
+    .tabs {
+      display: flex;
+      background: white;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      cursor: pointer;
+      border: none;
+      background: white;
+      font-size: 14px;
+      color: #666;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      background: #f5f5f5;
+    }
+
+    .tab.active {
+      color: #4285f4;
+      border-bottom: 2px solid #4285f4;
+      font-weight: 500;
+    }
+
+    .tab-content {
+      display: none;
+      padding: 0;
+      max-height: 500px;
+      overflow: hidden;
+    }
+
+    .tab-content.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tab-content .pagination-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      max-height: 500px;
+    }
+
+    .tab-content .pagination-content {
+      flex: 1;
+      overflow-y: auto;
       padding: 16px;
+    }
+
+    #detectedTab {
+      padding: 16px;
+      max-height: 500px;
+      overflow-y: auto;
     }
 
     .input-section {
@@ -68,26 +123,56 @@
       cursor: not-allowed;
     }
 
-    .downloads-list {
-      margin-top: 16px;
-    }
-
-    .download-item {
+    .video-item, .download-item, .error-item {
       background: white;
       border: 1px solid #ddd;
       border-radius: 4px;
       padding: 12px;
       margin-bottom: 8px;
+      display: flex;
+      gap: 12px;
     }
 
-    .download-item-header {
+    .video-item-preview {
+      flex-shrink: 0;
+      width: 160px;
+      height: 90px;
+      border-radius: 4px;
+      overflow: hidden;
+      background: #f0f0f0;
+      position: relative;
+    }
+
+    .video-item-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .video-item-preview .no-thumbnail {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      font-size: 24px;
+    }
+
+    .video-item-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .video-item-header, .download-item-header, .error-item-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 8px;
     }
 
-    .download-item-title {
+    .video-item-title, .download-item-title, .error-item-title {
       font-size: 14px;
       font-weight: 500;
       color: #333;
@@ -97,7 +182,106 @@
       flex: 1;
     }
 
-    .download-item-status {
+    .video-meta {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .video-resolution {
+      display: inline-block;
+      background: #e3f2fd;
+      color: #1976d2;
+      padding: 2px 8px;
+      border-radius: 12px;
+      margin-right: 8px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .video-format {
+      display: inline-block;
+      background: #f3e5f5;
+      color: #7b1fa2;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .video-btn {
+      padding: 6px 12px;
+      background: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    .video-btn:hover {
+      background: #3367d6;
+    }
+
+    .error-item-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 4px;
+      margin-bottom: 4px;
+    }
+
+    .error-item-datetime {
+      font-size: 11px;
+      color: #999;
+    }
+
+    .error-copy-btn {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+      border-radius: 4px;
+      transition: all 0.2s;
+      line-height: 1;
+    }
+
+    .error-copy-btn:hover {
+      background: #f0f0f0;
+      color: #4285f4;
+    }
+
+    .error-copy-btn svg {
+      display: block;
+    }
+
+    .error-item-message {
+      font-size: 12px;
+      color: #d32f2f;
+      margin-top: 4px;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+
+    .error-item-url {
+      font-size: 12px;
+      color: #4285f4;
+      text-decoration: underline;
+      cursor: pointer;
+      margin-top: 4px;
+      word-break: break-all;
+    }
+
+    .error-item-url:hover {
+      color: #3367d6;
+    }
+
+    .download-item-status, .error-item-status {
       font-size: 12px;
       padding: 4px 8px;
       border-radius: 12px;
@@ -107,6 +291,7 @@
     .status-detecting { background: #e3f2fd; color: #1976d2; }
     .status-downloading { background: #fff3e0; color: #f57c00; }
     .status-merging { background: #f3e5f5; color: #7b1fa2; }
+    .status-saving { background: #e8f5e9; color: #388e3c; }
     .status-uploading { background: #e8f5e9; color: #388e3c; }
     .status-completed { background: #e8f5e9; color: #388e3c; }
     .status-failed { background: #ffebee; color: #d32f2f; }
@@ -140,10 +325,97 @@
       color: #4285f4;
       text-decoration: none;
       font-size: 14px;
+      padding: 8px;
     }
 
     .settings-link:hover {
       text-decoration: underline;
+    }
+
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: white;
+      border-top: 1px solid #ddd;
+    }
+
+    .pagination-button {
+      padding: 6px 12px;
+      background: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .pagination-button:hover:not(:disabled) {
+      background: #3367d6;
+    }
+
+    .pagination-button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .pagination-info {
+      font-size: 12px;
+      color: #666;
+      min-width: 120px;
+      text-align: center;
+    }
+
+    .pagination-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .pagination-content {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .errors-header {
+      padding: 12px 16px;
+      background: white;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .clear-errors-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .clear-errors-btn:hover {
+      background: #d32f2f;
+    }
+
+    .clear-errors-btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .clear-errors-btn svg {
+      width: 14px;
+      height: 14px;
+      display: block;
     }
   </style>
 </head>
@@ -152,25 +424,61 @@
     <h1>Media Bridge</h1>
   </div>
   
-  <div class="content">
+  <div class="tabs">
+    <button class="tab active" data-tab="detected">Detected Videos</button>
+    <button class="tab" data-tab="downloads">Downloads</button>
+    <button class="tab" data-tab="errors">Errors</button>
+  </div>
+
+  <!-- Detected Videos Tab -->
+  <div id="detectedTab" class="tab-content active">
     <div class="input-section">
       <input 
         type="text" 
         id="urlInput" 
         class="url-input" 
-        placeholder="Paste video URL (HLS/DASH/direct)"
+        placeholder="Or paste video URL manually"
       />
       <button id="downloadBtn" class="download-btn">Download</button>
     </div>
-
-    <div id="downloadsList" class="downloads-list">
-      <div class="empty-state">No downloads yet</div>
-    </div>
-
-    <a href="#" id="settingsLink" class="settings-link">Settings</a>
+    <div id="detectedVideosList"></div>
   </div>
+
+  <!-- Downloads Tab -->
+  <div id="downloadsTab" class="tab-content">
+    <div class="pagination-container">
+      <div id="downloadsList" class="pagination-content"></div>
+      <div id="downloadsPagination" class="pagination" style="display: none;">
+        <button class="pagination-button" id="downloadsPrevBtn">Previous</button>
+        <span class="pagination-info" id="downloadsPageInfo"></span>
+        <button class="pagination-button" id="downloadsNextBtn">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Errors Tab -->
+  <div id="errorsTab" class="tab-content">
+    <div class="pagination-container">
+      <div class="errors-header">
+        <button id="clearErrorsBtn" class="clear-errors-btn" title="Clear all errors">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          Clear Errors
+        </button>
+      </div>
+      <div id="errorsList" class="pagination-content"></div>
+      <div id="errorsPagination" class="pagination" style="display: none;">
+        <button class="pagination-button" id="errorsPrevBtn">Previous</button>
+        <span class="pagination-info" id="errorsPageInfo"></span>
+        <button class="pagination-button" id="errorsNextBtn">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <a href="#" id="settingsLink" class="settings-link">Settings</a>
 
   <script src="popup.js"></script>
 </body>
 </html>
-

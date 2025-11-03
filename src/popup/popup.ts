@@ -1,23 +1,60 @@
 /**
- * Popup UI logic
+ * Popup UI logic with tabs for Detected Videos, Downloads, and Errors
  */
 
-import { DownloadState } from '../lib/types';
+import { DownloadState, VideoMetadata } from '../lib/types';
 import { DownloadStateManager } from '../lib/storage/download-state';
 import { MessageType } from '../shared/messages';
 
 // DOM elements
 const urlInput = document.getElementById('urlInput') as HTMLInputElement;
 const downloadBtn = document.getElementById('downloadBtn') as HTMLButtonElement;
-const downloadsList = document.getElementById('downloadsList') as HTMLDivElement;
 const settingsLink = document.getElementById('settingsLink') as HTMLAnchorElement;
+
+// Tab elements
+const tabs = document.querySelectorAll('.tab');
+const tabContents = {
+  detected: document.getElementById('detectedTab') as HTMLDivElement,
+  downloads: document.getElementById('downloadsTab') as HTMLDivElement,
+  errors: document.getElementById('errorsTab') as HTMLDivElement,
+};
+
+// List containers
+const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
+const downloadsList = document.getElementById('downloadsList') as HTMLDivElement;
+const errorsList = document.getElementById('errorsList') as HTMLDivElement;
+
+// Pagination elements
+const downloadsPagination = document.getElementById('downloadsPagination') as HTMLDivElement;
+const downloadsPrevBtn = document.getElementById('downloadsPrevBtn') as HTMLButtonElement;
+const downloadsNextBtn = document.getElementById('downloadsNextBtn') as HTMLButtonElement;
+const downloadsPageInfo = document.getElementById('downloadsPageInfo') as HTMLSpanElement;
+
+const errorsPagination = document.getElementById('errorsPagination') as HTMLDivElement;
+const errorsPrevBtn = document.getElementById('errorsPrevBtn') as HTMLButtonElement;
+const errorsNextBtn = document.getElementById('errorsNextBtn') as HTMLButtonElement;
+const errorsPageInfo = document.getElementById('errorsPageInfo') as HTMLSpanElement;
+const clearErrorsBtn = document.getElementById('clearErrorsBtn') as HTMLButtonElement;
+
+// Detected videos storage
+let detectedVideos: VideoMetadata[] = [];
+
+// Pagination state
+const ITEMS_PER_PAGE = 10;
+let downloadsCurrentPage = 1;
+let errorsCurrentPage = 1;
 
 /**
  * Initialize popup
  */
 async function init() {
-  // Load current downloads
-  await loadDownloads();
+  // Setup tabs
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const tabName = tab.getAttribute('data-tab')!;
+      switchTab(tabName);
+    });
+  });
 
   // Setup event listeners
   downloadBtn.addEventListener('click', handleDownloadClick);
@@ -32,15 +69,455 @@ async function init() {
     chrome.runtime.openOptionsPage();
   });
 
-  // Listen for download updates
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === MessageType.DOWNLOAD_PROGRESS) {
+  // Setup pagination button handlers
+  downloadsPrevBtn.addEventListener('click', () => {
+    if (downloadsCurrentPage > 1) {
+      downloadsCurrentPage--;
       loadDownloads();
     }
   });
 
-  // Refresh downloads every 2 seconds
-  setInterval(loadDownloads, 2000);
+  downloadsNextBtn.addEventListener('click', () => {
+    downloadsCurrentPage++;
+    loadDownloads();
+  });
+
+  errorsPrevBtn.addEventListener('click', () => {
+    if (errorsCurrentPage > 1) {
+      errorsCurrentPage--;
+      loadErrors();
+    }
+  });
+
+  errorsNextBtn.addEventListener('click', () => {
+    errorsCurrentPage++;
+    loadErrors();
+  });
+
+  clearErrorsBtn.addEventListener('click', handleClearErrors);
+
+  // Listen for messages
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === MessageType.DOWNLOAD_PROGRESS) {
+      loadDownloads();
+      loadErrors();
+    }
+    if (message.type === MessageType.VIDEO_DETECTED) {
+      addDetectedVideo(message.payload);
+    }
+  });
+
+  // Load data
+  await loadDetectedVideos();
+  await loadDownloads();
+  await loadErrors();
+
+  // Get detected videos from current tab
+  await requestDetectedVideos();
+
+  // Refresh data periodically
+  setInterval(async () => {
+    await loadDownloads();
+    await loadErrors();
+    await requestDetectedVideos();
+  }, 2000);
+}
+
+/**
+ * Switch between tabs
+ */
+function switchTab(tabName: string) {
+  tabs.forEach(tab => {
+    if (tab.getAttribute('data-tab') === tabName) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  });
+
+  Object.keys(tabContents).forEach(key => {
+    if (key === tabName) {
+      tabContents[key as keyof typeof tabContents].classList.add('active');
+    } else {
+      tabContents[key as keyof typeof tabContents].classList.remove('active');
+    }
+  });
+
+  // Reset pagination when switching tabs
+  if (tabName === 'downloads') {
+    downloadsCurrentPage = 1;
+  } else if (tabName === 'errors') {
+    errorsCurrentPage = 1;
+  }
+}
+
+/**
+ * Request detected videos from current tab
+ */
+async function requestDetectedVideos() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab.id) {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        type: MessageType.GET_DETECTED_VIDEOS,
+      });
+      
+      // Merge received videos with existing ones
+      if (response && response.videos && Array.isArray(response.videos)) {
+        // Clear existing videos from this tab and merge
+        const currentUrl = tab.url || '';
+        detectedVideos = detectedVideos.filter(v => !v.pageUrl || !v.pageUrl.includes(currentUrl));
+        
+        // Add all videos from content script
+        response.videos.forEach((video: VideoMetadata) => {
+          if (!detectedVideos.find(v => v.url === video.url)) {
+            detectedVideos.push(video);
+          }
+        });
+        
+        renderDetectedVideos();
+      }
+    }
+  } catch (error) {
+    // Tab might not have content script, ignore
+    console.debug('Could not get detected videos:', error);
+  }
+}
+
+/**
+ * Add detected video
+ */
+function addDetectedVideo(video: VideoMetadata) {
+  // Check if video already exists
+  if (!detectedVideos.find(v => v.url === video.url)) {
+    detectedVideos.push(video);
+    renderDetectedVideos();
+  }
+}
+
+/**
+ * Load detected videos
+ */
+async function loadDetectedVideos() {
+  // Get from storage or use in-memory
+  renderDetectedVideos();
+}
+
+/**
+ * Render detected videos
+ */
+function renderDetectedVideos() {
+  if (detectedVideos.length === 0) {
+    detectedVideosList.innerHTML = `
+      <div class="empty-state">
+        No videos detected on this page.<br>
+        Use the input above to paste a video URL manually.
+      </div>
+    `;
+    return;
+  }
+
+  detectedVideosList.innerHTML = detectedVideos.map(video => `
+    <div class="video-item">
+      <div class="video-item-preview">
+        ${video.thumbnail ? `
+          <img src="${escapeHtml(video.thumbnail)}" 
+               alt="Video preview" 
+               onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>🎬</div>'"
+               loading="lazy">
+        ` : `
+          <div class="no-thumbnail">🎬</div>
+        `}
+      </div>
+      <div class="video-item-content">
+        <div class="video-item-header">
+          <div class="video-item-title" title="${escapeHtml(video.url)}">
+            ${escapeHtml(video.title || getVideoTitleFromUrl(video.url))}
+          </div>
+        </div>
+        <div class="video-meta">
+          ${video.resolution ? `<span class="video-resolution">${escapeHtml(video.resolution)}</span>` : ''}
+          ${video.width && video.height && !video.resolution ? `<span class="video-resolution">${video.width}x${video.height}</span>` : ''}
+          <span class="video-format">${escapeHtml(video.format.toUpperCase())}</span>
+          ${video.duration ? `<span style="color: #666; margin-left: 4px;">⏱ ${formatDuration(video.duration)}</span>` : ''}
+        </div>
+        ${video.pageUrl ? `
+          <div style="font-size: 11px; color: #999; margin-top: 4px;">
+            From: ${escapeHtml(new URL(video.pageUrl).hostname)}
+          </div>
+        ` : ''}
+        <button class="video-btn" data-url="${escapeHtml(video.url)}">
+          Download
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  // Add click handlers for download buttons
+  detectedVideosList.querySelectorAll('.video-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const url = (e.target as HTMLButtonElement).getAttribute('data-url')!;
+      startDownload(url);
+    });
+  });
+}
+
+/**
+ * Load and display downloads
+ */
+async function loadDownloads() {
+  const downloads = await DownloadStateManager.getAllDownloads();
+  const activeDownloads = downloads.filter(d => d.progress.stage !== 'completed' && d.progress.stage !== 'failed');
+  
+  // Sort by creation date (newest first)
+  activeDownloads.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  
+  if (activeDownloads.length === 0) {
+    downloadsList.innerHTML = '<div class="empty-state">No active downloads</div>';
+    downloadsPagination.style.display = 'none';
+    return;
+  }
+
+  // Calculate pagination
+  const totalPages = Math.ceil(activeDownloads.length / ITEMS_PER_PAGE);
+  if (downloadsCurrentPage > totalPages) {
+    downloadsCurrentPage = totalPages || 1;
+  }
+  
+  const startIndex = (downloadsCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedDownloads = activeDownloads.slice(startIndex, endIndex);
+
+  // Render downloads
+  if (paginatedDownloads.length === 0) {
+    downloadsList.innerHTML = '<div class="empty-state">No downloads on this page</div>';
+  } else {
+    downloadsList.innerHTML = paginatedDownloads.map(download => `
+      <div class="download-item">
+        <div class="download-item-header">
+          <div class="download-item-title" title="${escapeHtml(download.url)}">
+            ${escapeHtml(getDownloadTitle(download))}
+          </div>
+          <span class="download-item-status status-${download.progress.stage}">
+            ${getStatusText(download.progress.stage)}
+          </span>
+        </div>
+        ${download.progress.percentage !== undefined ? `
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: ${download.progress.percentage}%"></div>
+          </div>
+        ` : ''}
+        ${download.progress.message ? `
+          <div style="font-size: 12px; color: #666; margin-top: 4px;">
+            ${escapeHtml(download.progress.message)}
+          </div>
+        ` : ''}
+      </div>
+    `).join('');
+  }
+
+  // Update pagination controls
+  if (totalPages > 1) {
+    downloadsPagination.style.display = 'flex';
+    downloadsPageInfo.textContent = `Page ${downloadsCurrentPage} of ${totalPages} (${activeDownloads.length} total)`;
+    downloadsPrevBtn.disabled = downloadsCurrentPage === 1;
+    downloadsNextBtn.disabled = downloadsCurrentPage === totalPages;
+  } else {
+    downloadsPagination.style.display = 'none';
+  }
+}
+
+/**
+ * Handle clear errors button click
+ */
+async function handleClearErrors() {
+  const downloads = await DownloadStateManager.getAllDownloads();
+  const failedDownloads = downloads.filter(d => d.progress.stage === 'failed');
+  
+  if (failedDownloads.length === 0) {
+    return; // No errors to clear
+  }
+
+  // Show confirmation dialog
+  const confirmed = confirm(
+    `Are you sure you want to clear ${failedDownloads.length} error${failedDownloads.length > 1 ? 's' : ''}?\n\nThis action cannot be undone.`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  // Clear all failed downloads
+  clearErrorsBtn.disabled = true;
+  clearErrorsBtn.textContent = 'Clearing...';
+  
+  try {
+    // Remove all failed downloads
+    for (const download of failedDownloads) {
+      await DownloadStateManager.removeDownload(download.id);
+    }
+    
+    // Reload errors list
+    errorsCurrentPage = 1;
+    await loadErrors();
+  } catch (error) {
+    console.error('Failed to clear errors:', error);
+    alert('Failed to clear errors. Please try again.');
+  } finally {
+    clearErrorsBtn.disabled = false;
+    clearErrorsBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+      Clear Errors
+    `;
+  }
+}
+
+/**
+ * Load and display errors
+ */
+async function loadErrors() {
+  const downloads = await DownloadStateManager.getAllDownloads();
+  const failedDownloads = downloads.filter(d => d.progress.stage === 'failed');
+  
+  // Sort by updated date (newest first), fallback to createdAt
+  failedDownloads.sort((a, b) => {
+    const aTime = a.updatedAt || a.createdAt || 0;
+    const bTime = b.updatedAt || b.createdAt || 0;
+    return bTime - aTime; // Descending order
+  });
+  
+  // Enable/disable clear button based on errors count
+  clearErrorsBtn.disabled = failedDownloads.length === 0;
+  
+  if (failedDownloads.length === 0) {
+    errorsList.innerHTML = '<div class="empty-state">No errors</div>';
+    errorsPagination.style.display = 'none';
+    return;
+  }
+
+  // Calculate pagination
+  const totalPages = Math.ceil(failedDownloads.length / ITEMS_PER_PAGE);
+  if (errorsCurrentPage > totalPages) {
+    errorsCurrentPage = totalPages || 1;
+  }
+  
+  const startIndex = (errorsCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedErrors = failedDownloads.slice(startIndex, endIndex);
+
+  // Render errors
+  if (paginatedErrors.length === 0) {
+    errorsList.innerHTML = '<div class="empty-state">No errors on this page</div>';
+  } else {
+    errorsList.innerHTML = paginatedErrors.map(download => {
+      const errorText = download.progress.error || 'Unknown error';
+      const timestamp = download.updatedAt || download.createdAt || Date.now();
+      const dateTime = formatDateTime(timestamp);
+      
+      return `
+      <div class="error-item">
+        <div class="error-item-header">
+          <div class="error-item-title" title="${escapeHtml(download.url)}">
+            ${escapeHtml(getDownloadTitle(download))}
+          </div>
+          <span class="error-item-status status-failed">Failed</span>
+        </div>
+        <div class="error-item-meta">
+          <span class="error-item-datetime">${dateTime}</span>
+          <button class="error-copy-btn" 
+                  data-error="${escapeHtml(errorText)}" 
+                  data-url="${escapeHtml(download.url)}"
+                  data-title="${escapeHtml(getDownloadTitle(download))}"
+                  data-timestamp="${timestamp}"
+                  title="Copy error traceback">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+        ${errorText ? `
+          <div class="error-item-message">
+            ${escapeHtml(errorText)}
+          </div>
+        ` : ''}
+        <div class="error-item-url" data-url="${escapeHtml(download.url)}">
+          ${escapeHtml(download.url)}
+        </div>
+      </div>
+    `;
+    }).join('');
+
+    // Add click handlers to open failed video URLs
+    errorsList.querySelectorAll('.error-item-url').forEach(link => {
+      link.addEventListener('click', async () => {
+        const url = (link as HTMLElement).getAttribute('data-url')!;
+        await chrome.tabs.create({ url });
+      });
+    });
+
+    // Add click handlers for copy buttons
+    errorsList.querySelectorAll('.error-copy-btn').forEach(btnElement => {
+      const btn = btnElement as HTMLButtonElement;
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const errorText = btn.getAttribute('data-error') || '';
+        const url = btn.getAttribute('data-url') || '';
+        const title = btn.getAttribute('data-title') || '';
+        const timestampStr = btn.getAttribute('data-timestamp') || '';
+        const timestamp = timestampStr ? parseInt(timestampStr) : Date.now();
+        
+        // Build full error traceback
+        const fullError = `Error: ${errorText}\n\nURL: ${url}\nTimestamp: ${formatDateTime(timestamp)}\nTitle: ${title}`;
+        
+        try {
+          await navigator.clipboard.writeText(fullError);
+          // Visual feedback
+          const originalHTML = btn.innerHTML;
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+          btn.style.color = '#4caf50';
+          setTimeout(() => {
+            btn.innerHTML = originalHTML;
+            btn.style.color = '';
+          }, 2000);
+        } catch (err) {
+          // Fallback for older browsers
+          const textArea = document.createElement('textarea');
+          textArea.value = fullError;
+          textArea.style.position = 'fixed';
+          textArea.style.opacity = '0';
+          document.body.appendChild(textArea);
+          textArea.select();
+          try {
+            document.execCommand('copy');
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+            btn.style.color = '#4caf50';
+            setTimeout(() => {
+              btn.innerHTML = originalHTML;
+              btn.style.color = '';
+            }, 2000);
+          } catch (fallbackErr) {
+            console.error('Failed to copy:', fallbackErr);
+          }
+          document.body.removeChild(textArea);
+        }
+      });
+    });
+  }
+
+  // Update pagination controls
+  if (totalPages > 1) {
+    errorsPagination.style.display = 'flex';
+    errorsPageInfo.textContent = `Page ${errorsCurrentPage} of ${totalPages} (${failedDownloads.length} total)`;
+    errorsPrevBtn.disabled = errorsCurrentPage === 1;
+    errorsNextBtn.disabled = errorsCurrentPage === totalPages;
+  } else {
+    errorsPagination.style.display = 'none';
+  }
 }
 
 /**
@@ -54,7 +531,6 @@ async function handleDownloadClick() {
     return;
   }
 
-  // Validate URL
   try {
     new URL(url);
   } catch {
@@ -62,6 +538,14 @@ async function handleDownloadClick() {
     return;
   }
 
+  await startDownload(url);
+  urlInput.value = '';
+}
+
+/**
+ * Start download
+ */
+async function startDownload(url: string) {
   downloadBtn.disabled = true;
   downloadBtn.textContent = 'Starting...';
 
@@ -74,7 +558,8 @@ async function handleDownloadClick() {
     });
 
     if (response && response.success) {
-      urlInput.value = '';
+      // Switch to downloads tab
+      switchTab('downloads');
       await loadDownloads();
     } else {
       alert(response?.error || 'Download failed');
@@ -86,49 +571,6 @@ async function handleDownloadClick() {
     downloadBtn.disabled = false;
     downloadBtn.textContent = 'Download';
   }
-}
-
-/**
- * Load and display downloads
- */
-async function loadDownloads() {
-  const downloads = await DownloadStateManager.getAllDownloads();
-  
-  if (downloads.length === 0) {
-    downloadsList.innerHTML = '<div class="empty-state">No downloads yet</div>';
-    return;
-  }
-
-  // Sort by creation date (newest first)
-  downloads.sort((a, b) => b.createdAt - a.createdAt);
-
-  downloadsList.innerHTML = downloads.map(download => `
-    <div class="download-item">
-      <div class="download-item-header">
-        <div class="download-item-title" title="${escapeHtml(download.url)}">
-          ${escapeHtml(getDownloadTitle(download))}
-        </div>
-        <span class="download-item-status status-${download.progress.stage}">
-          ${getStatusText(download.progress.stage)}
-        </span>
-      </div>
-      ${download.progress.percentage !== undefined ? `
-        <div class="progress-bar">
-          <div class="progress-fill" style="width: ${download.progress.percentage}%"></div>
-        </div>
-      ` : ''}
-      ${download.progress.message ? `
-        <div style="font-size: 12px; color: #666; margin-top: 4px;">
-          ${escapeHtml(download.progress.message)}
-        </div>
-      ` : ''}
-      ${download.progress.error ? `
-        <div style="font-size: 12px; color: #d32f2f; margin-top: 4px;">
-          Error: ${escapeHtml(download.progress.error)}
-        </div>
-      ` : ''}
-    </div>
-  `).join('');
 }
 
 /**
@@ -150,6 +592,20 @@ function getDownloadTitle(download: DownloadState): string {
 }
 
 /**
+ * Get video title from URL
+ */
+function getVideoTitleFromUrl(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const filename = pathname.split('/').pop();
+    return filename || url.substring(0, 50) + '...';
+  } catch {
+    return url.substring(0, 50) + '...';
+  }
+}
+
+/**
  * Get status text
  */
 function getStatusText(stage: string): string {
@@ -157,13 +613,69 @@ function getStatusText(stage: string): string {
     detecting: 'Detecting',
     downloading: 'Downloading',
     merging: 'Merging',
-    uploading: 'Uploading',
     saving: 'Saving',
+    uploading: 'Uploading',
     completed: 'Completed',
     failed: 'Failed',
   };
   
   return statusMap[stage] || stage;
+}
+
+/**
+ * Format duration in seconds to readable format
+ */
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Format timestamp to readable datetime
+ */
+function formatDateTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  // Show relative time for recent errors
+  if (diffMins < 1) {
+    return 'Just now';
+  } else if (diffMins < 60) {
+    return `${diffMins}m ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  } else if (diffDays < 7) {
+    return `${diffDays}d ago`;
+  }
+
+  // Show full date for older errors
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) {
+    return `Today ${hours}:${minutes}`;
+  }
+  
+  const isThisYear = year === now.getFullYear();
+  if (isThisYear) {
+    return `${month}/${day} ${hours}:${minutes}`;
+  }
+  
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
 /**
@@ -181,4 +693,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-

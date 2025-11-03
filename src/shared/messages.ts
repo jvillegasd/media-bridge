@@ -16,6 +16,8 @@ export enum MessageType {
   
   // Video detection
   VIDEO_DETECTED = 'VIDEO_DETECTED',
+  GET_DETECTED_VIDEOS = 'GET_DETECTED_VIDEOS',
+  CLEAR_DETECTED_VIDEOS = 'CLEAR_DETECTED_VIDEOS',
   START_DOWNLOAD = 'START_DOWNLOAD',
   
   // Cloud upload
