@@ -32,7 +32,7 @@ export class DownloadManager {
   /**
    * Download video from URL
    */
-  async download(url: string, filename?: string): Promise<DownloadState> {
+  async download(url: string, filename?: string, metadata?: VideoMetadata): Promise<DownloadState> {
     const downloadId = this.generateDownloadId(url);
     
     try {
@@ -54,51 +54,75 @@ export class DownloadManager {
 
       // Detect format
       logger.info(`Detecting format for ${url}`);
-      let format = await FormatDetector.detectWithInspection(url);
+      // detectWithInspection always returns a valid VideoFormat (never 'unknown')
+      // It defaults to 'direct' if format can't be determined
+      let format: VideoFormat = await FormatDetector.detectWithInspection(url);
       
-      // If format is unknown, try additional detection methods
-      if (format === 'unknown') {
-        logger.warn(`Format detection returned unknown for ${url}, attempting fallback methods`);
-        
-        // Try URL-based detection as fallback
-        format = FormatDetector.detectFromUrl(url);
-        
-        // If still unknown, log warning and attempt as direct video
-        if (format === 'unknown') {
-          logger.warn(`Could not determine format for ${url}, attempting as direct video download`);
-          format = 'direct';
-        }
+      // If we got 'unknown' from URL detection (shouldn't happen with detectWithInspection, but handle it)
+      // Try URL-based detection as additional fallback
+      const urlBasedFormat = FormatDetector.detectFromUrl(url);
+      if (urlBasedFormat !== 'unknown') {
+        format = urlBasedFormat;
       }
       
       logger.info(`Detected format: ${format} for URL: ${url}`);
       
-      state.metadata = {
-        url,
-        format,
-      };
+      // Use provided metadata if available, otherwise create minimal metadata
+      if (metadata) {
+        // Merge provided metadata with detected format
+        state.metadata = {
+          ...metadata,
+          format,
+        };
+      } else {
+        // Create minimal metadata from URL
+        state.metadata = {
+          url,
+          format,
+        };
+      }
       state.progress.stage = 'downloading';
       state.progress.message = `Detected format: ${format}`;
       
       await DownloadStateManager.saveDownload(state);
       this.notifyProgress(state);
 
+      // Check if URL is a page URL - if so, try to extract actual video URL from metadata
+      const isPageUrl = this.isPageUrl(url);
+      let actualVideoUrl = url;
+      
+      if (isPageUrl && format === 'direct' && metadata) {
+        // Try to find actual video URL from metadata or video element
+        // For now, log a warning - in the future we could request content script to extract it
+        logger.warn(`URL appears to be a page URL: ${url}`);
+        
+        // If metadata has a real video URL stored separately, use it
+        // This would require content script to extract and store it
+        if (metadata.url && !this.isPageUrl(metadata.url) && metadata.url !== url) {
+          actualVideoUrl = metadata.url;
+          logger.info(`Using actual video URL from metadata: ${actualVideoUrl}`);
+        } else {
+          throw new Error('Cannot download page URLs directly. The video URL appears to be a page URL, not a direct video file. Please ensure the actual video file URL is detected.');
+        }
+      }
+
       // Download based on format
       let finalBlob: Blob;
 
       switch (format) {
         case 'hls':
-          finalBlob = await this.downloadHLS(url, state.id);
+          finalBlob = await this.downloadHLS(actualVideoUrl, state.id);
           break;
         case 'dash':
-          finalBlob = await this.downloadDASH(url, state.id);
+          finalBlob = await this.downloadDASH(actualVideoUrl, state.id);
           break;
         case 'direct':
-          finalBlob = await this.downloadDirect(url, state.id);
+          finalBlob = await this.downloadDirect(actualVideoUrl, state.id);
           break;
         default:
           // Last resort: try as direct video
           logger.warn(`Unknown format ${format}, attempting as direct video download`);
-          finalBlob = await this.downloadDirect(url, state.id);
+          finalBlob = await this.downloadDirect(actualVideoUrl, state.id);
       }
 
       // Save file locally (using Chrome downloads API)
@@ -373,6 +397,51 @@ export class DownloadManager {
       return `${baseName}.${extension}`;
     } catch {
       return `video_${Date.now()}.mp4`;
+    }
+  }
+
+  /**
+   * Check if URL is a page URL (like view_video.php) vs actual video file
+   */
+  private isPageUrl(url: string): boolean {
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname.toLowerCase();
+      const hostname = urlObj.hostname.toLowerCase();
+      
+      // Check for common page URL patterns
+      const pagePatterns = [
+        /view_video/i,
+        /watch/i,
+        /video\.php/i,
+        /embed/i,
+        /\.html$/i,
+        /\.php$/i,
+      ];
+      
+      // Check pathname
+      if (pagePatterns.some(pattern => pattern.test(pathname))) {
+        return true;
+      }
+      
+      // Check for hash fragments that indicate page anchors (not video files)
+      if (urlObj.hash && urlObj.hash.includes('video-')) {
+        return true;
+      }
+      
+      // Check if it's a known video site page URL
+      if (hostname.includes('pornhub.com') && pathname.includes('/view_video')) {
+        return true;
+      }
+      
+      if ((hostname.includes('youtube.com') || hostname.includes('youtu.be')) && pathname.includes('/watch')) {
+        return true;
+      }
+      
+      return false;
+    } catch {
+      // If URL parsing fails, assume it's not a page URL
+      return false;
     }
   }
 

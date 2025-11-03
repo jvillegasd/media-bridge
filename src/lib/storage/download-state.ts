@@ -38,6 +38,15 @@ export class DownloadStateManager {
   }
 
   /**
+   * Get download state by videoId
+   * Matches downloads by the unique video ID
+   */
+  static async getDownloadByVideoId(videoId: string): Promise<DownloadState | null> {
+    const downloads = await this.getAllDownloads();
+    return downloads.find(d => d.metadata?.videoId === videoId) ?? null;
+  }
+
+  /**
    * Save or update download state
    */
   static async saveDownload(state: DownloadState): Promise<void> {

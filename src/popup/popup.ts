@@ -2,15 +2,19 @@
  * Popup UI logic with tabs for Detected Videos, Downloads, and Errors
  */
 
-import { DownloadState, VideoMetadata } from '../lib/types';
+import { DownloadState, VideoMetadata, VideoFormat } from '../lib/types';
 import { DownloadStateManager } from '../lib/storage/download-state';
 import { MessageType } from '../shared/messages';
 import { normalizeUrl } from '../lib/utils/url-utils';
+import { v4 as uuidv4 } from 'uuid';
 
 // DOM elements
-const urlInput = document.getElementById('urlInput') as HTMLInputElement;
-const downloadBtn = document.getElementById('downloadBtn') as HTMLButtonElement;
-const settingsLink = document.getElementById('settingsLink') as HTMLAnchorElement;
+let noVideoBtn: HTMLButtonElement | null = null;
+let forceDetectionBtn: HTMLButtonElement | null = null;
+let closeNoVideoNoticeBtn: HTMLButtonElement | null = null;
+let noVideoNotice: HTMLDivElement | null = null;
+let settingsBtn: HTMLButtonElement | null = null;
+let downloadsBtn: HTMLButtonElement | null = null;
 
 // Tab elements
 const tabs = document.querySelectorAll('.tab');
@@ -50,18 +54,38 @@ async function init() {
     });
   });
 
-  // Setup event listeners
-  downloadBtn.addEventListener('click', handleDownloadClick);
-  urlInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      handleDownloadClick();
-    }
-  });
+  // Initialize DOM elements
+  noVideoBtn = document.getElementById('noVideoBtn') as HTMLButtonElement;
+  forceDetectionBtn = document.getElementById('forceDetectionBtn') as HTMLButtonElement;
+  closeNoVideoNoticeBtn = document.getElementById('closeNoVideoNotice') as HTMLButtonElement;
+  noVideoNotice = document.getElementById('noVideoNotice') as HTMLDivElement;
+  settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
+  downloadsBtn = document.getElementById('downloadsBtn') as HTMLButtonElement;
 
-  settingsLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    chrome.runtime.openOptionsPage();
-  });
+  // Ensure notice is hidden initially
+  if (noVideoNotice) {
+    noVideoNotice.classList.remove('show');
+    noVideoNotice.classList.remove('visible');
+  }
+
+  // Setup event listeners
+  if (noVideoBtn) {
+    noVideoBtn.addEventListener('click', toggleNoVideoNotice);
+  }
+  if (closeNoVideoNoticeBtn) {
+    closeNoVideoNoticeBtn.addEventListener('click', hideNoVideoNotice);
+  }
+  if (forceDetectionBtn) {
+    forceDetectionBtn.addEventListener('click', handleForceDetection);
+  }
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      chrome.runtime.openOptionsPage();
+    });
+  }
+  if (downloadsBtn) {
+    downloadsBtn.addEventListener('click', handleOpenDownloads);
+  }
 
   // Setup pagination button handlers
   errorsPrevBtn.addEventListener('click', () => {
@@ -80,23 +104,35 @@ async function init() {
 
   // Listen for messages
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === MessageType.DOWNLOAD_PROGRESS) {
-      loadDownloadStates();
-      renderDetectedVideos();
-      loadErrors();
-    }
-    if (message.type === MessageType.VIDEO_DETECTED) {
-      addDetectedVideo(message.payload);
-    }
-    if (message.type === MessageType.DOWNLOAD_FAILED) {
-      loadDownloadStates();
-      renderDetectedVideos();
-      loadErrors();
-      // Show error notification if it's a user-initiated download
-      if (message.payload && message.payload.error) {
-        // Error will be shown in the error tab, but we can also show a brief notification
-        console.warn('Download failed:', message.payload.error);
+    // Check if extension context is still valid
+    if (chrome.runtime.lastError && chrome.runtime.lastError.message) {
+      if (chrome.runtime.lastError.message.includes('Extension context invalidated')) {
+        console.debug('Extension context invalidated, reloading popup may be needed');
+        return;
       }
+    }
+    
+    try {
+      if (message.type === MessageType.DOWNLOAD_PROGRESS) {
+        loadDownloadStates();
+        renderDetectedVideos();
+        loadErrors();
+      }
+      if (message.type === MessageType.VIDEO_DETECTED) {
+        addDetectedVideo(message.payload);
+      }
+      if (message.type === MessageType.DOWNLOAD_FAILED) {
+        loadDownloadStates();
+        renderDetectedVideos();
+        loadErrors();
+        // Show error notification if it's a user-initiated download
+        if (message.payload && message.payload.error) {
+          // Error will be shown in the error tab, but we can also show a brief notification
+          console.warn('Download failed:', message.payload.error);
+        }
+      }
+    } catch (error) {
+      console.debug('Error handling message:', error);
     }
   });
 
@@ -143,16 +179,106 @@ function switchTab(tabName: string) {
   }
 }
 
+function showNoVideoNotice() {
+  if (!noVideoNotice) return;
+  noVideoNotice.classList.add('show');
+  noVideoNotice.classList.remove('visible'); // Remove old class if exists
+  // Force inline style as backup
+  noVideoNotice.style.display = 'block';
+}
+
+function hideNoVideoNotice() {
+  if (!noVideoNotice) return;
+  noVideoNotice.classList.remove('show');
+  noVideoNotice.classList.remove('visible'); // Remove old class if exists
+  // Force inline style as backup
+  noVideoNotice.style.display = 'none';
+}
+
+function toggleNoVideoNotice() {
+  // Only show the notice, don't toggle - X button is used to close
+  showNoVideoNotice();
+}
+
+async function handleForceDetection() {
+  if (!forceDetectionBtn) return;
+  const originalText = forceDetectionBtn.textContent;
+  forceDetectionBtn.disabled = true;
+  forceDetectionBtn.textContent = 'Refreshing...';
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+
+    if (!activeTab || activeTab.id === undefined) {
+      throw new Error('Active tab not found');
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      chrome.tabs.reload(activeTab.id!, { bypassCache: true }, () => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    hideNoVideoNotice();
+    window.close();
+  } catch (error) {
+    console.error('Failed to refresh tab for force detection:', error);
+    alert('Failed to refresh the page. Please try again.');
+  } finally {
+    forceDetectionBtn.disabled = false;
+    forceDetectionBtn.textContent = originalText || 'Force detection';
+  }
+}
+
+async function handleOpenDownloads() {
+  if (!downloadsBtn) return;
+  
+  try {
+    // Open the default downloads folder
+    await chrome.downloads.showDefaultFolder();
+  } catch (error) {
+    console.error('Failed to open downloads folder:', error);
+    alert('Failed to open downloads folder. Please check your browser settings.');
+  }
+}
+
 /**
  * Request detected videos from current tab
  */
 async function requestDetectedVideos() {
   try {
+    // Check if extension context is still valid
+    if (chrome.runtime.lastError && chrome.runtime.lastError.message) {
+      if (chrome.runtime.lastError.message.includes('Extension context invalidated')) {
+        console.debug('Extension context invalidated, cannot request videos');
+        return;
+      }
+    }
+    
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab.id) {
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: MessageType.GET_DETECTED_VIDEOS,
-      });
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {
+          type: MessageType.GET_DETECTED_VIDEOS,
+        });
+      } catch (error: any) {
+        // Handle extension context invalidated or content script not available
+        if (error?.message?.includes('Extension context invalidated') ||
+            chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
+          console.debug('Extension context invalidated, cannot communicate with content script');
+          return;
+        }
+        // Content script might not be available, ignore
+        console.debug('Could not send message to content script:', error);
+        return;
+      }
       
       // Merge received videos with existing ones
       if (response && response.videos && Array.isArray(response.videos)) {
@@ -160,10 +286,35 @@ async function requestDetectedVideos() {
         const currentUrl = tab.url || '';
         detectedVideos = detectedVideos.filter(v => !v.pageUrl || !v.pageUrl.includes(currentUrl));
         
-        // Add all videos from content script
+        // Add all videos from content script with improved deduplication
         response.videos.forEach((video: VideoMetadata) => {
-          if (!detectedVideos.find(v => v.url === video.url)) {
+          // Use normalized URLs for comparison to prevent duplicates
+          const normalizedVideoUrl = normalizeUrl(video.url);
+          const existingIndex = detectedVideos.findIndex(v => normalizeUrl(v.url) === normalizedVideoUrl);
+          
+          if (existingIndex < 0) {
             detectedVideos.push(video);
+          } else {
+            // Update existing entry with latest metadata if needed
+            const existing = detectedVideos[existingIndex];
+            if (video.title && !existing.title) {
+              existing.title = video.title;
+            }
+            if (video.thumbnail && !existing.thumbnail) {
+              existing.thumbnail = video.thumbnail;
+            }
+            if (video.resolution && !existing.resolution) {
+              existing.resolution = video.resolution;
+            }
+            if (video.width && !existing.width) {
+              existing.width = video.width;
+            }
+            if (video.height && !existing.height) {
+              existing.height = video.height;
+            }
+            if (video.duration && !existing.duration) {
+              existing.duration = video.duration;
+            }
           }
         });
         
@@ -203,49 +354,51 @@ async function loadDownloadStates() {
 }
 
 /**
- * Get download state for a video URL
- * Only matches if the URLs are actually the same video (exact match after normalization)
- * Additional validation to prevent false matches between page URLs and actual video files
+ * Get or generate a unique video ID
+ * If video doesn't have an ID, generate one
  */
-function getDownloadStateForVideo(url: string): DownloadState | undefined {
-  return downloadStates.find(d => {
-    // Use the normalizeUrl utility for consistent comparison
-    const normalizedVideoUrl = normalizeUrl(url);
-    const normalizedDownloadUrl = normalizeUrl(d.url);
-    
-    // Only match if URLs are exactly the same after normalization
-    if (normalizedVideoUrl !== normalizedDownloadUrl) {
-      return false;
-    }
-    
-    // Additional validation: Check if one is a page URL pattern and the other is a direct video file
-    // This prevents false matches when multiple videos on the same page all use the page URL as identifier
-    const videoUrlIsPagePattern = /(view_video|watch|video|embed|\.php|\.html)(\?|#|$)/i.test(normalizedVideoUrl);
-    const downloadUrlIsVideoFile = /\.(mp4|webm|m3u8|mpd|flv|mov|avi|mkv|ts)(\?|#|$)/i.test(normalizedDownloadUrl);
-    const videoUrlIsVideoFile = /\.(mp4|webm|m3u8|mpd|flv|mov|avi|mkv|ts)(\?|#|$)/i.test(normalizedVideoUrl);
-    const downloadUrlIsPagePattern = /(view_video|watch|video|embed|\.php|\.html)(\?|#|$)/i.test(normalizedDownloadUrl);
-    
-    // If detected video is a page URL but download was a direct video file, don't match
-    // (This means multiple videos might share the same page URL, but we only downloaded one specific video file)
-    if (videoUrlIsPagePattern && downloadUrlIsVideoFile) {
-      return false;
-    }
-    
-    // If detected video is a direct video file but download was a page URL, don't match
-    // (This means the download might have been from a page, but this specific video file wasn't downloaded)
-    if (videoUrlIsVideoFile && downloadUrlIsPagePattern) {
-      return false;
-    }
-    
-    return true;
-  });
+function getOrCreateVideoId(video: VideoMetadata): string {
+  // Use existing videoId if available
+  if (video.videoId) {
+    return video.videoId;
+  }
+  
+  // Generate a new UUID v4 for this video instance
+  const videoId = uuidv4();
+  video.videoId = videoId;
+  return videoId;
+}
+
+/**
+ * Get download state for a video
+ * Uses unique video ID to match only the exact video that was downloaded
+ */
+function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefined {
+  const videoId = video.videoId || getOrCreateVideoId(video);
+
+  if (!videoId) {
+    return undefined;
+  }
+
+  return downloadStates.find(d => d.metadata?.videoId === videoId);
 }
 
 /**
  * Render detected videos with download status
  */
 function renderDetectedVideos() {
-  if (detectedVideos.length === 0) {
+  // Deduplicate videos before rendering using normalized URLs
+  const seenUrls = new Set<string>();
+  const uniqueVideos = detectedVideos.filter(video => {
+    const normalizedUrl = normalizeUrl(video.url);
+    if (seenUrls.has(normalizedUrl)) {
+      return false;
+    }
+    seenUrls.add(normalizedUrl);
+    return true;
+  });
+
+  if (uniqueVideos.length === 0) {
     detectedVideosList.innerHTML = `
       <div class="empty-state">
         No videos detected on this page.<br>
@@ -255,11 +408,15 @@ function renderDetectedVideos() {
     return;
   }
 
-  detectedVideosList.innerHTML = detectedVideos.map(video => {
-    const downloadState = getDownloadStateForVideo(video.url);
+  detectedVideosList.innerHTML = uniqueVideos.map(video => {
+    const videoId = video.videoId || getOrCreateVideoId(video);
+    const downloadState = getDownloadStateForVideo(video);
     const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
     const isCompleted = downloadState && downloadState.progress.stage === 'completed';
     const isFailed = downloadState && downloadState.progress.stage === 'failed';
+    
+    // Get actual file format for display (from download state or video URL)
+    const actualFormat = getActualFileFormat(video, downloadState);
     
     let statusBadge = '';
     let progressBar = '';
@@ -316,7 +473,7 @@ function renderDetectedVideos() {
         <div class="video-meta">
           ${video.resolution ? `<span class="video-resolution">${escapeHtml(video.resolution)}</span>` : ''}
           ${video.width && video.height && !video.resolution ? `<span class="video-resolution">${video.width}x${video.height}</span>` : ''}
-          <span class="video-format">${escapeHtml(video.format.toUpperCase())}</span>
+          <span class="video-format">${escapeHtml(getFormatDisplayName(video.format, actualFormat))}</span>
           ${video.duration ? `<span style="color: #666; margin-left: 4px;">⏱ ${formatDuration(video.duration)}</span>` : ''}
         </div>
         ${video.pageUrl ? `
@@ -338,6 +495,7 @@ function renderDetectedVideos() {
         ` : ''}
         <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
                 data-url="${escapeHtml(video.url)}" 
+                data-video-id="${escapeHtml(videoId)}"
                 ${buttonDisabled ? 'disabled' : ''}>
           ${buttonText}
         </button>
@@ -352,7 +510,18 @@ function renderDetectedVideos() {
       const button = e.target as HTMLButtonElement;
       if (button.disabled) return;
       const url = button.getAttribute('data-url')!;
-      startDownload(url);
+      const videoId = button.getAttribute('data-video-id');
+
+      let videoMetadata: VideoMetadata | undefined;
+      if (videoId) {
+        videoMetadata = detectedVideos.find(v => v.videoId === videoId);
+      }
+
+      if (!videoMetadata) {
+        videoMetadata = detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(url));
+      }
+
+      startDownload(url, videoMetadata ? { ...videoMetadata } : undefined, { triggerButton: button });
     });
   });
 }
@@ -552,40 +721,46 @@ async function loadErrors() {
 }
 
 /**
- * Handle download button click
- */
-async function handleDownloadClick() {
-  const url = urlInput.value.trim();
-  
-  if (!url) {
-    alert('Please enter a video URL');
-    return;
-  }
-
-  try {
-    new URL(url);
-  } catch {
-    alert('Invalid URL');
-    return;
-  }
-
-  await startDownload(url);
-  urlInput.value = '';
-}
-
-/**
  * Start download
  */
-async function startDownload(url: string) {
-  downloadBtn.disabled = true;
-  downloadBtn.textContent = 'Starting...';
+async function startDownload(
+  url: string,
+  videoMetadata?: VideoMetadata,
+  options: { triggerButton?: HTMLButtonElement } = {}
+) {
+  const triggerButton = options.triggerButton;
+  const originalText = triggerButton?.textContent;
+  if (triggerButton) {
+    triggerButton.disabled = true;
+    triggerButton.classList.add('disabled');
+    triggerButton.textContent = 'Starting...';
+  }
+
+  let shouldResetButton = false;
 
   try {
+    // Check if extension context is still valid before sending
+    if (chrome.runtime.lastError) {
+      if (chrome.runtime.lastError.message?.includes('Extension context invalidated')) {
+        alert('Extension was reloaded. Please refresh this page and try again.');
+        shouldResetButton = true;
+        return;
+      }
+    }
+    
     const response = await chrome.runtime.sendMessage({
       type: MessageType.DOWNLOAD_REQUEST,
       payload: {
         url,
+        metadata: videoMetadata, // Include video metadata so download state can track which video was downloaded
       },
+    }).catch((error: any) => {
+      // Handle extension context invalidated
+      if (error?.message?.includes('Extension context invalidated') ||
+          chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
+        throw new Error('Extension context invalidated. Please refresh the page and try again.');
+      }
+      throw error;
     });
 
     if (response && response.success) {
@@ -603,13 +778,24 @@ async function startDownload(url: string) {
       // Still refresh the UI in case download state changed
       await loadDownloadStates();
       renderDetectedVideos();
+      shouldResetButton = true;
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Download request failed:', error);
-    alert('Failed to start download');
+    // Check if error is due to invalidated context
+    if (error?.message?.includes('Extension context invalidated') ||
+        chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
+      alert('Extension was reloaded. Please close and reopen this popup, then try again.');
+    } else {
+      alert('Failed to start download: ' + (error?.message || 'Unknown error'));
+    }
+    shouldResetButton = true;
   } finally {
-    downloadBtn.disabled = false;
-    downloadBtn.textContent = 'Download';
+    if (shouldResetButton && triggerButton && triggerButton.isConnected) {
+      triggerButton.disabled = false;
+      triggerButton.classList.remove('disabled');
+      triggerButton.textContent = originalText || 'Download';
+    }
   }
 }
 
@@ -660,6 +846,56 @@ function getStatusText(stage: string): string {
   };
   
   return statusMap[stage] || stage;
+}
+
+/**
+ * Get actual file format from video URL or download state
+ */
+function getActualFileFormat(video: VideoMetadata, downloadState?: DownloadState): string | null {
+  // First, check if download is completed and we have the local path
+  if (downloadState?.localPath) {
+    const ext = downloadState.localPath.split('.').pop()?.toUpperCase();
+    if (ext && ['MP4', 'WEBM', 'MOV', 'AVI', 'MKV', 'FLV', 'WMV', 'OGG'].includes(ext)) {
+      return ext;
+    }
+  }
+  
+  // Check video URL for file extension
+  try {
+    const url = new URL(video.url);
+    const pathname = url.pathname.toLowerCase();
+    const extensionMatch = pathname.match(/\.(mp4|webm|mov|avi|mkv|flv|wmv|ogg)(\?|$|#)/);
+    if (extensionMatch && extensionMatch[1]) {
+      return extensionMatch[1].toUpperCase();
+    }
+  } catch {
+    // URL parsing failed, try simple string match
+    const urlLower = video.url.toLowerCase();
+    const extensionMatch = urlLower.match(/\.(mp4|webm|mov|avi|mkv|flv|wmv|ogg)(\?|$|#)/);
+    if (extensionMatch && extensionMatch[1]) {
+      return extensionMatch[1].toUpperCase();
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Get format display name - show actual file format instead of delivery method
+ */
+function getFormatDisplayName(format: VideoFormat, actualFormat?: string | null): string {
+  // If we have the actual file format, use it
+  if (actualFormat) {
+    return actualFormat;
+  }
+  
+  // When format is "direct", it means it's a direct video file download
+  // Default to MP4 if we can't determine the actual format
+  if (format === 'direct') {
+    return 'MP4';
+  }
+  
+  return format.toUpperCase();
 }
 
 /**

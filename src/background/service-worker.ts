@@ -7,7 +7,7 @@ import { DownloadStateManager } from '../lib/storage/download-state';
 import { UploadManager } from '../lib/cloud/upload-manager';
 import { ChromeStorage } from '../lib/storage/chrome-storage';
 import { MessageType } from '../shared/messages';
-import { DownloadState, StorageConfig } from '../lib/types';
+import { DownloadState, StorageConfig, VideoMetadata } from '../lib/types';
 import { logger } from '../lib/utils/logger';
 import { normalizeUrl } from '../lib/utils/url-utils';
 
@@ -118,31 +118,37 @@ async function handleDownloadRequest(payload: {
   url: string;
   filename?: string;
   uploadToDrive?: boolean;
+  metadata?: VideoMetadata;
 }): Promise<{ error?: string } | void> {
-  const { url, filename, uploadToDrive } = payload;
+  const { url, filename, uploadToDrive, metadata } = payload;
   
   // Normalize URL for comparison (remove hash fragments)
   const normalizedUrl = normalizeUrl(url);
   
-  // Check if download is already in progress (check both original and normalized URL)
-  for (const [activeUrl] of activeDownloads) {
-    if (normalizeUrl(activeUrl) === normalizedUrl) {
-      logger.info(`Download already in progress for ${url} (normalized: ${normalizedUrl})`);
-      return { error: 'Download is already in progress. Please wait for it to complete.' };
+  // Check for existing download - only use videoId for comparison
+  if (metadata?.videoId) {
+    // Check by videoId (unique identifier for each video instance)
+    const existing = await DownloadStateManager.getDownloadByVideoId(metadata.videoId);
+    
+    if (existing && existing.progress.stage === 'completed') {
+      logger.info(`Download already exists for videoId: ${metadata.videoId}`);
+      return { error: 'Download already completed. If you want to download again, please remove the existing download from the downloads list first.' };
     }
-  }
-  
-  // Check if download already exists and is completed
-  const existing = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
-  if (existing && existing.progress.stage === 'completed') {
-    logger.info(`Download already exists for ${url} (normalized: ${normalizedUrl})`);
-    return { error: 'Download already completed. If you want to download again, please remove the existing download from the downloads list first.' };
-  }
-  
-  // If download exists but failed, allow retry by removing old state
-  if (existing && existing.progress.stage === 'failed') {
-    logger.info(`Retrying failed download for ${url} (normalized: ${normalizedUrl})`);
-    await DownloadStateManager.removeDownload(existing.id);
+    
+    // If download exists but failed, allow retry by removing old state
+    if (existing && existing.progress.stage === 'failed') {
+      logger.info(`Retrying failed download for videoId: ${metadata.videoId}`);
+      await DownloadStateManager.removeDownload(existing.id);
+    }
+    
+    // Check if download is already in progress (by videoId)
+    for (const [activeUrl, promise] of activeDownloads) {
+      const activeDownload = await DownloadStateManager.getDownloadByUrl(activeUrl);
+      if (activeDownload?.metadata?.videoId === metadata.videoId) {
+        logger.info(`Download already in progress for videoId: ${metadata.videoId}`);
+        return { error: 'Download is already in progress. Please wait for it to complete.' };
+      }
+    }
   }
 
   // Get configuration
@@ -176,7 +182,7 @@ async function handleDownloadRequest(payload: {
   // the download flow to upload before saving to disk
   
   // Start download (use normalized URL as key to prevent duplicates with different hash fragments)
-  const downloadPromise = startDownload(downloadManager, undefined, url, filename);
+  const downloadPromise = startDownload(downloadManager, undefined, url, filename, metadata);
   activeDownloads.set(normalizedUrl, downloadPromise);
 
   // Clean up when done
@@ -197,11 +203,12 @@ async function startDownload(
   downloadManager: DownloadManager,
   uploadManager: UploadManager | undefined,
   url: string,
-  filename?: string
+  filename?: string,
+  metadata?: VideoMetadata
 ): Promise<void> {
   try {
     // Download video
-    const downloadState = await downloadManager.download(url, filename);
+    const downloadState = await downloadManager.download(url, filename, metadata);
 
     // Note: Upload functionality would require storing the blob during download
     // or uploading before saving to disk. For now, uploads are not automatically

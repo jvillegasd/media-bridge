@@ -15,6 +15,18 @@ export interface VideoMetadata {
   resolution?: string; // e.g., "1920x1080", "1080p"
   pageUrl?: string; // URL of the page where video was detected
   thumbnail?: string; // Thumbnail/preview image URL
+  videoId?: string; // Unique identifier for this video instance
+  availableQualities?: VideoQuality[]; // Available quality options (for HLS/DASH)
+}
+
+export interface VideoQuality {
+  url: string; // Playlist/manifest URL for this quality
+  bandwidth: number; // Bitrate in bits per second
+  resolution?: string; // e.g., "1920x1080"
+  width?: number;
+  height?: number;
+  quality?: string; // Human-readable quality label (e.g., "1080p", "720p")
+  codecs?: string;
 }
 
 export interface DownloadProgress {

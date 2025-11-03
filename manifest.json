@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Media Bridge",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Download videos from the web (HLS/DASH/direct) and upload to Google Drive",
   "permissions": [
     "storage",
@@ -31,7 +31,7 @@
       "matches": ["<all_urls>"],
       "js": ["content/content-script.js"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "options_page": "options/options.html",
