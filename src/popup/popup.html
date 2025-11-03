@@ -142,13 +142,17 @@
     }
 
     .no-video-notice {
-      margin-bottom: 16px;
-      border-radius: 8px;
+      margin-bottom: 0;
+      border-radius: 0;
       padding: 16px;
       background: #1f1f1f;
       color: #f5f5f5;
       display: none;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+      position: sticky;
+      bottom: 60px;
+      z-index: 15;
+      border-top: 1px solid #333;
     }
 
     .no-video-notice.show {
@@ -429,7 +433,7 @@
       flex-shrink: 0;
       position: sticky;
       bottom: 0;
-      z-index: 10;
+      z-index: 20;
     }
 
     .bottom-bar-btn {
@@ -567,16 +571,6 @@
 
   <!-- Detected Videos Tab -->
   <div id="detectedTab" class="tab-content active">
-    <div id="noVideoNotice" class="no-video-notice">
-      <div class="no-video-notice-header">
-        <div class="no-video-notice-title">Can't see the media you're looking for?</div>
-        <button id="closeNoVideoNotice" class="notice-close" aria-label="Close">&times;</button>
-      </div>
-      <p>Start the video (and skip ads if any) to help detect the media.</p>
-      <div class="no-video-notice-actions">
-        <button id="forceDetectionBtn" class="primary-btn">Force detection</button>
-      </div>
-    </div>
     <div id="detectedVideosList"></div>
   </div>
 
@@ -598,6 +592,18 @@
         <span class="pagination-info" id="errorsPageInfo"></span>
         <button class="pagination-button" id="errorsNextBtn">Next</button>
       </div>
+    </div>
+  </div>
+
+  <!-- No Video Notice -->
+  <div id="noVideoNotice" class="no-video-notice">
+    <div class="no-video-notice-header">
+      <div class="no-video-notice-title">Can't see the media you're looking for?</div>
+      <button id="closeNoVideoNotice" class="notice-close" aria-label="Close">&times;</button>
+    </div>
+    <p>Start the video (and skip ads if any) to help detect the media.</p>
+    <div class="no-video-notice-actions">
+      <button id="forceDetectionBtn" class="primary-btn">Force detection</button>
     </div>
   </div>
 
