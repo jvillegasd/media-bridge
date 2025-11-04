@@ -47,25 +47,41 @@ export class HlsDownloadHandler {
         throw new Error('No video levels found in master playlist');
       }
 
-      // Step 2: Select level (use provided or highest quality)
-      const level = selectedLevel || this.selectBestLevel(levels);
-      logger.info(`Selected level: ${level.uri}`);
-
-      // Step 3: Fetch and parse level playlist
-      await this.updateProgress(stateId, 'downloading', 0.1, 'Fetching level playlist...');
-      const levelPlaylistText = await HlsLoader.fetchText(level.uri, this.fetchAttempts);
-      const fragments = HlsParser.parseLevelPlaylist(levelPlaylistText, level.uri);
-
-      if (fragments.length === 0) {
-        throw new Error('No fragments found in level playlist');
+      // Step 2: Select video and audio levels
+      const videoLevel = selectedLevel || this.selectBestLevel(levels);
+      const audioLevel = this.selectBestAudioLevel(levels);
+      logger.info(`Selected video level: ${videoLevel.uri}`);
+      if (audioLevel) {
+        logger.info(`Selected audio level: ${audioLevel.uri}`);
       }
 
-      logger.info(`Found ${fragments.length} fragments`);
+      // Step 3: Fetch and parse video playlist
+      await this.updateProgress(stateId, 'downloading', 0.1, 'Fetching video playlist...');
+      const videoPlaylistText = await HlsLoader.fetchText(videoLevel.uri, this.fetchAttempts);
+      const videoFragments = HlsParser.parseLevelPlaylist(videoPlaylistText, videoLevel.uri);
+
+      if (videoFragments.length === 0) {
+        throw new Error('No video fragments found in playlist');
+      }
+
+      logger.info(`Found ${videoFragments.length} video fragments`);
+
+      // Step 3b: Fetch and parse audio playlist if available
+      let audioFragments: HlsFragment[] = [];
+      if (audioLevel) {
+        try {
+          await this.updateProgress(stateId, 'downloading', 0.12, 'Fetching audio playlist...');
+          const audioPlaylistText = await HlsLoader.fetchText(audioLevel.uri, this.fetchAttempts);
+          audioFragments = HlsParser.parseLevelPlaylist(audioPlaylistText, audioLevel.uri);
+          logger.info(`Found ${audioFragments.length} audio fragments`);
+        } catch (error) {
+          logger.warn('Failed to fetch audio playlist, continuing with video only:', error);
+          // Continue without audio - some streams might be muxed
+        }
+      }
 
       // Step 4: Create storage bucket
       await this.updateProgress(stateId, 'downloading', 0.15, 'Initializing storage...');
-      const videoFragments = fragments; // For now, assume all are video
-      const audioFragments: HlsFragment[] = []; // TODO: Handle separate audio tracks
       const bucket = await hlsStorageManager.createBucket(
         stateId,
         videoFragments.length,
@@ -74,13 +90,21 @@ export class HlsDownloadHandler {
 
       try {
         // Step 5: Download all fragments concurrently
+        const totalFragments = videoFragments.length + audioFragments.length;
         await this.updateProgress(
           stateId,
           'downloading',
           0.2,
-          `Downloading ${fragments.length} segments...`
+          `Downloading ${totalFragments} segments...`
         );
-        await this.downloadFragments(fragments, bucket, stateId);
+        
+        // Download video fragments
+        await this.downloadFragments(videoFragments, bucket, stateId, 0, videoFragments.length);
+        
+        // Download audio fragments if available
+        if (audioFragments.length > 0) {
+          await this.downloadFragments(audioFragments, bucket, stateId, videoFragments.length, audioFragments.length);
+        }
 
         // Step 6: Merge segments
         await this.updateProgress(stateId, 'merging', 0.9, 'Merging segments...');
@@ -140,14 +164,30 @@ export class HlsDownloadHandler {
   }
 
   /**
+   * Select the best audio level (highest bitrate)
+   */
+  private selectBestAudioLevel(levels: HlsLevel[]): HlsLevel | null {
+    const audioLevels = levels.filter((l) => l.type === 'audio');
+    if (audioLevels.length === 0) {
+      return null;
+    }
+
+    // Sort by bitrate (descending) and select highest
+    // If no bitrate info, just return the first one
+    return audioLevels.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+  }
+
+  /**
    * Download all fragments with concurrency control
    */
   private async downloadFragments(
     fragments: HlsFragment[],
     bucket: IndexedDBHlsBucket,
-    stateId: string
+    stateId: string,
+    startIndex: number = 0,
+    totalCount?: number
   ): Promise<void> {
-    const total = fragments.length;
+    const total = totalCount || fragments.length;
     let downloaded = 0;
     const startTime = Date.now();
 
@@ -157,7 +197,7 @@ export class HlsDownloadHandler {
 
     for (let i = 0; i < fragments.length; i++) {
       const fragment = fragments[i];
-      const index = i;
+      const index = startIndex + i;
 
       // Wait for a slot to be available
       const slot = await Promise.race(
@@ -183,8 +223,8 @@ export class HlsDownloadHandler {
             this.fetchAttempts
           );
 
-          // Write to bucket
-          await bucket.write(fragment.index, segmentData);
+          // Write to bucket with adjusted index
+          await bucket.write(index, segmentData);
 
           downloaded++;
           const percentage = (downloaded / total) * 100;

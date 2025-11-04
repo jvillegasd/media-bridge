@@ -213,9 +213,10 @@ async function handleDownloadRequest(payload: {
     // Check by videoId (unique identifier for each video instance)
     const existing = await DownloadStateManager.getDownloadByVideoId(metadata.videoId);
     
+    // Allow redownloading completed videos - remove old state first
     if (existing && existing.progress.stage === 'completed') {
-      logger.info(`Download already exists for videoId: ${metadata.videoId}`);
-      return { error: 'Download already completed. If you want to download again, please remove the existing download from the downloads list first.' };
+      logger.info(`Redownloading completed video for videoId: ${metadata.videoId}`);
+      await DownloadStateManager.removeDownload(existing.id);
     }
     
     // If download exists but failed, allow retry by removing old state

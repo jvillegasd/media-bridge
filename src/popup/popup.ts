@@ -399,8 +399,8 @@ function renderDetectedVideos() {
       buttonDisabled = true;
     } else if (isCompleted) {
       statusBadge = `<span class="video-status status-completed">Completed</span>`;
-      buttonText = 'Downloaded';
-      buttonDisabled = true;
+      buttonText = 'Redownload';
+      buttonDisabled = false; // Allow redownloading
     } else if (isFailed) {
       statusBadge = `<span class="video-status status-failed">Failed</span>`;
       buttonText = 'Retry';
@@ -680,14 +680,16 @@ function getFormatDisplayName(format: VideoFormat, actualFormat?: string | null)
 }
 
 /**
- * Get link type display name (delivery method: direct)
+ * Get link type display name (delivery method: direct, hls, etc.)
  */
 function getLinkTypeDisplayName(format: VideoFormat): string {
   switch (format) {
     case 'direct':
       return 'Direct';
+    case 'hls':
+      return 'HLS';
     default:
-      return 'Direct';
+      return format.charAt(0).toUpperCase() + format.slice(1);
   }
 }
 
