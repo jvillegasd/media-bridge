@@ -4,6 +4,44 @@
 
 import { logger } from '../core/utils/logger';
 
+/**
+ * Check if an HLS playlist URL is a master playlist (not a quality-specific one)
+ */
+function isMasterPlaylist(url: string): boolean {
+  const urlLower = url.toLowerCase();
+  
+  // Must be an .m3u8 file
+  if (!urlLower.includes('.m3u8')) {
+    return false;
+  }
+  
+  // Master playlists typically have:
+  // 1. variant_version query parameter (Twitter/X)
+  // 2. Don't have /avc1/ or /mp4a/ in the path (these are quality-specific)
+  // 3. Don't have specific codec/bitrate/resolution in path
+  
+  // Check for variant_version (master playlist indicator for Twitter/X)
+  if (url.includes('variant_version=')) {
+    return true;
+  }
+  
+  // Check for quality-specific paths (these are NOT master playlists)
+  if (urlLower.includes('/avc1/') || urlLower.includes('/mp4a/') || 
+      urlLower.includes('/h264/') || urlLower.includes('/aac/')) {
+    return false;
+  }
+  
+  // Check for resolution/bitrate in path (quality-specific)
+  // Patterns like /1080x1080/, /320x320/, /32000/, /128000/
+  if (urlLower.match(/\/\d+x\d+\//) || urlLower.match(/\/\d{5,}\//)) {
+    return false;
+  }
+  
+  // If it's a .m3u8 file and doesn't have quality-specific patterns, assume it's a master
+  // This works for platforms other than Twitter/X
+  return true;
+}
+
 interface DetectedPlaylist {
   url: string;
   tabId: number;
@@ -81,20 +119,26 @@ export function initializeHlsDetector(): void {
 
       logger.info(`Detected HLS playlist: ${details.url}`);
       
-      // Send message to content script to handle the playlist
-      try {
-        await chrome.tabs.sendMessage(details.tabId, {
-          type: 'HLS_PLAYLIST_DETECTED',
-          payload: {
-            url: details.url,
-            pageUrl,
-            pageTitle,
-          },
-        });
-      } catch (error) {
-        // Content script might not be loaded yet, or tab might not have content script
-        // This is okay - the content script will also detect via network interception
-        logger.debug('Could not send playlist to content script:', error);
+      // Only send master playlists to content script (skip quality-specific playlists)
+      // This prevents creating multiple video cards for the same video
+      if (isMasterPlaylist(details.url)) {
+        // Send message to content script to handle the playlist
+        try {
+          await chrome.tabs.sendMessage(details.tabId, {
+            type: 'HLS_PLAYLIST_DETECTED',
+            payload: {
+              url: details.url,
+              pageUrl,
+              pageTitle,
+            },
+          });
+        } catch (error) {
+          // Content script might not be loaded yet, or tab might not have content script
+          // This is okay - the content script will also detect via network interception
+          logger.debug('Could not send playlist to content script:', error);
+        }
+      } else {
+        logger.debug(`Skipping quality-specific playlist: ${details.url}`);
       }
     },
     {

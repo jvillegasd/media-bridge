@@ -99,7 +99,15 @@ export class HlsDownloadHandler {
           // Regular context - fetch from blob URL
           const response = await fetch(linkOrBlob);
           blob = await response.blob();
-          URL.revokeObjectURL(linkOrBlob);
+          // Only revoke if URL.revokeObjectURL is available (not in service worker)
+          if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+            try {
+              URL.revokeObjectURL(linkOrBlob);
+            } catch (error) {
+              // Ignore errors if revoke fails
+              logger.debug('Could not revoke blob URL:', error);
+            }
+          }
         }
 
         // Cleanup
