@@ -4,13 +4,13 @@
 
 import { VideoFormat, VideoMetadata, DownloadState } from '../types';
 import { FormatDetector } from './format-detector';
-import { HLSDownloader } from './hls-downloader';
-import { DASHDownloader } from './dash-downloader';
 import { DirectDownloader } from './direct-downloader';
 import { DownloadStateManager } from '../storage/download-state';
 import { DownloadError } from '../utils/errors';
 import { logger } from '../utils/logger';
-import { mergeHLSOffscreen, mergeDASHOffscreen } from '../../background/offscreen-merger-client';
+import {
+  extractMetadataFromDirectBlob,
+} from '../merger/metadata-extractor';
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
@@ -106,27 +106,39 @@ export class DownloadManager {
         }
       }
 
-      // Download based on format
+      // Download video (only direct downloads supported)
       let finalBlob: Blob;
+      let extractedMetadata: Partial<VideoMetadata> = {};
 
-      switch (format) {
-        case 'hls':
-          finalBlob = await this.downloadHLS(actualVideoUrl, state.id);
-          break;
-        case 'dash':
-          finalBlob = await this.downloadDASH(actualVideoUrl, state.id);
-          break;
-        case 'direct':
-          finalBlob = await this.downloadDirect(actualVideoUrl, state.id);
-          break;
-        default:
-          // Last resort: try as direct video
-          logger.warn(`Unknown format ${format}, attempting as direct video download`);
-          finalBlob = await this.downloadDirect(actualVideoUrl, state.id);
+      // Always download as direct video
+      finalBlob = await this.downloadDirect(actualVideoUrl, state.id);
+      // Extract metadata from direct video blob
+      const contentType = finalBlob.type;
+      const directMetadata = await extractMetadataFromDirectBlob(finalBlob, actualVideoUrl, contentType);
+      extractedMetadata.fileExtension = directMetadata.extension;
+
+      // Update state metadata with extracted information
+      if (state.metadata) {
+        state.metadata = {
+          ...state.metadata,
+          ...extractedMetadata,
+        };
+      } else {
+        state.metadata = {
+          url: actualVideoUrl,
+          format,
+          ...extractedMetadata,
+        };
       }
 
+      // Save updated metadata
+      state.updatedAt = Date.now();
+      await DownloadStateManager.saveDownload(state);
+
       // Save file locally (using Chrome downloads API)
-      const downloadFilename = filename || this.generateFilename(url, format);
+      // Use detected extension if available, otherwise use mp4
+      const detectedExtension = extractedMetadata.fileExtension || 'mp4';
+      const downloadFilename = filename || this.generateFilenameWithExtension(url, format, detectedExtension);
       
       state.progress.stage = 'saving';
       state.progress.message = 'Saving file...';
@@ -252,39 +264,6 @@ export class DownloadManager {
   }
 
   /**
-   * Download HLS stream
-   */
-  private async downloadHLS(url: string, stateId: string): Promise<Blob> {
-    const hlsDownloader = new HLSDownloader({
-      maxConcurrent: this.maxConcurrent,
-      onProgress: (stage, progress) => {
-        // Update progress via state manager
-        logger.debug(`HLS download: ${stage}`, progress);
-      },
-    });
-
-    const segments = await hlsDownloader.download(url);
-
-    return await mergeHLSOffscreen(segments);
-  }
-
-  /**
-   * Download DASH stream
-   */
-  private async downloadDASH(url: string, stateId: string): Promise<Blob> {
-    const dashDownloader = new DASHDownloader({
-      maxConcurrent: this.maxConcurrent,
-      onProgress: (stage, stream, progress) => {
-        logger.debug(`DASH download: ${stage} ${stream}`, progress);
-      },
-    });
-
-    const dashResult = await dashDownloader.download(url);
-
-    return await mergeDASHOffscreen(dashResult);
-  }
-
-  /**
    * Download direct video
    */
   private async downloadDirect(url: string, stateId: string): Promise<Blob> {
@@ -368,23 +347,25 @@ export class DownloadManager {
   }
 
   /**
-   * Generate filename from URL
+   * Generate filename from URL with specific extension
    */
-  private generateFilename(url: string, format: VideoFormat): string {
+  private generateFilenameWithExtension(url: string, format: VideoFormat, extension: string): string {
     try {
       const urlObj = new URL(url);
       const pathname = urlObj.pathname;
       const filename = pathname.split('/').pop() || 'video';
       
-      // Remove query parameters and extension, add appropriate extension
+      // Remove query parameters and existing extension
       const baseName = filename.split('?')[0].split('.')[0];
-      const extension = format === 'hls' || format === 'dash' ? 'mp4' : filename.split('.').pop() || 'mp4';
       
       return `${baseName}.${extension}`;
     } catch {
-      return `video_${Date.now()}.mp4`;
+      // Fallback if URL parsing fails
+      const timestamp = Date.now();
+      return `video_${timestamp}.${extension}`;
     }
   }
+
 
   /**
    * Check if URL is a page URL (like view_video.php) vs actual video file

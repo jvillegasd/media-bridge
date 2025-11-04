@@ -2,7 +2,7 @@
  * Type definitions for Media Bridge Extension
  */
 
-export type VideoFormat = 'hls' | 'dash' | 'direct' | 'unknown';
+export type VideoFormat = 'direct' | 'unknown';
 
 export interface VideoMetadata {
   url: string;
@@ -16,8 +16,7 @@ export interface VideoMetadata {
   pageUrl?: string; // URL of the page where video was detected
   thumbnail?: string; // Thumbnail/preview image URL
   videoId?: string; // Unique identifier for this video instance
-  availableQualities?: VideoQuality[]; // Available quality options (for HLS/DASH)
-  selectedQualityUrl?: string; // Persisted quality selection in popup UI
+  fileExtension?: string; // Detected file extension (e.g., "mp4", "webm")
 }
 
 export interface VideoQuality {
@@ -74,47 +73,4 @@ export interface MessageResponse {
   error?: string;
 }
 
-export interface SegmentInfo {
-  url: string;
-  sequence: number;
-  duration?: number;
-  byteRange?: {
-    start: number;
-    end: number;
-  };
-}
-
-export interface HLSPlaylist {
-  isMasterPlaylist: boolean;
-  variants?: HLSVariant[];
-  segments: SegmentInfo[];
-  totalDuration?: number;
-  baseUrl: string;
-}
-
-export interface HLSVariant {
-  url: string;
-  bandwidth: number;
-  resolution?: string;
-  codecs?: string;
-}
-
-export interface DASHManifest {
-  video: DASHRepresentation[];
-  audio: DASHRepresentation[];
-  baseUrl: string;
-}
-
-export interface DASHRepresentation {
-  id: string;
-  type: 'video' | 'audio';
-  bandwidth: number;
-  width?: number;
-  height?: number;
-  codecs?: string;
-  segments: {
-    initUrl?: string;
-    segments: SegmentInfo[];
-  };
-}
 

@@ -1,6 +1,6 @@
 {
   "name": "media-bridge-extension",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Download videos (HLS/DASH/direct) and upload to Google Drive",
   "scripts": {
     "build": "webpack --mode production",
@@ -30,7 +30,6 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
-    "@ffmpeg/util": "^0.12.1",
     "uuid": "^13.0.0"
   }
 }

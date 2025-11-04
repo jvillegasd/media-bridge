@@ -4,6 +4,7 @@
 
 import { VideoFormat } from '../types';
 import { logger } from '../utils/logger';
+import { detectExtensionFromUrl as extractExtensionFromUrl } from '../merger/metadata-extractor';
 
 export class FormatDetector {
   /**
@@ -27,33 +28,8 @@ export class FormatDetector {
     try {
       urlObj = new URL(url);
     } catch (error) {
-      // If URL parsing fails, check if it's a blob URL or try to detect from string
-      if (urlLower.includes('.m3u8')) {
-        return 'hls';
-      }
-      if (urlLower.includes('.mpd')) {
-        return 'dash';
-      }
       // Default to direct for unparseable URLs that might be video
       return 'direct';
-    }
-    
-    // Check for query parameters that indicate format
-    const urlParams = urlObj.searchParams;
-    if (urlParams.get('format') === 'm3u8' || urlParams.has('m3u8')) {
-      return 'hls';
-    }
-    if (urlParams.get('format') === 'mpd' || urlParams.has('mpd')) {
-      return 'dash';
-    }
-    
-    // Check path for format indicators
-    if (urlLower.includes('.m3u8') || urlLower.endsWith('.m3u8') || urlLower.includes('/hls/')) {
-      return 'hls';
-    }
-    
-    if (urlLower.includes('.mpd') || urlLower.endsWith('.mpd') || urlLower.includes('/dash/')) {
-      return 'dash';
     }
     
     // Check for common video extensions
@@ -62,19 +38,8 @@ export class FormatDetector {
       return 'direct';
     }
     
-    // Check for YouTube URLs - these need special handling
-    const hostname = urlObj.hostname.toLowerCase();
-    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
-      // YouTube watch URLs use DASH format
-      // Short URLs (youtu.be) or watch URLs should be treated as needing special extraction
-      if (urlObj.pathname.includes('/watch') || hostname.includes('youtu.be')) {
-        return 'dash';
-      }
-      // For other YouTube URLs (embed, etc.), also use dash
-      return 'dash';
-    }
-    
     // Check for Twitter/X URLs - these typically use blob URLs or direct video
+    const hostname = urlObj.hostname.toLowerCase();
     if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
       return 'direct';
     }
@@ -93,24 +58,6 @@ export class FormatDetector {
    */
   static detectFromHeaders(contentType: string, url: string): VideoFormat {
     const contentTypeLower = contentType.toLowerCase();
-    
-    // HLS detection
-    if (
-      contentTypeLower.includes('application/vnd.apple.mpegurl') ||
-      contentTypeLower.includes('application/x-mpegurl') ||
-      contentTypeLower.includes('audio/mpegurl') ||
-      contentTypeLower.includes('video/mpegurl')
-    ) {
-      return 'hls';
-    }
-    
-    // DASH detection
-    if (
-      contentTypeLower.includes('application/dash+xml') ||
-      contentTypeLower.includes('application/xml+dash')
-    ) {
-      return 'dash';
-    }
     
     // Direct video detection
     if (contentTypeLower.match(/video\/(mp4|webm|ogg|quicktime|x-msvideo|x-matroska)/)) {
@@ -190,27 +137,10 @@ export class FormatDetector {
         
         const contentType = response.headers.get('content-type') || '';
         
-        // If it's text, try to read content
+        // If it's text, skip it - we only support direct video downloads
         if (contentType.includes('text') || contentType.includes('application') || 
             contentType.includes('xml') || contentType.includes('json')) {
-          try {
-            const text = await response.text();
-            
-            // Check for M3U8 indicators
-            if (text.includes('#EXTM3U') || text.includes('#EXTINF')) {
-              logger.debug('Format detected from content: HLS');
-              return 'hls';
-            }
-            
-            // Check for MPD indicators
-            if (text.includes('<MPD') || text.includes('xmlns="urn:mpeg:dash') || 
-                text.includes('type="dynamic"') && text.includes('DASH')) {
-              logger.debug('Format detected from content: DASH');
-              return 'dash';
-            }
-          } catch (textError) {
-            logger.debug(`Could not read response as text: ${textError}`);
-          }
+          logger.debug('Non-video content type detected, skipping');
         }
         
         // Check headers
@@ -231,6 +161,13 @@ export class FormatDetector {
       const urlFormat = this.detectFromUrl(url);
       return urlFormat !== 'unknown' ? urlFormat : 'direct'; // Default to direct if unknown
     }
+  }
+
+  /**
+   * Extract file extension from URL
+   */
+  static detectExtensionFromUrl(url: string): string | undefined {
+    return extractExtensionFromUrl(url);
   }
 }
 

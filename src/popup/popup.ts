@@ -2,11 +2,12 @@
  * Popup UI logic with tabs for Detected Videos, Downloads, and Errors
  */
 
-import { DownloadState, VideoMetadata, VideoFormat, VideoQuality } from '../lib/types';
+import { DownloadState, VideoMetadata, VideoFormat } from '../lib/types';
 import { DownloadStateManager } from '../lib/storage/download-state';
 import { MessageType } from '../shared/messages';
 import { normalizeUrl } from '../lib/utils/url-utils';
 import { v4 as uuidv4 } from 'uuid';
+
 
 // DOM elements
 let noVideoBtn: HTMLButtonElement | null = null;
@@ -38,8 +39,7 @@ const clearErrorsBtn = document.getElementById('clearErrorsBtn') as HTMLButtonEl
 let detectedVideos: VideoMetadata[] = [];
 let downloadStates: DownloadState[] = [];
 
-// Persist quality selections between renders and detection refreshes
-const qualitySelectionBySourceUrl = new Map<string, string>();
+// Quality selection removed - only direct downloads supported
 
 // Pagination state
 const ITEMS_PER_PAGE = 10;
@@ -292,7 +292,6 @@ async function requestDetectedVideos() {
         // Add all videos from content script with improved deduplication
         response.videos.forEach((video: VideoMetadata) => {
           getOrCreateVideoId(video);
-          applyStoredQualitySelection(video);
 
           // Use normalized URLs for comparison to prevent duplicates
           const normalizedVideoUrl = normalizeUrl(video.url);
@@ -303,10 +302,6 @@ async function requestDetectedVideos() {
           } else {
             // Update existing entry with latest metadata if needed
             const existing = detectedVideos[existingIndex];
-            if (video.availableQualities && video.availableQualities.length > 0) {
-              existing.availableQualities = video.availableQualities;
-            }
-            applyStoredQualitySelection(existing);
             if (video.title && !existing.title) {
               existing.title = video.title;
             }
@@ -328,8 +323,6 @@ async function requestDetectedVideos() {
           }
         });
 
-        cleanupQualitySelections();
-        
         renderDetectedVideos();
       }
     }
@@ -346,9 +339,7 @@ function addDetectedVideo(video: VideoMetadata) {
   // Check if video already exists
   if (!detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(video.url))) {
     getOrCreateVideoId(video);
-    applyStoredQualitySelection(video);
     detectedVideos.push(video);
-    cleanupQualitySelections();
     renderDetectedVideos();
   }
 }
@@ -398,92 +389,12 @@ function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefin
   return downloadStates.find(d => d.metadata?.videoId === videoId);
 }
 
-function getQualitySelectionKey(video: VideoMetadata): string {
-  return normalizeUrl(video.url);
-}
-
-function getSortedQualities(video: VideoMetadata): VideoQuality[] {
-  if (!video.availableQualities || video.availableQualities.length === 0) {
-    return [];
-  }
-  return [...video.availableQualities].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
-}
-
-function applyStoredQualitySelection(video: VideoMetadata): void {
-  if (!video.availableQualities || video.availableQualities.length === 0) {
-    video.selectedQualityUrl = undefined;
-    return;
-  }
-
-  const key = getQualitySelectionKey(video);
-  const storedUrl = qualitySelectionBySourceUrl.get(key);
-
-  if (storedUrl && video.availableQualities.some(q => q.url === storedUrl)) {
-    video.selectedQualityUrl = storedUrl;
-  } else if (video.selectedQualityUrl && video.availableQualities.some(q => q.url === video.selectedQualityUrl)) {
-    qualitySelectionBySourceUrl.set(key, video.selectedQualityUrl);
-  } else {
-    qualitySelectionBySourceUrl.delete(key);
-    video.selectedQualityUrl = undefined;
-  }
-}
-
-function cleanupQualitySelections(): void {
-  const activeKeys = new Set<string>();
-  detectedVideos.forEach(video => {
-    activeKeys.add(getQualitySelectionKey(video));
-  });
-
-  for (const key of Array.from(qualitySelectionBySourceUrl.keys())) {
-    if (!activeKeys.has(key)) {
-      qualitySelectionBySourceUrl.delete(key);
-    }
-  }
-}
-
-function handleQualitySelectionChange(event: Event): void {
-  const select = event.target as HTMLSelectElement;
-  const videoId = select.dataset.videoId;
-  if (!videoId) {
-    return;
-  }
-
-  const video = detectedVideos.find(v => (v.videoId || getOrCreateVideoId(v)) === videoId);
-  if (!video || !video.availableQualities || video.availableQualities.length === 0) {
-    return;
-  }
-
-  const sortedQualities = getSortedQualities(video);
-  const selectedIndex = parseInt(select.value, 10);
-  const selectedQuality = sortedQualities[selectedIndex];
-  const key = getQualitySelectionKey(video);
-
-  if (selectedQuality && selectedQuality.url) {
-    video.selectedQualityUrl = selectedQuality.url;
-    qualitySelectionBySourceUrl.set(key, selectedQuality.url);
-
-    if (selectedQuality.resolution) {
-      video.resolution = selectedQuality.resolution;
-    }
-    if (selectedQuality.width) {
-      video.width = selectedQuality.width;
-    }
-    if (selectedQuality.height) {
-      video.height = selectedQuality.height;
-    }
-  } else {
-    video.selectedQualityUrl = undefined;
-    qualitySelectionBySourceUrl.delete(key);
-  }
-
-  renderDetectedVideos();
-}
+// Quality selection functions removed - only direct downloads supported
 
 /**
  * Render detected videos with download status
  */
 function renderDetectedVideos() {
-  cleanupQualitySelections();
   // Deduplicate videos before rendering using normalized URLs
   const seenUrls = new Set<string>();
   const uniqueVideos = detectedVideos.filter(video => {
@@ -506,7 +417,6 @@ function renderDetectedVideos() {
   }
 
   detectedVideosList.innerHTML = uniqueVideos.map(video => {
-    applyStoredQualitySelection(video);
     const videoId = video.videoId || getOrCreateVideoId(video);
     const downloadState = getDownloadStateForVideo(video);
     const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
@@ -516,24 +426,9 @@ function renderDetectedVideos() {
     // Get actual file format for display (from download state or video URL)
     const actualFormat = getActualFileFormat(video, downloadState);
 
-    const sortedQualities = getSortedQualities(video);
-    let selectedIndex = 0;
-    if (sortedQualities.length > 0 && video.selectedQualityUrl) {
-      const storedIndex = sortedQualities.findIndex(q => q.url === video.selectedQualityUrl);
-      if (storedIndex >= 0) {
-        selectedIndex = storedIndex;
-      }
-    }
-    if (selectedIndex === 0 && sortedQualities.length > 0) {
-      const currentUrlIndex = sortedQualities.findIndex(q => q.url === video.url);
-      if (currentUrlIndex >= 0) {
-        selectedIndex = currentUrlIndex;
-      }
-    }
-    const selectedQuality = sortedQualities.length > 0 ? sortedQualities[selectedIndex] : undefined;
-    const displayResolution = (selectedQuality?.quality || selectedQuality?.resolution || video.resolution || '').trim();
-    const displayWidth = selectedQuality?.width ?? video.width;
-    const displayHeight = selectedQuality?.height ?? video.height;
+    const displayResolution = (video.resolution || '').trim();
+    const displayWidth = video.width;
+    const displayHeight = video.height;
     const displayDimensions = (!displayResolution && displayWidth && displayHeight) ? `${displayWidth}x${displayHeight}` : '';
     
     let statusBadge = '';
@@ -569,20 +464,7 @@ function renderDetectedVideos() {
       buttonText = 'Retry';
     }
     
-    const qualitySelectMarkup = sortedQualities.length > 1
-      ? `
-          <select class="video-quality-select" 
-                  data-video-id="${escapeHtml(videoId)}"
-                  ${buttonDisabled ? 'disabled' : ''}>
-            ${sortedQualities.map((quality, index) => {
-              const sizeEstimate = calculateEstimatedSize(quality.bandwidth, video.duration);
-              const qualityLabel = quality.quality || quality.resolution || 'Auto';
-              const sizeText = sizeEstimate ? ` (~${sizeEstimate})` : '';
-              return `<option value="${index}" ${index === selectedIndex ? 'selected' : ''}>${escapeHtml(qualityLabel)}${sizeText}</option>`;
-            }).join('')}
-          </select>
-        `
-      : '';
+    // Quality selection removed - only direct downloads supported
 
     return `
     <div class="video-item">
@@ -627,7 +509,6 @@ function renderDetectedVideos() {
             ${escapeHtml(downloadState.progress.error)}
           </div>
         ` : ''}
-        ${qualitySelectMarkup}
         <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
                 data-url="${escapeHtml(video.url)}" 
                 data-video-id="${escapeHtml(videoId)}"
@@ -638,10 +519,6 @@ function renderDetectedVideos() {
     </div>
   `;
   }).join('');
-
-  detectedVideosList.querySelectorAll('.video-quality-select').forEach(select => {
-    select.addEventListener('change', handleQualitySelectionChange);
-  });
 
   // Add click handlers for download buttons
   detectedVideosList.querySelectorAll('.video-btn').forEach(btn => {
@@ -660,38 +537,8 @@ function renderDetectedVideos() {
         videoMetadata = detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(url));
       }
 
-      // Get selected quality if available
-      let downloadUrl = url;
-      if (videoMetadata && videoMetadata.availableQualities && videoMetadata.availableQualities.length > 1 && videoId) {
-        const qualitySelect = detectedVideosList.querySelector(`select.video-quality-select[data-video-id="${videoId}"]`) as HTMLSelectElement;
-        if (qualitySelect) {
-          const selectedIndex = parseInt(qualitySelect.value);
-          const sortedQualities = getSortedQualities(videoMetadata);
-          const selectedQuality = sortedQualities[selectedIndex];
-          if (selectedQuality && selectedQuality.url) {
-            downloadUrl = selectedQuality.url;
-            // Update metadata to reflect selected quality
-            videoMetadata = {
-              ...videoMetadata,
-              url: downloadUrl,
-              selectedQualityUrl: selectedQuality.url,
-              quality: selectedQuality.quality,
-              resolution: selectedQuality.resolution,
-              width: selectedQuality.width,
-              height: selectedQuality.height,
-            };
-          }
-        } else if (videoMetadata.selectedQualityUrl) {
-          downloadUrl = videoMetadata.selectedQualityUrl;
-          videoMetadata = {
-            ...videoMetadata,
-            url: downloadUrl,
-            selectedQualityUrl: downloadUrl,
-          };
-        }
-      }
-
-      startDownload(downloadUrl, videoMetadata, { triggerButton: button });
+      // Quality selection removed - only direct downloads supported
+      startDownload(url, videoMetadata, { triggerButton: button });
     });
   });
 }
@@ -1069,18 +916,14 @@ function getFormatDisplayName(format: VideoFormat, actualFormat?: string | null)
 }
 
 /**
- * Get link type display name (delivery method: direct, HLS, DASH)
+ * Get link type display name (delivery method: direct)
  */
 function getLinkTypeDisplayName(format: VideoFormat): string {
   switch (format) {
-    case 'hls':
-      return 'HLS';
-    case 'dash':
-      return 'DASH';
     case 'direct':
       return 'Direct';
     default:
-      return format.toUpperCase();
+      return 'Direct';
   }
 }
 

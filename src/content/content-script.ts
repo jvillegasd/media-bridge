@@ -4,22 +4,14 @@
 
 import { FormatDetector } from '../lib/downloader/format-detector';
 import { MessageType } from '../shared/messages';
-import { VideoFormat, VideoMetadata, VideoQuality } from '../lib/types';
+import { VideoFormat, VideoMetadata } from '../lib/types';
 import { v4 as uuidv4 } from 'uuid';
-import { M3U8Parser } from '../lib/parsers/m3u8-parser';
 
 // Video detection state
 let detectedVideos: VideoMetadata[] = [];
 const capturedVideoUrls = new Map<HTMLVideoElement, string>(); // Map video element -> actual video URL
 
-// Queue playlist URLs that are captured before a video element exists
-interface PendingPlaylistCapture {
-  url: string;
-  timestamp: number;
-}
-
-const pendingPlaylistCaptures: PendingPlaylistCapture[] = [];
-const PENDING_PLAYLIST_TTL_MS = 30_000;
+// Pending playlist captures are no longer needed - only direct downloads supported
 
 // Track recently processed URLs so we don't spam the same capture repeatedly
 const RECENT_CAPTURE_TTL_MS = 5_000;
@@ -46,51 +38,10 @@ function registerCapturedUrl(url: string): boolean {
   return true;
 }
 
-function prunePendingPlaylistCaptures(now: number) {
-  while (pendingPlaylistCaptures.length > 0) {
-    const oldest = pendingPlaylistCaptures[0];
-    if (now - oldest.timestamp > PENDING_PLAYLIST_TTL_MS) {
-      pendingPlaylistCaptures.shift();
-      continue;
-    }
-    break;
-  }
-}
-
-function enqueuePendingPlaylist(url: string) {
-  const now = Date.now();
-  prunePendingPlaylistCaptures(now);
-
-  if (pendingPlaylistCaptures.some((capture) => capture.url === url)) {
-    return;
-  }
-
-  pendingPlaylistCaptures.push({ url, timestamp: now });
-  console.log('[Media Bridge] Queued pending playlist capture:', url);
-}
-
-function consumePendingPlaylist(): string | null {
-  const now = Date.now();
-  prunePendingPlaylistCaptures(now);
-
-  const capture = pendingPlaylistCaptures.shift();
-  if (!capture) {
-    return null;
-  }
-
-  console.log('[Media Bridge] Consumed pending playlist capture:', capture.url);
-  return capture.url;
-}
-
-function removePendingPlaylist(url: string) {
-  const index = pendingPlaylistCaptures.findIndex((capture) => capture.url === url);
-  if (index >= 0) {
-    pendingPlaylistCaptures.splice(index, 1);
-  }
-}
+// Playlist functions removed - only direct downloads supported
 
 function normalizeFormat(format: VideoFormat): VideoFormat {
-  if (format === 'unknown' || format === 'dash') {
+  if (format === 'unknown') {
     return 'direct';
   }
   return format;
@@ -147,7 +98,7 @@ function handlePlaylistCapture(url: string) {
     return;
   }
 
-  console.log('[Media Bridge] Captured HLS/DASH URL:', url);
+  console.log('[Media Bridge] Captured video URL:', url);
 
         const videoElements = document.querySelectorAll('video');
   let storedToVideoElement = false;
@@ -163,32 +114,18 @@ function handlePlaylistCapture(url: string) {
             }
           }
           
-  if (storedToVideoElement) {
-    removePendingPlaylist(url);
-  } else {
-    enqueuePendingPlaylist(url);
-  }
+  // Playlist capture removed - only direct downloads supported
 
   let updatedExistingVideo = false;
           for (const existingVideo of detectedVideos) {
-            const needsUpdate = (!existingVideo.url.includes('.m3u8') && 
-                               !existingVideo.url.includes('.mpd') && 
-                               !existingVideo.url.includes('.mp4') &&
-                               !existingVideo.url.includes('.webm') &&
-                               !existingVideo.url.includes('.mov') &&
-                               !existingVideo.url.includes('.avi') &&
-                               !existingVideo.url.includes('.mkv')) &&
+            const needsUpdate = (!isDirectVideoUrl(existingVideo.url)) &&
                                (existingVideo.pageUrl === window.location.href ||
                                 (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
           
           if (needsUpdate) {
             existingVideo.url = url;
-            const interceptedFormat = url.includes('.m3u8')
-              ? 'hls'
-              : (url.includes('.mpd') ? 'direct' : existingVideo.format);
-            existingVideo.format = normalizeFormat(interceptedFormat as VideoFormat);
+            existingVideo.format = normalizeFormat('direct');
             updatedExistingVideo = true;
-      removePendingPlaylist(url);
             
             try {
               chrome.runtime.sendMessage({
@@ -232,13 +169,7 @@ function handleDirectCapture(url: string) {
 
       let updatedExistingVideo = false;
             for (const existingVideo of detectedVideos) {
-          const needsUpdate = (!existingVideo.url.includes('.m3u8') && 
-                                 !existingVideo.url.includes('.mpd') && 
-                                 !existingVideo.url.includes('.mp4') &&
-                                 !existingVideo.url.includes('.webm') &&
-                             !existingVideo.url.includes('.mov') &&
-                             !existingVideo.url.includes('.avi') &&
-                             !existingVideo.url.includes('.mkv')) &&
+          const needsUpdate = (!isDirectVideoUrl(existingVideo.url)) &&
                                  (existingVideo.pageUrl === window.location.href ||
                                   (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
               
@@ -290,7 +221,8 @@ function handleSegmentCapture(url: string) {
 function handleCapturedRequest(url: string) {
   const lowerUrl = url.toLowerCase();
 
-  if (lowerUrl.includes('.m3u8') || lowerUrl.includes('.mpd')) {
+  // Skip playlist URLs - only direct downloads supported
+  if (false) {
     handlePlaylistCapture(url);
   }
 
@@ -355,8 +287,6 @@ function setupResourcePerformanceObserver() {
 
         const lower = url.toLowerCase();
         if (
-          lower.includes('.m3u8') ||
-          lower.includes('.mpd') ||
           lower.includes('.m4s') ||
           lower.includes('.ts') ||
           isDirectVideoUrl(lower)
@@ -506,130 +436,41 @@ async function detectVideos() {
       continue;
     }
     
-    // Prioritize HLS/DASH over direct video links
+    // Get direct video URL
     let videoUrl: string | null = null;
-    let directVideoUrl: string | null = null; // Fallback for direct videos
     
-    // First, always check for HLS/DASH sources (prioritize these)
-    // Check captured URLs for HLS/DASH
+    // Check captured URLs for direct video
     let capturedUrl = capturedVideoUrls.get(vid);
-    if (!capturedUrl) {
-      const pendingPlaylist = consumePendingPlaylist();
-      if (pendingPlaylist) {
-        capturedVideoUrls.set(vid, pendingPlaylist);
-        capturedUrl = pendingPlaylist;
-        console.log('[Media Bridge] Assigned pending playlist URL to video element:', pendingPlaylist);
-      }
-    }
-
-    if (capturedUrl) {
-      console.log('[Media Bridge] Found captured URL for video element:', capturedUrl);
-      if (capturedUrl.includes('.m3u8') || capturedUrl.includes('.mpd')) {
-        videoUrl = capturedUrl;
-        console.log('[Media Bridge] Using HLS/DASH captured URL:', videoUrl);
-      } else {
-        // Store direct video URL as fallback
-        directVideoUrl = capturedUrl;
-        console.log('[Media Bridge] Using direct captured URL as fallback:', directVideoUrl);
-      }
+    if (capturedUrl && isDirectVideoUrl(capturedUrl)) {
+      videoUrl = capturedUrl;
+      console.log('[Media Bridge] Using captured direct video URL:', videoUrl);
     }
     
-    // Check HLS.js player
+    // Fallback to getVideoUrl() for direct video links
     if (!videoUrl) {
-      const hls = (vid as any).hls;
-      if (hls) {
-        if (hls.url && typeof hls.url === 'string' && !hls.url.startsWith('blob:') && !hls.url.startsWith('data:')) {
-          videoUrl = hls.url;
-        } else if (hls.media && hls.media.src && !hls.media.src.startsWith('blob:') && !hls.media.src.startsWith('data:')) {
-          videoUrl = hls.media.src;
-        } else if (hls.levels && hls.levels.length > 0) {
-          for (const level of hls.levels) {
-            if (level && level.url && !level.url.startsWith('blob:') && !level.url.startsWith('data:')) {
-              videoUrl = level.url;
-              break;
-            }
-          }
-        }
-      }
-    }
-    
-    // Check Dash.js player
-    if (!videoUrl) {
-      const dash = (vid as any).dash;
-      if (dash) {
-        if (dash.getSource && dash.getSource()) {
-          const source = dash.getSource();
-          if (source && source.url && !source.url.startsWith('blob:')) {
-            videoUrl = source.url;
-          }
-        } else if (dash.getActiveStream) {
-          const stream = dash.getActiveStream();
-          if (stream && stream.url && !stream.url.startsWith('blob:')) {
-            videoUrl = stream.url;
-          }
-        }
-      }
-    }
-    
-    // Check source elements for HLS/DASH
-    if (!videoUrl) {
-      const sources = vid.querySelectorAll('source');
-      for (const sourceEl of Array.from(sources)) {
-        const source = sourceEl as HTMLSourceElement;
-        if (source.src && (source.src.includes('.m3u8') || source.src.includes('.mpd'))) {
-          videoUrl = source.src;
-          break;
-        }
-      }
-    }
-    
-    // Fallback to direct video links if no HLS/DASH found
-    if (!videoUrl) {
-      // Use getVideoUrl() which already checks HLS/DASH first, then falls back to direct
       const fallbackUrl = getVideoUrl(vid);
-      if (fallbackUrl) {
-        // If getVideoUrl returns HLS/DASH, use it (it prioritizes correctly)
-        if (fallbackUrl.includes('.m3u8') || fallbackUrl.includes('.mpd')) {
-          videoUrl = fallbackUrl;
-        } else {
-          // It's a direct video, use it as fallback
-          directVideoUrl = fallbackUrl;
-          videoUrl = directVideoUrl;
-        }
-      } else if (directVideoUrl) {
-        // Use captured direct video URL if available
-        videoUrl = directVideoUrl;
+      if (fallbackUrl && isDirectVideoUrl(fallbackUrl)) {
+        videoUrl = fallbackUrl;
+        console.log('[Media Bridge] Using direct video URL from video element:', videoUrl);
       }
     }
     
     const isRealUrl = videoUrl && !videoUrl.startsWith('blob:') && !videoUrl.startsWith('data:');
     
     // If we don't have a real URL for a direct video, skip it (can't download page URLs)
-    // Only allow videos without real URLs if they're HLS/DASH (which will be handled differently)
     if (!isRealUrl && !videoUrl) {
-      console.log('[Media Bridge] Skipping video - no real URL found and not HLS/DASH');
+      console.log('[Media Bridge] Skipping video - no real URL found');
       continue;
     }
     
-    // For blob URLs, check if we have any captured video URL (HLS/DASH or direct), otherwise skip
+    // For blob URLs, check if we have any captured direct video URL, otherwise skip
     if (!isRealUrl && videoUrl && videoUrl.startsWith('blob:')) {
-      // If we have any captured video URL (HLS/DASH or direct video file), use that instead of blob URL
       const captured = capturedVideoUrls.get(vid);
-      if (captured && (
-        captured.includes('.m3u8') || 
-        captured.includes('.mpd') || 
-        captured.includes('.mp4') || 
-        captured.includes('.webm') || 
-        captured.includes('.mov') ||
-        captured.includes('.avi') ||
-        captured.includes('.mkv')
-      )) {
+      if (captured && isDirectVideoUrl(captured)) {
         videoUrl = captured;
         console.log('[Media Bridge] Using captured video URL instead of blob URL:', videoUrl);
-        // Now it's a real URL
-        // isRealUrl will be updated below, but we need to use videoUrl which is now the captured URL
       } else {
-        console.log('[Media Bridge] Skipping video - only blob URL found and no video URL captured');
+        console.log('[Media Bridge] Skipping video - only blob URL found and no direct video URL captured');
         continue;
       }
     }
@@ -687,13 +528,11 @@ async function detectVideos() {
     console.log('[Media Bridge] Detected video:', {
       url: finalUrl,
       format: finalFormat,
-      isHLSorDASH: finalFormat === 'hls' || finalFormat === 'dash',
       pageUrl: metadata.pageUrl
     });
 
-    // Check if there's an existing direct video from the same page that should be replaced with HLS/DASH
-    const isHLSorDASH = finalFormat === 'hls' || finalFormat === 'dash';
-    if (isHLSorDASH && metadata.pageUrl) {
+    // Check if there's an existing video from the same page that should be replaced
+    if (metadata.pageUrl) {
       // Look for existing direct video from the same page that could be the same video
       // Try to match by pageUrl and similar dimensions/duration first (more likely same video)
       let existingDirectVideoIndex = -1;
@@ -753,23 +592,7 @@ async function detectVideos() {
     addDetectedVideo(metadata);
   }
 
-  // Detect video URLs in source elements (HLS only for now)
-  const sourceElements = document.querySelectorAll('source[src*=".m3u8"]');
-  
-  for (const source of Array.from(sourceElements)) {
-    const url = (source as HTMLSourceElement).src;
-    if (url && !detectedUrls.has(url)) {
-      detectedUrls.add(url);
-      const format = normalizeFormat(FormatDetector.detectFromUrl(url));
-      const metadata: VideoMetadata = {
-        url,
-        format,
-        pageUrl: window.location.href,
-        title: document.title, // Default to browser tab title
-      };
-      addDetectedVideo(metadata);
-    }
-  }
+  // Source element detection removed - only direct downloads supported
 
 }
 
@@ -853,187 +676,7 @@ async function extractVideoMetadata(video: HTMLVideoElement, url: string): Promi
   // Extract thumbnail/preview
   metadata.thumbnail = await extractThumbnail(video, url);
 
-  // Extract available qualities for all adaptive streaming formats
-  // HLS streams
-  if (normalizedFormat === 'hls' || url.includes('.m3u8')) {
-    try {
-      // Check HLS.js player for levels
-      const hls = (video as any).hls;
-      if (hls && hls.levels && hls.levels.length > 0) {
-        const qualities: VideoQuality[] = hls.levels.map((level: any, index: number) => {
-          const resolution = level.resolution || level.attrs?.RESOLUTION;
-          const bandwidth = level.bitrate || level.attrs?.BANDWIDTH || 0;
-          const width = level.width || (resolution ? parseInt(resolution.split('x')[0]) : undefined);
-          const height = level.height || (resolution ? parseInt(resolution.split('x')[1]) : undefined);
-          
-          // Generate human-readable quality label
-          let qualityLabel: string | undefined;
-          if (height) {
-            if (height >= 2160) qualityLabel = '4K';
-            else if (height >= 1440) qualityLabel = '1440p';
-            else if (height >= 1080) qualityLabel = '1080p';
-            else if (height >= 720) qualityLabel = '720p';
-            else if (height >= 480) qualityLabel = '480p';
-            else if (height >= 360) qualityLabel = '360p';
-            else qualityLabel = `${height}p`;
-          } else if (bandwidth) {
-            // Fallback to bitrate-based label
-            if (bandwidth >= 8000000) qualityLabel = '4K';
-            else if (bandwidth >= 5000000) qualityLabel = '1080p';
-            else if (bandwidth >= 2500000) qualityLabel = '720p';
-            else if (bandwidth >= 1000000) qualityLabel = '480p';
-            else qualityLabel = '360p';
-          }
-          
-          return {
-            url: level.url || url,
-            bandwidth: bandwidth,
-            resolution: resolution,
-            width: width,
-            height: height,
-            quality: qualityLabel,
-            codecs: level.attrs?.CODECS,
-          };
-        }).filter((q: VideoQuality) => q.url); // Only include qualities with URLs
-        
-        if (qualities.length > 0) {
-          metadata.availableQualities = qualities;
-          // Set current quality based on selected level
-          const currentLevel = hls.currentLevel;
-          if (currentLevel !== -1 && qualities[currentLevel]) {
-            metadata.quality = qualities[currentLevel].quality;
-            metadata.resolution = qualities[currentLevel].resolution;
-          } else if (qualities.length > 0) {
-            // Default to highest quality
-            const highestQuality = qualities.sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))[0];
-            metadata.quality = highestQuality.quality;
-            metadata.resolution = highestQuality.resolution;
-          }
-        }
-      } else if (url.includes('.m3u8')) {
-        // Try to fetch and parse the playlist to get variants
-        try {
-          const response = await fetch(url);
-          const playlistText = await response.text();
-          const playlist = M3U8Parser.parse(playlistText, url);
-          
-          if (playlist.isMasterPlaylist && playlist.variants && playlist.variants.length > 0) {
-            const qualities: VideoQuality[] = playlist.variants.map(variant => {
-              const resolution = variant.resolution;
-              const width = resolution ? parseInt(resolution.split('x')[0]) : undefined;
-              const height = resolution ? parseInt(resolution.split('x')[1]) : undefined;
-              
-              let qualityLabel: string | undefined;
-              if (height) {
-                if (height >= 2160) qualityLabel = '4K';
-                else if (height >= 1440) qualityLabel = '1440p';
-                else if (height >= 1080) qualityLabel = '1080p';
-                else if (height >= 720) qualityLabel = '720p';
-                else if (height >= 480) qualityLabel = '480p';
-                else if (height >= 360) qualityLabel = '360p';
-                else qualityLabel = `${height}p`;
-              } else if (variant.bandwidth) {
-                if (variant.bandwidth >= 8000000) qualityLabel = '4K';
-                else if (variant.bandwidth >= 5000000) qualityLabel = '1080p';
-                else if (variant.bandwidth >= 2500000) qualityLabel = '720p';
-                else if (variant.bandwidth >= 1000000) qualityLabel = '480p';
-                else qualityLabel = '360p';
-              }
-              
-              return {
-                url: variant.url,
-                bandwidth: variant.bandwidth,
-                resolution: variant.resolution,
-                width: width,
-                height: height,
-                quality: qualityLabel,
-                codecs: variant.codecs,
-              };
-            });
-            
-            metadata.availableQualities = qualities;
-            // Set highest quality as default
-            if (qualities.length > 0) {
-              const highestQuality = qualities.sort((a, b) => b.bandwidth - a.bandwidth)[0];
-              metadata.quality = highestQuality.quality;
-              metadata.resolution = highestQuality.resolution;
-            }
-          }
-        } catch (error) {
-          // Failed to fetch/parse playlist, continue without quality info
-          console.debug('Failed to fetch HLS playlist for quality detection:', error);
-        }
-      }
-    } catch (error) {
-      // Failed to extract qualities, continue without them
-      console.debug('Failed to extract video qualities:', error);
-    }
-  }
-  
-  // Direct videos - check for multiple source elements with different qualities
-  if (normalizedFormat === 'direct') {
-    try {
-      const sources = video.querySelectorAll('source');
-      if (sources.length > 1) {
-        const qualities: VideoQuality[] = [];
-        for (const sourceEl of Array.from(sources)) {
-          const source = sourceEl as HTMLSourceElement;
-          if (source.src && !source.src.startsWith('blob:') && !source.src.startsWith('data:')) {
-            // Try to extract quality from srcset, type, or media attributes
-            const type = source.type;
-            const media = source.media;
-            let qualityLabel: string | undefined;
-            let width: number | undefined;
-            let height: number | undefined;
-            
-            // Check media query for resolution (e.g., "min-width: 1920px")
-            if (media) {
-              const widthMatch = media.match(/width:\s*(\d+)px/);
-              const heightMatch = media.match(/height:\s*(\d+)px/);
-              if (widthMatch) width = parseInt(widthMatch[1]);
-              if (heightMatch) height = parseInt(heightMatch[1]);
-            }
-            
-            // Check if source element has dimensions from data attributes or class names
-            if (!width && !height) {
-              const dataWidth = source.getAttribute('data-width');
-              const dataHeight = source.getAttribute('data-height');
-              if (dataWidth) width = parseInt(dataWidth);
-              if (dataHeight) height = parseInt(dataHeight);
-            }
-            
-            if (height) {
-              if (height >= 2160) qualityLabel = '4K';
-              else if (height >= 1440) qualityLabel = '1440p';
-              else if (height >= 1080) qualityLabel = '1080p';
-              else if (height >= 720) qualityLabel = '720p';
-              else if (height >= 480) qualityLabel = '480p';
-              else if (height >= 360) qualityLabel = '360p';
-              else qualityLabel = `${height}p`;
-            }
-            
-            if (qualityLabel || source.src !== metadata.url) {
-              qualities.push({
-                url: source.src,
-                bandwidth: 0, // Unknown for direct videos
-                resolution: width && height ? `${width}x${height}` : undefined,
-                width: width,
-                height: height,
-                quality: qualityLabel || 'Auto',
-                codecs: type ? type.split(';')[0] : undefined,
-              });
-            }
-          }
-        }
-        
-        if (qualities.length > 1) {
-          metadata.availableQualities = qualities;
-        }
-      }
-    } catch (error) {
-      console.debug('Failed to extract direct video qualities:', error);
-    }
-  }
+  // Quality detection removed - only direct downloads supported
 
   return metadata;
 }
@@ -1214,56 +857,7 @@ function addDetectedVideo(video: VideoMetadata) {
  * Tries multiple methods to extract the actual video file URL
  */
 function getVideoUrl(video: HTMLVideoElement): string | null {
-  // Check for HLS.js player first (most reliable for HLS streams)
-  const hls = (video as any).hls;
-  if (hls) {
-    // HLS.js stores the manifest URL in hls.url
-    if (hls.url && typeof hls.url === 'string' && !hls.url.startsWith('blob:') && !hls.url.startsWith('data:')) {
-      return hls.url;
-    }
-    
-    // Also check hls.media if url is not directly available
-    if (hls.media && hls.media.src && !hls.media.src.startsWith('blob:') && !hls.media.src.startsWith('data:')) {
-      return hls.media.src;
-    }
-    
-    // Check for master playlist in hls levels
-    if (hls.levels && hls.levels.length > 0) {
-      for (const level of hls.levels) {
-        if (level && level.url && !level.url.startsWith('blob:') && !level.url.startsWith('data:')) {
-          return level.url;
-        }
-      }
-    }
-    
-    // Check captured URLs from network interceptor
-    const captured = capturedVideoUrls.get(video);
-    if (captured && (captured.includes('.m3u8') || captured.includes('.mpd'))) {
-      return captured;
-    }
-  }
-
-  // Check for Dash.js player
-  const dash = (video as any).dash;
-  if (dash) {
-    if (dash.getProtectionController && dash.getProtectionController().getLicenseServer) {
-      // Dash.js has the manifest URL
-      const player = dash;
-      if (player.getSource && player.getSource()) {
-        const source = player.getSource();
-        if (source && source.url && !source.url.startsWith('blob:')) {
-          return source.url;
-        }
-      }
-    }
-    
-    if (dash.getActiveStream) {
-      const stream = dash.getActiveStream();
-      if (stream && stream.url && !stream.url.startsWith('blob:')) {
-        return stream.url;
-      }
-    }
-  }
+  // HLS.js and Dash.js player checks removed - only direct downloads supported
 
   // Check currentSrc (what's actually playing)
   if (video.currentSrc && !video.currentSrc.startsWith('blob:') && !video.currentSrc.startsWith('data:')) {
@@ -1297,6 +891,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.debug('Extension context error:', chrome.runtime.lastError.message);
     return false;
   }
+
+  // HLS playlist detection removed - only direct downloads supported
   
   try {
     if (message.type === MessageType.GET_DETECTED_VIDEOS) {
@@ -1310,7 +906,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Set up network interceptor IMMEDIATELY before DOM is ready
-// This ensures we capture early HLS/DASH requests that happen before init()
 setupNetworkInterceptor();
 
 // Initialize when DOM is ready
