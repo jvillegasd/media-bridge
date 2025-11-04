@@ -24,8 +24,8 @@ const activeDownloads = new Map<string, Promise<void>>();
 async function init() {
   logger.info('Service worker initialized');
   
-  // Handle messages
-  chrome.runtime.onMessage.addListener(handleMessage);
+  // Handle messages - now handled directly in addListener with async function
+  // (see handleMessage function below)
   
   // Handle extension installation
   chrome.runtime.onInstalled.addListener(handleInstallation);
@@ -43,42 +43,117 @@ function handleInstallation(details: chrome.runtime.InstalledDetails) {
 }
 
 /**
+ * Handle download request message
+ */
+async function handleDownloadRequestMessage(payload: {
+  url: string;
+  filename?: string;
+  uploadToDrive?: boolean;
+  metadata?: VideoMetadata;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const downloadResult = await handleDownloadRequest(payload);
+    if (downloadResult && downloadResult.error) {
+      return { success: false, error: downloadResult.error };
+    }
+    return { success: true };
+  } catch (error) {
+    logger.error('Download request error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+/**
+ * Handle get downloads message
+ */
+async function handleGetDownloadsMessage(): Promise<{ success: boolean; data?: DownloadState[]; error?: string }> {
+  try {
+    const downloads = await DownloadStateManager.getAllDownloads();
+    return { success: true, data: downloads };
+  } catch (error) {
+    logger.error('Get downloads error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+/**
+ * Handle cancel download message
+ */
+async function handleCancelDownloadMessage(id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await handleCancelDownload(id);
+    return { success: true };
+  } catch (error) {
+    logger.error('Cancel download error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+/**
+ * Handle get config message
+ */
+async function handleGetConfigMessage(): Promise<{ success: boolean; data?: StorageConfig; error?: string }> {
+  try {
+    const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
+    return { success: true, data: config || undefined };
+  } catch (error) {
+    logger.error('Get config error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+/**
+ * Handle save config message
+ */
+async function handleSaveConfigMessage(payload: StorageConfig): Promise<{ success: boolean; error?: string }> {
+  try {
+    await ChromeStorage.set(CONFIG_KEY, payload);
+    return { success: true };
+  } catch (error) {
+    logger.error('Save config error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+/**
  * Handle messages from popup and content scripts
  */
-async function handleMessage(
-  message: any,
-  sender: chrome.runtime.MessageSender,
-  sendResponse: (response: any) => void
-): Promise<boolean> {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   try {
     switch (message.type) {
       case MessageType.DOWNLOAD_REQUEST:
-        const downloadResult = await handleDownloadRequest(message.payload);
-        if (downloadResult && downloadResult.error) {
-          sendResponse({ success: false, error: downloadResult.error });
-        } else {
-          sendResponse({ success: true });
-        }
-        return true;
+        handleDownloadRequestMessage(message.payload).then(sendResponse);
+        return true; // Return true to indicate async response
 
       case MessageType.GET_DOWNLOADS:
-        const downloads = await DownloadStateManager.getAllDownloads();
-        sendResponse({ success: true, data: downloads });
+        handleGetDownloadsMessage().then(sendResponse);
         return true;
 
       case MessageType.CANCEL_DOWNLOAD:
-        await handleCancelDownload(message.payload.id);
-        sendResponse({ success: true });
+        handleCancelDownloadMessage(message.payload.id).then(sendResponse);
         return true;
 
       case MessageType.GET_CONFIG:
-        const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
-        sendResponse({ success: true, data: config });
+        handleGetConfigMessage().then(sendResponse);
         return true;
 
       case MessageType.SAVE_CONFIG:
-        await ChromeStorage.set(CONFIG_KEY, message.payload);
-        sendResponse({ success: true });
+        handleSaveConfigMessage(message.payload).then(sendResponse);
         return true;
 
       case MessageType.VIDEO_DETECTED:
@@ -113,7 +188,7 @@ async function handleMessage(
     });
     return false;
   }
-}
+});
 
 /**
  * Handle download request
@@ -194,7 +269,7 @@ async function handleDownloadRequest(payload: {
     .then(() => {
       activeDownloads.delete(normalizedUrl);
     })
-    .catch((error) => {
+    .catch((error: any) => {
       logger.error(`Download failed for ${url}:`, error);
       activeDownloads.delete(normalizedUrl);
     });

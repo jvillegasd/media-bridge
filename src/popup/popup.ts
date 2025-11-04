@@ -17,23 +17,8 @@ let noVideoNotice: HTMLDivElement | null = null;
 let settingsBtn: HTMLButtonElement | null = null;
 let downloadsBtn: HTMLButtonElement | null = null;
 
-// Tab elements
-const tabs = document.querySelectorAll('.tab');
-const tabContents = {
-  detected: document.getElementById('detectedTab') as HTMLDivElement,
-  errors: document.getElementById('errorsTab') as HTMLDivElement,
-};
-
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
-const errorsList = document.getElementById('errorsList') as HTMLDivElement;
-
-// Pagination elements
-const errorsPagination = document.getElementById('errorsPagination') as HTMLDivElement;
-const errorsPrevBtn = document.getElementById('errorsPrevBtn') as HTMLButtonElement;
-const errorsNextBtn = document.getElementById('errorsNextBtn') as HTMLButtonElement;
-const errorsPageInfo = document.getElementById('errorsPageInfo') as HTMLSpanElement;
-const clearErrorsBtn = document.getElementById('clearErrorsBtn') as HTMLButtonElement;
 
 // Detected videos storage
 let detectedVideos: VideoMetadata[] = [];
@@ -41,22 +26,10 @@ let downloadStates: DownloadState[] = [];
 
 // Quality selection removed - only direct downloads supported
 
-// Pagination state
-const ITEMS_PER_PAGE = 10;
-let errorsCurrentPage = 1;
-
 /**
  * Initialize popup
  */
 async function init() {
-  // Setup tabs
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      const tabName = tab.getAttribute('data-tab')!;
-      switchTab(tabName);
-    });
-  });
-
   // Initialize DOM elements
   noVideoBtn = document.getElementById('noVideoBtn') as HTMLButtonElement;
   forceDetectionBtn = document.getElementById('forceDetectionBtn') as HTMLButtonElement;
@@ -90,21 +63,6 @@ async function init() {
     downloadsBtn.addEventListener('click', handleOpenDownloads);
   }
 
-  // Setup pagination button handlers
-  errorsPrevBtn.addEventListener('click', () => {
-    if (errorsCurrentPage > 1) {
-      errorsCurrentPage--;
-      loadErrors();
-    }
-  });
-
-  errorsNextBtn.addEventListener('click', () => {
-    errorsCurrentPage++;
-    loadErrors();
-  });
-
-  clearErrorsBtn.addEventListener('click', handleClearErrors);
-
   // Listen for messages
   chrome.runtime.onMessage.addListener((message) => {
     // Check if extension context is still valid
@@ -119,7 +77,6 @@ async function init() {
       if (message.type === MessageType.DOWNLOAD_PROGRESS) {
         loadDownloadStates();
         renderDetectedVideos();
-        loadErrors();
       }
       if (message.type === MessageType.VIDEO_DETECTED) {
         addDetectedVideo(message.payload);
@@ -127,10 +84,8 @@ async function init() {
       if (message.type === MessageType.DOWNLOAD_FAILED) {
         loadDownloadStates();
         renderDetectedVideos();
-        loadErrors();
-        // Show error notification if it's a user-initiated download
+        // Log error for debugging
         if (message.payload && message.payload.error) {
-          // Error will be shown in the error tab, but we can also show a brief notification
           console.warn('Download failed:', message.payload.error);
         }
       }
@@ -142,7 +97,6 @@ async function init() {
   // Load data
   await loadDetectedVideos();
   await loadDownloadStates();
-  await loadErrors();
 
   // Get detected videos from current tab
   await requestDetectedVideos();
@@ -151,36 +105,11 @@ async function init() {
   setInterval(async () => {
     await loadDownloadStates();
     renderDetectedVideos();
-    await loadErrors();
     await requestDetectedVideos();
   }, 2000);
 }
 
-/**
- * Switch between tabs
- */
-function switchTab(tabName: string) {
-  tabs.forEach(tab => {
-    if (tab.getAttribute('data-tab') === tabName) {
-      tab.classList.add('active');
-    } else {
-      tab.classList.remove('active');
-    }
-  });
-
-  Object.keys(tabContents).forEach(key => {
-    if (key === tabName) {
-      tabContents[key as keyof typeof tabContents].classList.add('active');
-    } else {
-      tabContents[key as keyof typeof tabContents].classList.remove('active');
-    }
-  });
-
-  // Reset pagination when switching tabs
-  if (tabName === 'errors') {
-    errorsCurrentPage = 1;
-  }
-}
+// Tab switching removed - only video cards shown
 
 function showNoVideoNotice() {
   if (!noVideoNotice) return;
@@ -256,25 +185,38 @@ async function handleOpenDownloads() {
  */
 async function requestDetectedVideos() {
   try {
-    // Check if extension context is still valid
-    if (chrome.runtime.lastError && chrome.runtime.lastError.message) {
-      if (chrome.runtime.lastError.message.includes('Extension context invalidated')) {
-        console.debug('Extension context invalidated, cannot request videos');
-        return;
-      }
+    // Check if runtime is available
+    if (!chrome?.runtime || !chrome?.tabs) {
+      console.debug('Chrome runtime or tabs API not available');
+      return;
     }
     
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab.id) {
       let response;
       try {
-        response = await chrome.tabs.sendMessage(tab.id, {
-          type: MessageType.GET_DETECTED_VIDEOS,
+        response = await new Promise<any>((resolve, reject) => {
+          chrome.tabs.sendMessage(tab.id!, {
+            type: MessageType.GET_DETECTED_VIDEOS,
+          }, (response) => {
+            // Check for extension context invalidation after API call
+            if (chrome.runtime.lastError) {
+              const errorMessage = chrome.runtime.lastError.message || '';
+              if (errorMessage.includes('Extension context invalidated')) {
+                console.debug('Extension context invalidated, cannot communicate with content script');
+                reject(new Error('Extension context invalidated'));
+                return;
+              }
+              // Other errors (content script not available, etc.) - ignore silently
+              reject(new Error(chrome.runtime.lastError.message || 'Unknown error'));
+              return;
+            }
+            resolve(response);
+          });
         });
       } catch (error: any) {
         // Handle extension context invalidated or content script not available
-        if (error?.message?.includes('Extension context invalidated') ||
-            chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
+        if (error?.message?.includes('Extension context invalidated')) {
           console.debug('Extension context invalidated, cannot communicate with content script');
           return;
         }
@@ -544,198 +486,7 @@ function renderDetectedVideos() {
 }
 
 
-/**
- * Handle clear errors button click
- */
-async function handleClearErrors() {
-  const downloads = await DownloadStateManager.getAllDownloads();
-  const failedDownloads = downloads.filter(d => d.progress.stage === 'failed');
-  
-  if (failedDownloads.length === 0) {
-    return; // No errors to clear
-  }
-
-  // Show confirmation dialog
-  const confirmed = confirm(
-    `Are you sure you want to clear ${failedDownloads.length} error${failedDownloads.length > 1 ? 's' : ''}?\n\nThis action cannot be undone.`
-  );
-
-  if (!confirmed) {
-    return;
-  }
-
-  // Clear all failed downloads
-  clearErrorsBtn.disabled = true;
-  clearErrorsBtn.textContent = 'Clearing...';
-  
-  try {
-    // Remove all failed downloads
-    for (const download of failedDownloads) {
-      await DownloadStateManager.removeDownload(download.id);
-    }
-    
-    // Reload errors list
-    errorsCurrentPage = 1;
-    await loadErrors();
-  } catch (error) {
-    console.error('Failed to clear errors:', error);
-    alert('Failed to clear errors. Please try again.');
-  } finally {
-    clearErrorsBtn.disabled = false;
-    clearErrorsBtn.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="3 6 5 6 21 6"></polyline>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-      </svg>
-      Clear Errors
-    `;
-  }
-}
-
-/**
- * Load and display errors
- */
-async function loadErrors() {
-  const downloads = await DownloadStateManager.getAllDownloads();
-  const failedDownloads = downloads.filter(d => d.progress.stage === 'failed');
-  
-  // Sort by updated date (newest first), fallback to createdAt
-  failedDownloads.sort((a, b) => {
-    const aTime = a.updatedAt || a.createdAt || 0;
-    const bTime = b.updatedAt || b.createdAt || 0;
-    return bTime - aTime; // Descending order
-  });
-  
-  // Enable/disable clear button based on errors count
-  clearErrorsBtn.disabled = failedDownloads.length === 0;
-  
-  if (failedDownloads.length === 0) {
-    errorsList.innerHTML = '<div class="empty-state">No errors</div>';
-    errorsPagination.style.display = 'none';
-    return;
-  }
-
-  // Calculate pagination
-  const totalPages = Math.ceil(failedDownloads.length / ITEMS_PER_PAGE);
-  if (errorsCurrentPage > totalPages) {
-    errorsCurrentPage = totalPages || 1;
-  }
-  
-  const startIndex = (errorsCurrentPage - 1) * ITEMS_PER_PAGE;
-  const endIndex = startIndex + ITEMS_PER_PAGE;
-  const paginatedErrors = failedDownloads.slice(startIndex, endIndex);
-
-  // Render errors
-  if (paginatedErrors.length === 0) {
-    errorsList.innerHTML = '<div class="empty-state">No errors on this page</div>';
-  } else {
-    errorsList.innerHTML = paginatedErrors.map(download => {
-      const errorText = download.progress.error || 'Unknown error';
-      const timestamp = download.updatedAt || download.createdAt || Date.now();
-      const dateTime = formatDateTime(timestamp);
-      
-      return `
-      <div class="error-item">
-        <div class="error-item-header">
-          <div class="error-item-title" title="${escapeHtml(download.url)}">
-            ${escapeHtml(getDownloadTitle(download))}
-          </div>
-          <span class="error-item-status status-failed">Failed</span>
-        </div>
-        <div class="error-item-meta">
-          <span class="error-item-datetime">${dateTime}</span>
-          <button class="error-copy-btn" 
-                  data-error="${escapeHtml(errorText)}" 
-                  data-url="${escapeHtml(download.url)}"
-                  data-title="${escapeHtml(getDownloadTitle(download))}"
-                  data-timestamp="${timestamp}"
-                  title="Copy error traceback">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-          </button>
-        </div>
-        ${errorText ? `
-          <div class="error-item-message">
-            ${escapeHtml(errorText)}
-          </div>
-        ` : ''}
-        <div class="error-item-url" data-url="${escapeHtml(download.url)}">
-          ${escapeHtml(download.url)}
-        </div>
-      </div>
-    `;
-    }).join('');
-
-    // Add click handlers to open failed video URLs
-    errorsList.querySelectorAll('.error-item-url').forEach(link => {
-      link.addEventListener('click', async () => {
-        const url = (link as HTMLElement).getAttribute('data-url')!;
-        await chrome.tabs.create({ url });
-      });
-    });
-
-    // Add click handlers for copy buttons
-    errorsList.querySelectorAll('.error-copy-btn').forEach(btnElement => {
-      const btn = btnElement as HTMLButtonElement;
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const errorText = btn.getAttribute('data-error') || '';
-        const url = btn.getAttribute('data-url') || '';
-        const title = btn.getAttribute('data-title') || '';
-        const timestampStr = btn.getAttribute('data-timestamp') || '';
-        const timestamp = timestampStr ? parseInt(timestampStr) : Date.now();
-        
-        // Build full error traceback
-        const fullError = `Error: ${errorText}\n\nURL: ${url}\nTimestamp: ${formatDateTime(timestamp)}\nTitle: ${title}`;
-        
-        try {
-          await navigator.clipboard.writeText(fullError);
-          // Visual feedback
-          const originalHTML = btn.innerHTML;
-          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
-          btn.style.color = '#4caf50';
-          setTimeout(() => {
-            btn.innerHTML = originalHTML;
-            btn.style.color = '';
-          }, 2000);
-        } catch (err) {
-          // Fallback for older browsers
-          const textArea = document.createElement('textarea');
-          textArea.value = fullError;
-          textArea.style.position = 'fixed';
-          textArea.style.opacity = '0';
-          document.body.appendChild(textArea);
-          textArea.select();
-          try {
-            document.execCommand('copy');
-            const originalHTML = btn.innerHTML;
-            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
-            btn.style.color = '#4caf50';
-            setTimeout(() => {
-              btn.innerHTML = originalHTML;
-              btn.style.color = '';
-            }, 2000);
-          } catch (fallbackErr) {
-            console.error('Failed to copy:', fallbackErr);
-          }
-          document.body.removeChild(textArea);
-        }
-      });
-    });
-  }
-
-  // Update pagination controls
-  if (totalPages > 1) {
-    errorsPagination.style.display = 'flex';
-    errorsPageInfo.textContent = `Page ${errorsCurrentPage} of ${totalPages} (${failedDownloads.length} total)`;
-    errorsPrevBtn.disabled = errorsCurrentPage === 1;
-    errorsNextBtn.disabled = errorsCurrentPage === totalPages;
-  } else {
-    errorsPagination.style.display = 'none';
-  }
-}
+// Error handling functions removed - errors tab removed
 
 /**
  * Start download
@@ -765,17 +516,30 @@ async function startDownload(
       }
     }
     
-    const response = await chrome.runtime.sendMessage({
-      type: MessageType.DOWNLOAD_REQUEST,
-      payload: {
-        url,
-        metadata: videoMetadata, // Include video metadata so download state can track which video was downloaded
-      },
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        type: MessageType.DOWNLOAD_REQUEST,
+        payload: {
+          url,
+          metadata: videoMetadata, // Include video metadata so download state can track which video was downloaded
+        },
+      }, (response) => {
+        // Check for extension context invalidation
+        if (chrome.runtime.lastError) {
+          const errorMessage = chrome.runtime.lastError.message || '';
+          if (errorMessage.includes('Extension context invalidated')) {
+            reject(new Error('Extension context invalidated. Please reload the extension and try again.'));
+            return;
+          }
+          reject(new Error(chrome.runtime.lastError.message || 'Unknown error'));
+          return;
+        }
+        resolve(response);
+      });
     }).catch((error: any) => {
       // Handle extension context invalidated
-      if (error?.message?.includes('Extension context invalidated') ||
-          chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
-        throw new Error('Extension context invalidated. Please refresh the page and try again.');
+      if (error?.message?.includes('Extension context invalidated')) {
+        throw new Error('Extension context invalidated. Please reload the extension and try again.');
       }
       throw error;
     });

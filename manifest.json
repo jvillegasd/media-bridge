@@ -47,7 +47,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*", "ffmpeg/*", "offscreen/offscreen.html", "offscreen/offscreen.js"],
+      "resources": ["icons/*", "ffmpeg/*"],
       "matches": ["<all_urls>"]
     }
   ]

@@ -11,6 +11,12 @@ import { v4 as uuidv4 } from 'uuid';
 let detectedVideos: VideoMetadata[] = [];
 const capturedVideoUrls = new Map<HTMLVideoElement, string>(); // Map video element -> actual video URL
 
+// Track videos that have been sent to popup to avoid redundant updates
+const sentToPopup = new Set<string>();
+
+// Track videos by stable identifier to prevent duplicates
+const videoIdMap = new Map<string, VideoMetadata>(); // videoId -> VideoMetadata
+
 // Pending playlist captures are no longer needed - only direct downloads supported
 
 // Track recently processed URLs so we don't spam the same capture repeatedly
@@ -39,6 +45,46 @@ function registerCapturedUrl(url: string): boolean {
 }
 
 // Playlist functions removed - only direct downloads supported
+
+/**
+ * Safely send message to runtime, handling extension context invalidation
+ */
+function safeSendMessage(message: any): Promise<void> {
+  return new Promise((resolve) => {
+    // Check if runtime is available
+    if (!chrome?.runtime?.sendMessage) {
+      console.debug('Chrome runtime not available');
+      resolve();
+      return;
+    }
+
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        // Check for extension context invalidation
+        if (chrome.runtime.lastError) {
+          const errorMessage = chrome.runtime.lastError.message || '';
+          if (errorMessage.includes('Extension context invalidated')) {
+            console.debug('Extension context invalidated, cannot send messages');
+            resolve();
+            return;
+          }
+          // Other errors (popup not open, etc.) - ignore silently
+        }
+        resolve();
+      });
+    } catch (error: any) {
+      // Handle extension context invalidated error
+      if (error?.message?.includes('Extension context invalidated') ||
+          chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
+        console.debug('Extension context invalidated, cannot send messages');
+        resolve();
+        return;
+      }
+      // Other errors - ignore silently
+      resolve();
+    }
+  });
+}
 
 function normalizeFormat(format: VideoFormat): VideoFormat {
   if (format === 'unknown') {
@@ -127,16 +173,10 @@ function handlePlaylistCapture(url: string) {
             existingVideo.format = normalizeFormat('direct');
             updatedExistingVideo = true;
             
-            try {
-              chrome.runtime.sendMessage({
-                type: MessageType.VIDEO_DETECTED,
-                payload: existingVideo,
-              }).catch(() => {
-                // Popup might not be open, ignore
-              });
-            } catch (e) {
-              // Ignore errors
-            }
+            safeSendMessage({
+              type: MessageType.VIDEO_DETECTED,
+              payload: existingVideo,
+            });
                 break;
           }
         }
@@ -178,16 +218,10 @@ function handleDirectCapture(url: string) {
       existingVideo.format = normalizeFormat('direct');
           updatedExistingVideo = true;
                 
-                try {
-                  chrome.runtime.sendMessage({
-                    type: MessageType.VIDEO_DETECTED,
-                    payload: existingVideo,
-                  }).catch(() => {
-                    // Popup might not be open, ignore
-                  });
-                } catch (e) {
-                  // Ignore errors
-                }
+                safeSendMessage({
+                  type: MessageType.VIDEO_DETECTED,
+                  payload: existingVideo,
+                });
                 break;
               }
             }
@@ -357,7 +391,7 @@ function init() {
   });
   
   // Retry detection periodically for pages that load data dynamically (YouTube, Twitter)
-  // Increased interval for Twitter/X since scrolling loads content
+  // This allows detection during scrolling to catch new videos
   setInterval(() => {
     detectVideos();
   }, 3000);
@@ -417,6 +451,9 @@ function generateVideoId(video: HTMLVideoElement, pageUrl: string): string {
 async function detectVideos() {
   // Build set of already detected URLs to avoid duplicates within this detection run
   const detectedUrls = new Set<string>(detectedVideos.map(v => v.url));
+  
+  // Also track by videoId to prevent duplicates even if URL changes slightly
+  const existingVideoIds = new Set<string>(detectedVideos.map(v => v.videoId || '').filter(id => id));
   
   // Find video elements generically
   const videoElements = document.querySelectorAll('video');
@@ -525,69 +562,46 @@ async function detectVideos() {
     metadata.url = finalUrl;
     metadata.format = finalFormat;
     
-    console.log('[Media Bridge] Detected video:', {
-      url: finalUrl,
-      format: finalFormat,
-      pageUrl: metadata.pageUrl
-    });
-
-    // Check if there's an existing video from the same page that should be replaced
-    if (metadata.pageUrl) {
-      // Look for existing direct video from the same page that could be the same video
-      // Try to match by pageUrl and similar dimensions/duration first (more likely same video)
-      let existingDirectVideoIndex = -1;
-      
-      // First try: Match by pageUrl, format, and similar dimensions (most accurate)
-      if (metadata.width && metadata.height) {
-        existingDirectVideoIndex = detectedVideos.findIndex(v => 
-          v.pageUrl === metadata.pageUrl && 
-          v.format === 'direct' &&
-          v.width === metadata.width &&
-          v.height === metadata.height &&
-          (v.url.includes('.mp4') || v.url.includes('.webm') || v.url.includes('.mov'))
-        );
-      }
-      
-      // Second try: Match by pageUrl and format only (if dimensions don't match or aren't available)
-      if (existingDirectVideoIndex < 0) {
-        existingDirectVideoIndex = detectedVideos.findIndex(v => 
-          v.pageUrl === metadata.pageUrl && 
-          v.format === 'direct' &&
-          (v.url.includes('.mp4') || v.url.includes('.webm') || v.url.includes('.mov')) &&
-          // Only replace if there's only one direct video on this page (to avoid false matches)
-          detectedVideos.filter(dv => dv.pageUrl === metadata.pageUrl && dv.format === 'direct').length === 1
-        );
-      }
-      
-      if (existingDirectVideoIndex >= 0) {
-        // Replace the direct video with HLS/DASH
-        const existingDirect = detectedVideos[existingDirectVideoIndex];
-        // Preserve metadata from existing video
-        metadata.title = metadata.title || existingDirect.title;
-        metadata.thumbnail = metadata.thumbnail || existingDirect.thumbnail;
-        metadata.width = metadata.width || existingDirect.width;
-        metadata.height = metadata.height || existingDirect.height;
-        metadata.duration = metadata.duration || existingDirect.duration;
-        metadata.resolution = metadata.resolution || existingDirect.resolution;
-        metadata.videoId = existingDirect.videoId || metadata.videoId; // Keep the same videoId
-        
-        // Remove the direct video
-        detectedVideos.splice(existingDirectVideoIndex, 1);
-        detectedUrls.delete(existingDirect.url);
-        
-        // Add the HLS/DASH video
-        detectedUrls.add(videoIdentifier);
-        detectedUrls.add(finalUrl);
-        addDetectedVideo(metadata);
-        
-        // Already added, skip the normal add at the end
+    // Generate or get stable videoId for tracking
+    if (!metadata.videoId) {
+      const stableId = extractStableId(finalUrl) || videoIdentifier;
+      metadata.videoId = stableId;
+    }
+    
+    // Skip if we already have this video by videoId
+    if (existingVideoIds.has(metadata.videoId)) {
+      // Update existing video if needed, but don't add duplicate
+      const existingVideo = detectedVideos.find(v => v.videoId === metadata.videoId);
+      if (existingVideo) {
+        // Update URL if it changed (e.g., blob URL resolved to direct URL)
+        if (finalUrl !== existingVideo.url && finalIsRealUrl) {
+          existingVideo.url = finalUrl;
+          // Update metadata if missing
+          if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
+          if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
+          if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
+          if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
+          if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
+          if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
+          
+          // Only notify if URL actually changed
+          addDetectedVideo(existingVideo);
+        }
         continue;
       }
     }
+    
+    console.log('[Media Bridge] Detected video:', {
+      url: finalUrl,
+      format: finalFormat,
+      videoId: metadata.videoId,
+      pageUrl: metadata.pageUrl
+    });
 
     // Track both identifier and final URL to avoid duplicates in subsequent runs
     detectedUrls.add(videoIdentifier);
     detectedUrls.add(finalUrl);
+    existingVideoIds.add(metadata.videoId);
 
     addDetectedVideo(metadata);
   }
@@ -788,22 +802,35 @@ function extractStableId(url: string): string | null {
  * Add detected video and notify popup (generic duplicate detection)
  */
 function addDetectedVideo(video: VideoMetadata) {
-  // Check if already exists by URL
-  let existingIndex = detectedVideos.findIndex(v => v.url === video.url);
+  // Ensure video has a stable ID
+  if (!video.videoId) {
+    video.videoId = extractStableId(video.url) || video.url;
+  }
   
-  // If not found and URL contains an ID pattern, check by ID
+  // Check if already exists by videoId (most reliable)
+  let existingIndex = -1;
+  if (video.videoId) {
+    existingIndex = detectedVideos.findIndex(v => v.videoId === video.videoId);
+  }
+  
+  // Fallback: check by URL if no videoId match
+  if (existingIndex < 0) {
+    existingIndex = detectedVideos.findIndex(v => v.url === video.url);
+  }
+  
+  // Fallback: check by stable ID pattern if URL contains one
   if (existingIndex < 0) {
     const videoId = extractStableId(video.url);
     if (videoId) {
       existingIndex = detectedVideos.findIndex(v => {
-        const vId = extractStableId(v.url);
+        const vId = extractStableId(v.url) || v.videoId;
         return vId && vId === videoId && v.pageUrl === video.pageUrl;
       });
     }
   }
   
   if (existingIndex >= 0) {
-    // Update existing entry
+    // Update existing entry - keep the same object reference to prevent flickering
     const existing = detectedVideos[existingIndex];
     
     // Update title - prefer browser tab title (document.title) over any other title
@@ -814,43 +841,93 @@ function addDetectedVideo(video: VideoMetadata) {
     }
     
     // Update other metadata if missing
+    let updated = false;
     if (!existing.thumbnail && video.thumbnail) {
       existing.thumbnail = video.thumbnail;
+      updated = true;
     }
     if (!existing.width && video.width) {
       existing.width = video.width;
+      updated = true;
     }
     if (!existing.height && video.height) {
       existing.height = video.height;
+      updated = true;
     }
     if (!existing.duration && video.duration) {
       existing.duration = video.duration;
+      updated = true;
     }
     if (!existing.resolution && video.resolution) {
       existing.resolution = video.resolution;
+      updated = true;
     }
-    // Don't send duplicate message
+    
+    // Update URL if it changed (e.g., blob URL resolved to direct URL)
+    if (video.url !== existing.url && !video.url.startsWith('blob:') && !video.url.startsWith('data:')) {
+      existing.url = video.url;
+      updated = true;
+    }
+    
+    // Update videoId if missing
+    if (!existing.videoId && video.videoId) {
+      existing.videoId = video.videoId;
+    }
+    
+    // Only send update if something meaningful changed AND we haven't sent this recently
+    // Use videoId as key for tracking sent videos
+    const trackingKey = existing.videoId || existing.url;
+    if (updated && !sentToPopup.has(trackingKey)) {
+      sentToPopup.add(trackingKey);
+      safeSendMessage({
+        type: MessageType.VIDEO_DETECTED,
+        payload: existing,
+      });
+    }
+    
     return;
   }
 
+  // New video - add to list
   detectedVideos.push(video);
   
-  // Send to popup
-  chrome.runtime.sendMessage({
-    type: MessageType.VIDEO_DETECTED,
-    payload: video,
-  }).catch((error) => {
-    // Popup might not be open, or extension context invalidated
-    // Check if error is due to invalidated context
-    if (error?.message?.includes('Extension context invalidated') || 
-        chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
-      // Extension was reloaded, stop trying to send messages
-      console.debug('Extension context invalidated, stopping video detection notifications');
-      return;
-    }
-    // Other errors (popup not open, etc.) - ignore silently
-  });
+  // Track in videoIdMap
+  if (video.videoId) {
+    videoIdMap.set(video.videoId, video);
+  }
+  
+  // Only send to popup if we haven't sent this video recently
+  const trackingKey = video.videoId || video.url;
+  if (!sentToPopup.has(trackingKey)) {
+    sentToPopup.add(trackingKey);
+    
+    // Send to popup
+    safeSendMessage({
+      type: MessageType.VIDEO_DETECTED,
+      payload: video,
+    });
+  }
 }
+
+/**
+ * Clear sent-to-popup tracking when page changes (to allow re-detection on navigation)
+ */
+function clearSentToPopupTracking() {
+  sentToPopup.clear();
+  videoIdMap.clear();
+}
+
+// Clear tracking when page URL changes
+let lastUrl = window.location.href;
+setInterval(() => {
+  const currentUrl = window.location.href;
+  if (currentUrl !== lastUrl) {
+    lastUrl = currentUrl;
+    clearSentToPopupTracking();
+    // Also clear detected videos from previous page
+    detectedVideos = detectedVideos.filter(v => v.pageUrl === currentUrl);
+  }
+}, 1000);
 
 /**
  * Get video URL from video element
@@ -888,7 +965,12 @@ function getVideoUrl(video: HTMLVideoElement): string | null {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Check if extension context is still valid
   if (chrome.runtime.lastError) {
-    console.debug('Extension context error:', chrome.runtime.lastError.message);
+    const errorMessage = chrome.runtime.lastError.message || '';
+    if (errorMessage.includes('Extension context invalidated')) {
+      console.debug('Extension context invalidated');
+      return false;
+    }
+    console.debug('Extension context error:', errorMessage);
     return false;
   }
 
@@ -897,8 +979,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   try {
     if (message.type === MessageType.GET_DETECTED_VIDEOS) {
       sendResponse({ videos: detectedVideos });
+      return true; // Keep channel open for async response
     }
-    return true;
+    return false;
   } catch (error) {
     console.debug('Error handling message:', error);
     return false;
