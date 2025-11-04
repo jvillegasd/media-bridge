@@ -4,6 +4,7 @@
 
 import { openDB, deleteDB, DBSchema, IDBPDatabase } from 'idb';
 import { logger } from '../../utils/logger';
+import { mergeVideoAudio } from '../../../background/offscreen-merger-client';
 
 interface ChunksDB extends DBSchema {
   chunks: {
@@ -154,30 +155,69 @@ export class IndexedDBHlsBucket implements HlsBucket {
   }
 
   /**
-   * Merge segments using FFmpeg (called from offscreen document)
-   * This is a placeholder - actual implementation will use offscreen-merger-client
+   * Merge segments - handles both muxed (video+audio) and separate audio/video tracks
    */
   private async mergeSegments(
     segmentBuffers: ArrayBuffer[],
     onProgress?: (progress: number, message: string) => void
   ): Promise<Blob> {
-    // This will be implemented to use the offscreen document
-    // For now, we'll combine chunks directly (works for non-encrypted segments)
-    // In production, this should use FFmpeg for proper merging
-    
-    onProgress?.(0.7, 'Combining segments...');
-    const combined = new Uint8Array(
-      segmentBuffers.reduce((sum, buf) => sum + buf.byteLength, 0)
-    );
+    // Separate video and audio segments
+    const videoSegments = segmentBuffers.slice(0, this.videoLength);
+    const audioSegments = this.audioLength > 0 
+      ? segmentBuffers.slice(this.videoLength, this.videoLength + this.audioLength)
+      : [];
 
-    let offset = 0;
-    for (const buffer of segmentBuffers) {
-      combined.set(new Uint8Array(buffer), offset);
-      offset += buffer.byteLength;
+    onProgress?.(0.7, 'Preparing segments for merging...');
+
+    if (audioSegments.length > 0) {
+      // We have separate audio and video tracks - use FFmpeg to merge them
+      logger.info(`Merging ${videoSegments.length} video segments and ${audioSegments.length} audio segments with FFmpeg`);
+      
+      try {
+        onProgress?.(0.75, 'Requesting FFmpeg merge...');
+        const mergedArrayBuffer = await mergeVideoAudio(
+          videoSegments,
+          audioSegments,
+          (progress, message) => {
+            // Map FFmpeg progress (0.75-1.0) to our progress range
+            const mappedProgress = 0.75 + (progress * 0.25);
+            onProgress?.(mappedProgress, message);
+          }
+        );
+        
+        onProgress?.(1, 'Merge complete');
+        return new Blob([mergedArrayBuffer], { type: 'video/mp4' });
+      } catch (error) {
+        logger.error('FFmpeg merge failed, falling back to video-only:', error);
+        // Fallback to video-only if FFmpeg fails
+        const videoCombined = new Uint8Array(
+          videoSegments.reduce((sum, buf) => sum + buf.byteLength, 0)
+        );
+
+        let offset = 0;
+        for (const buffer of videoSegments) {
+          videoCombined.set(new Uint8Array(buffer), offset);
+          offset += buffer.byteLength;
+        }
+
+        onProgress?.(0.9, 'Creating blob (video only - FFmpeg merge failed)...');
+        return new Blob([videoCombined], { type: 'video/mp4' });
+      }
+    } else {
+      // Muxed segments - can be concatenated directly
+      const combined = new Uint8Array(
+        segmentBuffers.reduce((sum, buf) => sum + buf.byteLength, 0)
+      );
+
+      let offset = 0;
+      for (const buffer of segmentBuffers) {
+        combined.set(new Uint8Array(buffer), offset);
+        offset += buffer.byteLength;
+      }
+
+      onProgress?.(0.9, 'Creating blob...');
+      return new Blob([combined], { type: 'video/mp4' });
     }
-
-    onProgress?.(0.9, 'Creating blob...');
-    return new Blob([combined], { type: 'video/mp4' });
   }
 
   /**
