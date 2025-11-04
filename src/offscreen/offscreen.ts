@@ -2,7 +2,7 @@
 // This file can be kept for potential future use or removed entirely
 
 import { MessageType } from '../shared/messages';
-import { logger } from '../lib/utils/logger';
+import { logger } from '../core/utils/logger';
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== MessageType.OFFSCREEN_MERGE_REQUEST) {

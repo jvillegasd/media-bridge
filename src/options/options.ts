@@ -2,9 +2,9 @@
  * Options page logic
  */
 
-import { ChromeStorage } from '../lib/storage/chrome-storage';
-import { GoogleAuth } from '../lib/cloud/google-auth';
-import { StorageConfig } from '../lib/types';
+import { ChromeStorage } from '../core/storage/chrome-storage';
+import { GoogleAuth } from '../core/cloud/google-auth';
+import { StorageConfig } from '../core/types';
 
 // DOM elements
 const driveEnabled = document.getElementById('driveEnabled') as HTMLInputElement;

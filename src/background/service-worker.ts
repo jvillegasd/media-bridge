@@ -2,14 +2,15 @@
  * Background service worker for download orchestration
  */
 
-import { DownloadManager } from '../lib/downloader/download-manager';
-import { DownloadStateManager } from '../lib/storage/download-state';
-import { UploadManager } from '../lib/cloud/upload-manager';
-import { ChromeStorage } from '../lib/storage/chrome-storage';
+import { DownloadManager } from '../core/downloader/download-manager';
+import { DownloadStateManager } from '../core/storage/download-state';
+import { UploadManager } from '../core/cloud/upload-manager';
+import { ChromeStorage } from '../core/storage/chrome-storage';
 import { MessageType } from '../shared/messages';
-import { DownloadState, StorageConfig, VideoMetadata } from '../lib/types';
-import { logger } from '../lib/utils/logger';
-import { normalizeUrl } from '../lib/utils/url-utils';
+import { DownloadState, StorageConfig, VideoMetadata } from '../core/types';
+import { logger } from '../core/utils/logger';
+import { normalizeUrl } from '../core/utils/url-utils';
+import { initializeHlsDetector } from './hls-detector';
 
 // Configuration keys
 const CONFIG_KEY = 'storage_config';
@@ -23,6 +24,9 @@ const activeDownloads = new Map<string, Promise<void>>();
  */
 async function init() {
   logger.info('Service worker initialized');
+  
+  // Initialize HLS detector
+  initializeHlsDetector();
   
   // Handle messages - now handled directly in addListener with async function
   // (see handleMessage function below)

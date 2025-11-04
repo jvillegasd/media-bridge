@@ -2,10 +2,10 @@
  * Popup UI logic with tabs for Detected Videos, Downloads, and Errors
  */
 
-import { DownloadState, VideoMetadata, VideoFormat } from '../lib/types';
-import { DownloadStateManager } from '../lib/storage/download-state';
+import { DownloadState, VideoMetadata, VideoFormat } from '../core/types';
+import { DownloadStateManager } from '../core/storage/download-state';
 import { MessageType } from '../shared/messages';
-import { normalizeUrl } from '../lib/utils/url-utils';
+import { normalizeUrl } from '../core/utils/url-utils';
 import { v4 as uuidv4 } from 'uuid';
 
 

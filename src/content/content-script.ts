@@ -2,9 +2,9 @@
  * Content script for video detection - sends detected videos to popup
  */
 
-import { FormatDetector } from '../lib/downloader/format-detector';
+import { FormatDetector } from '../core/downloader/format-detector';
 import { MessageType } from '../shared/messages';
-import { VideoFormat, VideoMetadata } from '../lib/types';
+import { VideoFormat, VideoMetadata } from '../core/types';
 import { v4 as uuidv4 } from 'uuid';
 
 // Video detection state
@@ -164,13 +164,15 @@ function handlePlaylistCapture(url: string) {
 
   let updatedExistingVideo = false;
           for (const existingVideo of detectedVideos) {
-            const needsUpdate = (!isDirectVideoUrl(existingVideo.url)) &&
+            // Don't update if existing video already has HLS (prioritize HLS over direct)
+            const hasHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
+            const needsUpdate = (!isDirectVideoUrl(existingVideo.url) && !hasHls) &&
                                (existingVideo.pageUrl === window.location.href ||
                                 (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
           
           if (needsUpdate) {
             existingVideo.url = url;
-            existingVideo.format = normalizeFormat('direct');
+            existingVideo.format = 'hls'; // This is for playlist capture
             updatedExistingVideo = true;
             
             safeSendMessage({
@@ -209,7 +211,9 @@ function handleDirectCapture(url: string) {
 
       let updatedExistingVideo = false;
             for (const existingVideo of detectedVideos) {
-          const needsUpdate = (!isDirectVideoUrl(existingVideo.url)) &&
+          // Don't update if existing video already has HLS (prioritize HLS over direct)
+          const hasHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
+          const needsUpdate = (!isDirectVideoUrl(existingVideo.url) && !hasHls) &&
                                  (existingVideo.pageUrl === window.location.href ||
                                   (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
               
@@ -255,8 +259,8 @@ function handleSegmentCapture(url: string) {
 function handleCapturedRequest(url: string) {
   const lowerUrl = url.toLowerCase();
 
-  // Skip playlist URLs - only direct downloads supported
-  if (false) {
+  // Check for HLS playlist URLs
+  if (lowerUrl.includes('.m3u8') || lowerUrl.includes('playlist.m3u8') || lowerUrl.includes('master.m3u8')) {
     handlePlaylistCapture(url);
   }
 
@@ -574,18 +578,56 @@ async function detectVideos() {
       const existingVideo = detectedVideos.find(v => v.videoId === metadata.videoId);
       if (existingVideo) {
         // Update URL if it changed (e.g., blob URL resolved to direct URL)
+        // But prioritize HLS over direct - don't replace HLS with direct
+        const existingIsHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
+        const newIsHls = finalFormat === 'hls' || finalUrl.includes('.m3u8');
+        
         if (finalUrl !== existingVideo.url && finalIsRealUrl) {
-          existingVideo.url = finalUrl;
-          // Update metadata if missing
-          if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
-          if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
-          if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
-          if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
-          if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
-          if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
-          
-          // Only notify if URL actually changed
-          addDetectedVideo(existingVideo);
+          // Only update if:
+          // 1. New is HLS and existing is not HLS (upgrade to HLS), OR
+          // 2. Both are same type, OR
+          // 3. Existing is direct and new is direct (but prefer HLS)
+          if (newIsHls && !existingIsHls) {
+            // Upgrade from direct to HLS
+            existingVideo.url = finalUrl;
+            existingVideo.format = finalFormat;
+            // Update metadata if missing
+            if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
+            if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
+            if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
+            if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
+            if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
+            if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
+            
+            addDetectedVideo(existingVideo);
+          } else if (!existingIsHls && !newIsHls) {
+            // Both are direct, update normally
+            existingVideo.url = finalUrl;
+            existingVideo.format = finalFormat;
+            // Update metadata if missing
+            if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
+            if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
+            if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
+            if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
+            if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
+            if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
+            
+            addDetectedVideo(existingVideo);
+          } else if (existingIsHls && newIsHls) {
+            // Both are HLS, update normally
+            existingVideo.url = finalUrl;
+            existingVideo.format = finalFormat;
+            // Update metadata if missing
+            if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
+            if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
+            if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
+            if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
+            if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
+            if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
+            
+            addDetectedVideo(existingVideo);
+          }
+          // If existing is HLS and new is direct, don't update (keep HLS)
         }
         continue;
       }
@@ -864,9 +906,31 @@ function addDetectedVideo(video: VideoMetadata) {
     }
     
     // Update URL if it changed (e.g., blob URL resolved to direct URL)
+    // But prioritize HLS over direct - don't replace HLS with direct
+    const existingIsHls = existing.format === 'hls' || existing.url.includes('.m3u8');
+    const newIsHls = video.format === 'hls' || video.url.includes('.m3u8');
+    const newIsDirect = video.format === 'direct' || isDirectVideoUrl(video.url);
+    
     if (video.url !== existing.url && !video.url.startsWith('blob:') && !video.url.startsWith('data:')) {
-      existing.url = video.url;
-      updated = true;
+      // Only update if:
+      // 1. New is HLS and existing is not HLS (upgrade to HLS), OR
+      // 2. Both are same type (direct->direct or HLS->HLS), OR
+      // 3. Existing is direct and new is direct (but prefer HLS)
+      if (newIsHls && !existingIsHls) {
+        // Upgrade from direct to HLS
+        existing.url = video.url;
+        existing.format = video.format;
+        updated = true;
+      } else if (!existingIsHls && !newIsHls) {
+        // Both are direct, update normally
+        existing.url = video.url;
+        updated = true;
+      } else if (existingIsHls && newIsHls) {
+        // Both are HLS, update normally
+        existing.url = video.url;
+        updated = true;
+      }
+      // If existing is HLS and new is direct, don't update (keep HLS)
     }
     
     // Update videoId if missing
