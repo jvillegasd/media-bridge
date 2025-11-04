@@ -84,18 +84,25 @@ export class HlsDownloadHandler {
 
         // Step 6: Merge segments
         await this.updateProgress(stateId, 'merging', 0.9, 'Merging segments...');
-        const blobUrl = await bucket.getLink((progress, message) => {
+        const linkOrBlob = await bucket.getLink((progress, message) => {
           this.updateProgress(stateId, 'merging', 0.9 + progress * 0.1, message).catch(
             logger.error
           );
         });
 
-        // Step 7: Fetch the merged blob
-        const response = await fetch(blobUrl);
-        const blob = await response.blob();
+        // Step 7: Get the merged blob
+        let blob: Blob;
+        if (linkOrBlob instanceof Blob) {
+          // Service worker context - blob returned directly
+          blob = linkOrBlob;
+        } else {
+          // Regular context - fetch from blob URL
+          const response = await fetch(linkOrBlob);
+          blob = await response.blob();
+          URL.revokeObjectURL(linkOrBlob);
+        }
 
         // Cleanup
-        URL.revokeObjectURL(blobUrl);
         await bucket.cleanup();
 
         logger.info('HLS download completed successfully');

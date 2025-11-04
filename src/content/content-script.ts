@@ -94,6 +94,11 @@ function normalizeFormat(format: VideoFormat): VideoFormat {
 }
 
 function isDirectVideoUrl(url: string): boolean {
+  // Check if this is an HLS segment URL - these should not be treated as direct videos
+  if (FormatDetector.isHlsSegmentUrl(url)) {
+    return false;
+  }
+  
   return url.includes('.mp4') || url.includes('.webm') || url.includes('.mov') ||
                          url.includes('.avi') || url.includes('.mkv') || url.includes('.flv') ||
                          url.includes('.wmv') || url.includes('.ogg');
@@ -139,58 +144,163 @@ function derivePlaylistCandidatesFromSegment(segmentUrl: string): string[] {
   return Array.from(candidates);
 }
 
+/**
+ * Check if an HLS playlist URL is a master playlist (not a quality-specific one)
+ */
+function isMasterPlaylist(url: string): boolean {
+  const urlLower = url.toLowerCase();
+  
+  // Must be an .m3u8 file
+  if (!urlLower.includes('.m3u8')) {
+    return false;
+  }
+  
+  // Master playlists typically have:
+  // 1. variant_version query parameter (Twitter/X)
+  // 2. Don't have /avc1/ or /mp4a/ in the path (these are quality-specific)
+  // 3. Don't have specific codec/bitrate/resolution in path
+  
+  // Check for variant_version (master playlist indicator for Twitter/X)
+  if (url.includes('variant_version=')) {
+    return true;
+  }
+  
+  // Check for quality-specific paths (these are NOT master playlists)
+  if (urlLower.includes('/avc1/') || urlLower.includes('/mp4a/') || 
+      urlLower.includes('/h264/') || urlLower.includes('/aac/')) {
+    return false;
+  }
+  
+  // Check for resolution/bitrate in path (quality-specific)
+  // Patterns like /1080x1080/, /320x320/, /32000/, /128000/
+  if (urlLower.match(/\/\d+x\d+\//) || urlLower.match(/\/\d{5,}\//)) {
+    return false;
+  }
+  
+  // If it's a .m3u8 file and doesn't have quality-specific patterns, assume it's a master
+  // This works for platforms other than Twitter/X
+  return true;
+}
+
+/**
+ * Extract video ID from Twitter/X HLS playlist URL
+ */
+function extractVideoIdFromPlaylistUrl(url: string): string | null {
+  try {
+    // Twitter URLs have patterns like:
+    // .../amplify_video/{VIDEO_ID}/pl/...
+    // .../ext_tw_video/{VIDEO_ID}/pu/pl/...
+    const match = url.match(/\/(?:amplify_video|ext_tw_video)\/(\d+)\//);
+    if (match && match[1]) {
+      return match[1];
+    }
+    // Fallback: use a hash of the base URL (without quality-specific parts)
+    const urlObj = new URL(url);
+    const basePath = urlObj.pathname.split('/').slice(0, -2).join('/'); // Remove quality-specific parts
+    return `${urlObj.origin}${basePath}`;
+  } catch (error) {
+    return null;
+  }
+}
+
 function handlePlaylistCapture(url: string) {
   if (!registerCapturedUrl(url)) {
     return;
   }
 
-  console.log('[Media Bridge] Captured video URL:', url);
+  // Only process master playlists - skip quality-specific playlists
+  if (!isMasterPlaylist(url)) {
+    console.log('[Media Bridge] Skipping quality-specific playlist:', url);
+    return;
+  }
 
-        const videoElements = document.querySelectorAll('video');
+  console.log('[Media Bridge] Captured HLS master playlist URL:', url);
+
+  const videoElements = document.querySelectorAll('video');
   let storedToVideoElement = false;
         
-        for (const video of Array.from(videoElements)) {
-          const vid = video as HTMLVideoElement;
-          const existing = capturedVideoUrls.get(vid);
-          if (!existing || existing.startsWith('blob:') || existing.startsWith('data:') || 
+  for (const video of Array.from(videoElements)) {
+    const vid = video as HTMLVideoElement;
+    const existing = capturedVideoUrls.get(vid);
+    if (!existing || existing.startsWith('blob:') || existing.startsWith('data:') || 
         (!existing.includes('.m3u8') && !existing.includes('.mpd'))) {
-            capturedVideoUrls.set(vid, url);
+      capturedVideoUrls.set(vid, url);
       storedToVideoElement = true;
       console.log('[Media Bridge] Stored playlist URL for video element:', url);
-            }
-          }
+    }
+  }
           
-  // Playlist capture removed - only direct downloads supported
-
+  // Extract video ID to group playlists by video
+  const videoId = extractVideoIdFromPlaylistUrl(url);
+  
+  // Try to update existing video by video ID or URL
   let updatedExistingVideo = false;
-          for (const existingVideo of detectedVideos) {
-            // Don't update if existing video already has HLS (prioritize HLS over direct)
-            const hasHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
-            const needsUpdate = (!isDirectVideoUrl(existingVideo.url) && !hasHls) &&
-                               (existingVideo.pageUrl === window.location.href ||
-                                (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
-          
-          if (needsUpdate) {
-            existingVideo.url = url;
-            existingVideo.format = 'hls'; // This is for playlist capture
-            updatedExistingVideo = true;
-            
-            safeSendMessage({
-              type: MessageType.VIDEO_DETECTED,
-              payload: existingVideo,
-            });
-                break;
-          }
+  for (const existingVideo of detectedVideos) {
+    // Don't update if existing video already has HLS (prioritize HLS over direct)
+    const hasHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
+    const needsUpdate = (!isDirectVideoUrl(existingVideo.url) && !hasHls) &&
+                       (existingVideo.pageUrl === window.location.href ||
+                        (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
+    
+    // Also check if videoId matches (same video)
+    const existingVideoId = extractVideoIdFromPlaylistUrl(existingVideo.url);
+    const sameVideo = videoId && existingVideoId && videoId === existingVideoId;
+      
+    if (needsUpdate || sameVideo) {
+      // Prefer master playlist over quality-specific
+      if (isMasterPlaylist(url)) {
+        existingVideo.url = url;
+        existingVideo.format = 'hls';
+        if (videoId) {
+          existingVideo.videoId = videoId;
         }
+        updatedExistingVideo = true;
+        
+        safeSendMessage({
+          type: MessageType.VIDEO_DETECTED,
+          payload: existingVideo,
+        });
+        break;
+      }
+    }
+  }
             
+  // If no existing video was updated, create a new video entry
   if (!updatedExistingVideo) {
-    const delay = videoElements.length > 0 ? 100 : 500;
-    setTimeout(() => detectVideos(), delay);
+    // Check if we already have a video with the same video ID
+    const alreadyExists = videoId ? detectedVideos.some(v => {
+      const vId = extractVideoIdFromPlaylistUrl(v.url);
+      return vId && vId === videoId;
+    }) : detectedVideos.some(v => v.url === url);
+    
+    if (!alreadyExists) {
+      // Create a new video metadata entry for the HLS master playlist
+      const newVideo: VideoMetadata = {
+        url,
+        format: 'hls',
+        pageUrl: window.location.href,
+        title: document.title,
+        videoId: videoId || uuidv4(),
+      };
+      
+      console.log('[Media Bridge] Creating new video entry for HLS master playlist:', url);
+      addDetectedVideo(newVideo);
+    } else {
+      // Video already exists, trigger detection to refresh
+      const delay = videoElements.length > 0 ? 100 : 500;
+      setTimeout(() => detectVideos(), delay);
+    }
   }
 }
 
 function handleDirectCapture(url: string) {
   if (!registerCapturedUrl(url)) {
+    return;
+  }
+
+  // Skip HLS segment URLs - they should not be treated as direct videos
+  if (FormatDetector.isHlsSegmentUrl(url)) {
+    console.log('[Media Bridge] Skipping HLS segment URL (not a direct video):', url);
     return;
   }
 
@@ -202,7 +312,9 @@ function handleDirectCapture(url: string) {
             for (const video of Array.from(videoElements)) {
               const vid = video as HTMLVideoElement;
         const existing = capturedVideoUrls.get(vid);
-    if (!existing || existing.startsWith('blob:') || existing.startsWith('data:')) {
+    // Don't overwrite HLS playlist URLs with direct video URLs
+    if (!existing || existing.startsWith('blob:') || existing.startsWith('data:') || 
+        (!existing.includes('.m3u8') && !FormatDetector.isHlsSegmentUrl(existing))) {
       capturedVideoUrls.set(vid, url);
       storedToVideoElement = true;
       console.log('[Media Bridge] Stored direct video URL for video element:', url);
@@ -1024,7 +1136,7 @@ function getVideoUrl(video: HTMLVideoElement): string | null {
 
 
 /**
- * Listen for messages from popup
+ * Listen for messages from popup and background script
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Check if extension context is still valid
@@ -1038,13 +1150,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // HLS playlist detection removed - only direct downloads supported
-  
   try {
     if (message.type === MessageType.GET_DETECTED_VIDEOS) {
       sendResponse({ videos: detectedVideos });
       return true; // Keep channel open for async response
     }
+    
+    // Handle HLS playlist detected by background script
+    if (message.type === 'HLS_PLAYLIST_DETECTED' && message.payload?.url) {
+      console.log('[Media Bridge] Received HLS playlist from background script:', message.payload.url);
+      handlePlaylistCapture(message.payload.url);
+      sendResponse({ success: true });
+      return false;
+    }
+    
     return false;
   } catch (error) {
     console.debug('Error handling message:', error);

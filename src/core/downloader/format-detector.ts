@@ -8,6 +8,59 @@ import { detectExtensionFromUrl as extractExtensionFromUrl } from '../merger/met
 
 export class FormatDetector {
   /**
+   * Check if URL is an HLS segment (not a complete video file)
+   * This is resilient across different video platforms (YouTube, Vimeo, Twitch, Twitter, etc.)
+   */
+  static isHlsSegmentUrl(url: string): boolean {
+    const urlLower = url.toLowerCase();
+    
+    // Check for HLS segment file extensions (most reliable indicator)
+    // .ts (Transport Stream) is the standard HLS segment format
+    // .m4s (Media Segment) is used in CMAF/DASH-in-HLS
+    // In video download context, these are almost always HLS segments
+    if (urlLower.endsWith('.ts') || urlLower.endsWith('.m4s')) {
+      return true;
+    }
+    
+    // Check for HLS segment path patterns (works across platforms)
+    // These patterns are common in many CDNs and streaming services
+    const hlsSegmentPathPatterns = [
+      '/aud/',      // Audio segments (Twitter, many CDNs)
+      '/vid/',      // Video segments (Twitter, many CDNs)
+      '/seg-',      // Segment prefix (common pattern)
+      '/segment/',  // Segment directory
+      '/chunk/',    // Chunk directory
+      '/fragment/', // Fragment directory
+      '/hls/',      // HLS-specific directory
+    ];
+    
+    if (hlsSegmentPathPatterns.some(pattern => urlLower.includes(pattern))) {
+      return true;
+    }
+    
+    // Check for numeric segment patterns in filenames (platform-agnostic)
+    // e.g., seg001.mp4, chunk_123.mp4, frag001.mp4
+    // This catches many CDN patterns across different platforms
+    if (urlLower.match(/\/seg\d+\.(mp4|ts|m4s)$/i) || // seg001.mp4, seg123.ts
+        urlLower.match(/\/chunk[_\-]\d+\.(mp4|ts|m4s)$/i) || // chunk_001.mp4, chunk-123.ts
+        urlLower.match(/\/frag\d+\.(mp4|ts|m4s)$/i)) { // frag001.mp4
+      return true;
+    }
+    
+    // Check for sequential numeric patterns in streaming contexts
+    // e.g., /001.mp4, /002.mp4 in video/stream/media directories
+    // Only match if in a streaming-related directory to avoid false positives
+    if (urlLower.match(/\/\d{3,}\.(mp4|ts|m4s)$/) && 
+        (urlLower.includes('/video/') || urlLower.includes('/stream/') || 
+         urlLower.includes('/media/') || urlLower.includes('/hls/') ||
+         urlLower.includes('/v/') || urlLower.includes('/playback/'))) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
    * Detect format from URL
    */
   static detectFromUrl(url: string): VideoFormat {
@@ -17,6 +70,11 @@ export class FormatDetector {
     // Check for HLS playlist files
     if (urlLower.includes('.m3u8') || urlLower.includes('playlist.m3u8') || urlLower.includes('master.m3u8')) {
       return 'hls';
+    }
+    
+    // Check if this is an HLS segment URL - these should not be treated as direct videos
+    if (this.isHlsSegmentUrl(url)) {
+      return 'unknown'; // Don't treat HLS segments as direct videos
     }
     
     // Handle blob URLs - these are already video blobs, treat as direct

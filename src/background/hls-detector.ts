@@ -80,6 +80,22 @@ export function initializeHlsDetector(): void {
       });
 
       logger.info(`Detected HLS playlist: ${details.url}`);
+      
+      // Send message to content script to handle the playlist
+      try {
+        await chrome.tabs.sendMessage(details.tabId, {
+          type: 'HLS_PLAYLIST_DETECTED',
+          payload: {
+            url: details.url,
+            pageUrl,
+            pageTitle,
+          },
+        });
+      } catch (error) {
+        // Content script might not be loaded yet, or tab might not have content script
+        // This is okay - the content script will also detect via network interception
+        logger.debug('Could not send playlist to content script:', error);
+      }
     },
     {
       urls: ['http://*/*', 'https://*/*'],

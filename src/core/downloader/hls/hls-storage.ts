@@ -28,7 +28,7 @@ function sanitizeFilename(name: string): string {
 
 export interface HlsBucket {
   write(index: number, data: ArrayBuffer): Promise<void>;
-  getLink(onProgress?: (progress: number, message: string) => void): Promise<string>;
+  getLink(onProgress?: (progress: number, message: string) => void): Promise<string | Blob>;
   cleanup(): Promise<void>;
 }
 
@@ -104,8 +104,9 @@ export class IndexedDBHlsBucket implements HlsBucket {
 
   /**
    * Merge chunks and return blob URL (uses offscreen document for FFmpeg)
+   * In service worker context, returns the blob directly
    */
-  async getLink(onProgress?: (progress: number, message: string) => void): Promise<string> {
+  async getLink(onProgress?: (progress: number, message: string) => void): Promise<string | Blob> {
     if (!this.db) {
       throw new Error('Database not opened');
     }
@@ -138,7 +139,14 @@ export class IndexedDBHlsBucket implements HlsBucket {
       const mergedBlob = await this.mergeSegments(segmentBuffers, onProgress);
 
       onProgress?.(1, 'Done');
-      return URL.createObjectURL(mergedBlob);
+      
+      // Check if URL.createObjectURL is available (not available in service workers)
+      if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        return URL.createObjectURL(mergedBlob);
+      } else {
+        // Service worker context - return blob directly
+        return mergedBlob;
+      }
     } catch (error) {
       logger.error('Failed to get link:', error);
       throw error;
