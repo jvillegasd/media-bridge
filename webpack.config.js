@@ -23,7 +23,7 @@ module.exports = (env, argv) => {
         {
           test: /\.tsx?$/,
           use: 'ts-loader',
-          exclude: /node_modules/,
+          exclude: /node_modules|src\/ffmpeg/,
         },
         {
           test: /\.css$/,
@@ -42,23 +42,29 @@ module.exports = (env, argv) => {
         patterns: [
           { from: 'public/icons', to: 'icons' },
           { from: 'manifest.json', to: 'manifest.json' },
-          { from: 'public/ffmpeg', to: 'ffmpeg' },
+          {
+            from: path.resolve(__dirname, 'public/ffmpeg'),
+            to: 'ffmpeg'
+          },
         ],
       }),
       new HtmlWebpackPlugin({
         template: './src/popup/popup.html',
         filename: 'popup/popup.html',
         chunks: ['popup/popup'],
+        inject: 'body',
       }),
       new HtmlWebpackPlugin({
         template: './src/options/options.html',
         filename: 'options/options.html',
         chunks: ['options/options'],
+        inject: 'body',
       }),
       new HtmlWebpackPlugin({
         template: './src/offscreen/offscreen.html',
         filename: 'offscreen/offscreen.html',
         chunks: ['offscreen/offscreen'],
+        inject: 'body',
         minify: false,
       }),
     ],

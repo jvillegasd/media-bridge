@@ -4,8 +4,8 @@
 
 import { MessageType } from '../shared/messages';
 import { logger } from '../core/utils/logger';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { FFmpeg } from '../ffmpeg/ffmpeg/index.js';
+import { fetchFile } from '../ffmpeg/util/index.js';
 
 // Singleton FFmpeg instance (like the competitor)
 class FFmpegSingleton {
@@ -15,14 +15,13 @@ class FFmpegSingleton {
   static async getInstance(): Promise<FFmpeg> {
     if (!FFmpegSingleton.instance) {
       FFmpegSingleton.instance = new FFmpeg();
+      logger.info('Loading FFmpeg...');
 
-      const baseURL = chrome.runtime.getURL('ffmpeg');
-      logger.info(`Loading FFmpeg from: ${baseURL}`);
-      
       await FFmpegSingleton.instance.load({
-        coreURL: chrome.runtime.getURL('ffmpeg/ffmpeg-core.js'),
-        wasmURL: chrome.runtime.getURL('ffmpeg/ffmpeg-core.wasm'),
+        coreURL: chrome.runtime.getURL('/ffmpeg/core/ffmpeg-core.js'),
       });
+
+      logger.info('FFmpeg loaded successfully');
 
       // Set up logging
       FFmpegSingleton.instance.on('log', ({ message }) => {
