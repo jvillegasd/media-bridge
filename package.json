@@ -31,6 +31,8 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "idb": "^8.0.3",
     "m3u8-parser": "^7.2.0",
     "url-toolkit": "^2.2.5",

@@ -4,60 +4,40 @@
 
 import { MessageType } from '../shared/messages';
 import { logger } from '../core/utils/logger';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
-// FFmpeg will be loaded dynamically
-let ffmpeg: any = null;
-let ffmpegLoaded = false;
+// Singleton FFmpeg instance (like the competitor)
+class FFmpegSingleton {
+  private static instance: FFmpeg | null = null;
+  private static isLoaded = false;
 
-/**
- * Load FFmpeg core directly (no wrapper classes needed)
- * Uses ffmpeg-core.js and ffmpeg-core.wasm only - simpler and more efficient!
- */
-async function loadFFmpeg(): Promise<void> {
-  if (ffmpegLoaded) {
-    return;
+  static async getInstance(): Promise<FFmpeg> {
+    if (!FFmpegSingleton.instance) {
+      FFmpegSingleton.instance = new FFmpeg();
+
+      const baseURL = chrome.runtime.getURL('ffmpeg');
+      logger.info(`Loading FFmpeg from: ${baseURL}`);
+      
+      await FFmpegSingleton.instance.load({
+        coreURL: chrome.runtime.getURL('ffmpeg/ffmpeg-core.js'),
+        wasmURL: chrome.runtime.getURL('ffmpeg/ffmpeg-core.wasm'),
+      });
+
+      // Set up logging
+      FFmpegSingleton.instance.on('log', ({ message }) => {
+        logger.debug('FFmpeg:', message);
+      });
+
+      FFmpegSingleton.isLoaded = true;
+      logger.info('FFmpeg loaded successfully');
+    }
+
+    return FFmpegSingleton.instance;
   }
 
-  try {
-    const coreUrl = chrome.runtime.getURL('ffmpeg/ffmpeg-core.js');
-    const wasmUrl = chrome.runtime.getURL('ffmpeg/ffmpeg-core.wasm');
-    
-    logger.info(`Loading FFmpeg core from: ${coreUrl}`);
-    
-    // Import ffmpeg-core.js directly - it exports createFFmpegCore as default
-    const module = await import(coreUrl);
-    const createFFmpegCore = module.default;
-    
-    if (!createFFmpegCore) {
-      throw new Error('createFFmpegCore not found in ffmpeg-core.js');
-    }
-    
-    logger.info('FFmpeg core module loaded, initializing with WASM...');
-    
-    // Initialize FFmpeg core with WASM file
-    // The mainScriptUrlOrBlob hack encodes the WASM URL to help locateFile find it
-    ffmpeg = await createFFmpegCore({
-      mainScriptUrlOrBlob: `${coreUrl}#${btoa(JSON.stringify({ wasmURL: wasmUrl }))}`,
-    });
-    
-    // Set up logging and progress callbacks
-    ffmpeg.setLogger((data: any) => {
-      logger.debug('FFmpeg:', data);
-    });
-    
-    ffmpeg.setProgress((data: any) => {
-      // Progress callback can be used for detailed progress tracking
-      logger.debug('FFmpeg progress:', data);
-    });
-    
-    // Wait for FFmpeg to be ready
-    await ffmpeg.ready;
-    
-    ffmpegLoaded = true;
-    logger.info('FFmpeg core loaded successfully');
-  } catch (error) {
-    logger.error('Failed to load FFmpeg core:', error);
-    throw error;
+  static isFFmpegLoaded(): boolean {
+    return FFmpegSingleton.isLoaded;
   }
 }
 
@@ -69,79 +49,156 @@ async function mergeWithFFmpeg(
   audioSegments: ArrayBuffer[],
   onProgress?: (progress: number, message: string) => void
 ): Promise<Blob> {
-  if (!ffmpegLoaded) {
-    await loadFFmpeg();
-  }
+  const ffmpeg = await FFmpegSingleton.getInstance();
 
   try {
-    onProgress?.(0.1, 'Writing video segments to FFmpeg...');
-    
-    // Concatenate video segments into a single file
-    const videoCombined = new Uint8Array(
-      videoSegments.reduce((sum, buf) => sum + buf.byteLength, 0)
-    );
-    let offset = 0;
-    for (const buffer of videoSegments) {
-      videoCombined.set(new Uint8Array(buffer), offset);
-      offset += buffer.byteLength;
+    // Determine output filename
+    const outputFileName = '/tmp/output.mp4';
+
+    // Process based on available streams (like the competitor)
+    if (videoSegments.length > 0 && audioSegments.length > 0) {
+      await processVideoAndAudio(ffmpeg, videoSegments, audioSegments, outputFileName, onProgress);
+    } else if (videoSegments.length > 0) {
+      await processVideoOnly(ffmpeg, videoSegments, outputFileName, onProgress);
+    } else if (audioSegments.length > 0) {
+      await processAudioOnly(ffmpeg, audioSegments, outputFileName, onProgress);
+    } else {
+      throw new Error('No video or audio segments provided');
     }
-    
-    // Write video file using FFmpeg's FS API
-    ffmpeg.FS.writeFile('video.mp4', videoCombined);
-    
-    onProgress?.(0.3, 'Writing audio segments to FFmpeg...');
-    
-    // Concatenate audio segments into a single file
-    const audioCombined = new Uint8Array(
-      audioSegments.reduce((sum, buf) => sum + buf.byteLength, 0)
-    );
-    offset = 0;
-    for (const buffer of audioSegments) {
-      audioCombined.set(new Uint8Array(buffer), offset);
-      offset += buffer.byteLength;
-    }
-    
-    // Write audio file
-    ffmpeg.FS.writeFile('audio.mp4', audioCombined);
-    
-    onProgress?.(0.5, 'Merging audio and video with FFmpeg...');
-    
-    // Use FFmpeg core's exec() method directly
-    // -i video.mp4 -i audio.mp4 -c:v copy -c:a aac -shortest output.mp4
-    const exitCode = ffmpeg.exec([
-      '-i', 'video.mp4',
-      '-i', 'audio.mp4',
-      '-c:v', 'copy',  // Copy video codec (no re-encoding)
-      '-c:a', 'aac',   // Encode audio as AAC
-      '-shortest',     // Use shortest stream duration
-      'output.mp4'
-    ]);
-    
-    if (exitCode !== 0) {
-      throw new Error(`FFmpeg exec failed with exit code ${exitCode}`);
-    }
-    
+
+    // Read the merged file
     onProgress?.(0.9, 'Reading merged output...');
-    
-    // Read the merged file using FS API
-    const mergedData = ffmpeg.FS.readFile('output.mp4');
-    
-    // Cleanup
-    try {
-      ffmpeg.FS.unlink('video.mp4');
-      ffmpeg.FS.unlink('audio.mp4');
-      ffmpeg.FS.unlink('output.mp4');
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-    
+    const data = await ffmpeg.readFile(outputFileName);
     onProgress?.(1, 'Merge complete');
     
-    return new Blob([mergedData], { type: 'video/mp4' });
+    // Convert FileData to BlobPart
+    // readFile returns Uint8Array for binary files
+    const dataArray = data as Uint8Array;
+    // Create a new Uint8Array copy to ensure we have a proper ArrayBuffer
+    const dataCopy = new Uint8Array(dataArray);
+    return new Blob([dataCopy], { type: 'video/mp4' });
   } catch (error) {
     logger.error('FFmpeg merge failed:', error);
     throw error;
   }
+}
+
+/**
+ * Process video and audio together
+ */
+async function processVideoAndAudio(
+  ffmpeg: FFmpeg,
+  videoSegments: ArrayBuffer[],
+  audioSegments: ArrayBuffer[],
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void
+): Promise<void> {
+  onProgress?.(0.1, 'Concatenating video chunks');
+  const videoBlob = concatenateSegments(videoSegments);
+
+  onProgress?.(0.3, 'Concatenating audio chunks');
+  const audioBlob = concatenateSegments(audioSegments);
+
+  onProgress?.(0.5, 'Writing video stream');
+  await ffmpeg.writeFile('video.ts', await fetchFile(videoBlob));
+
+  onProgress?.(0.6, 'Writing audio stream');
+  await ffmpeg.writeFile('audio.ts', await fetchFile(audioBlob));
+
+  onProgress?.(0.7, 'Merging video and audio');
+  await ffmpeg.exec([
+    '-y',
+    '-i', 'video.ts',
+    '-i', 'audio.ts',
+    '-c:v', 'copy',
+    '-c:a', 'copy',
+    '-bsf:a', 'aac_adtstoasc',
+    '-shortest',
+    '-movflags', '+faststart',
+    outputFileName,
+  ]);
+
+  // Cleanup intermediate files
+  try {
+    await ffmpeg.deleteFile('video.ts');
+    await ffmpeg.deleteFile('audio.ts');
+  } catch (error) {
+    // Files may not exist, ignore error
+  }
+}
+
+/**
+ * Process video only
+ */
+async function processVideoOnly(
+  ffmpeg: FFmpeg,
+  videoSegments: ArrayBuffer[],
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void
+): Promise<void> {
+  onProgress?.(0.2, 'Concatenating video chunks');
+  const videoBlob = concatenateSegments(videoSegments);
+
+  onProgress?.(0.5, 'Writing video stream');
+  await ffmpeg.writeFile('video.ts', await fetchFile(videoBlob));
+
+  onProgress?.(0.7, 'Transcoding video');
+  await ffmpeg.exec([
+    '-y',
+    '-i', 'video.ts',
+    '-c:v', 'copy',
+    '-movflags', '+faststart',
+    outputFileName,
+  ]);
+
+  // Cleanup
+  try {
+    await ffmpeg.deleteFile('video.ts');
+  } catch (error) {
+    // File may not exist, ignore error
+  }
+}
+
+/**
+ * Process audio only
+ */
+async function processAudioOnly(
+  ffmpeg: FFmpeg,
+  audioSegments: ArrayBuffer[],
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void
+): Promise<void> {
+  onProgress?.(0.2, 'Concatenating audio chunks');
+  const audioBlob = concatenateSegments(audioSegments);
+
+  onProgress?.(0.5, 'Writing audio stream');
+  await ffmpeg.writeFile('audio.ts', await fetchFile(audioBlob));
+
+  onProgress?.(0.7, 'Transcoding audio');
+  await ffmpeg.exec([
+    '-y',
+    '-i', 'audio.ts',
+    '-c:a', 'aac',
+    '-b:a', '192k',
+    '-af', 'aresample=async=1:first_pts=0',
+    '-movflags', '+faststart',
+    outputFileName,
+  ]);
+
+  // Cleanup
+  try {
+    await ffmpeg.deleteFile('audio.ts');
+  } catch (error) {
+    // File may not exist, ignore error
+  }
+}
+
+/**
+ * Concatenate segments into a single blob
+ */
+function concatenateSegments(segments: ArrayBuffer[]): Blob {
+  const chunks: BlobPart[] = segments.map(seg => new Uint8Array(seg));
+  return new Blob(chunks);
 }
 
 /**
@@ -203,5 +260,3 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return true; // Keep channel open for async response
 });
-
-

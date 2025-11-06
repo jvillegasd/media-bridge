@@ -4,18 +4,18 @@
   "version": "0.0.9",
   "description": "Download videos from the web (direct downloads only) and upload to Google Drive",
   "permissions": [
-    "storage",
-    "downloads",
     "identity",
-    "activeTab",
     "scripting",
     "offscreen",
-    "webRequest"
+
+    "webRequest",
+    "unlimitedStorage",
+    "storage",
+    "downloads",
+    "tabs",
+    "activeTab"
   ],
-  "host_permissions": [
-    "https://*/*",
-    "http://*/*"
-  ],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
@@ -43,13 +43,13 @@
     "128": "icons/icon-128.png"
   },
   "content_security_policy": {
-      "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
+    "sandbox": "sandbox allow-scripts allow-forms allow-popups allow-modals; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; child-src 'self';"
   },
   "web_accessible_resources": [
     {
       "resources": ["icons/*", "ffmpeg/*"],
-      "matches": ["<all_urls>"]
+      "matches": ["<all_urls>", "chrome-extension://*/*"]
     }
   ]
 }
-

@@ -22,7 +22,7 @@ export async function ensureOffscreenDocument(): Promise<void> {
   // Use 'IFRAME_SCRIPTING' for FFmpeg.wasm execution
   await chrome.offscreen.createDocument({
     url: 'offscreen/offscreen.html',
-    reasons: ['IFRAME_SCRIPTING' as chrome.offscreen.Reason],
+    reasons: [chrome.offscreen.Reason.WORKERS],
     justification: 'FFmpeg-based HLS audio/video merging',
   });
 
