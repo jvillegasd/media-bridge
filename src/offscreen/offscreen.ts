@@ -13,12 +13,14 @@ class FFmpegSingleton {
   private static isLoaded = false;
 
   static async getInstance(): Promise<FFmpeg> {
-    if (!FFmpegSingleton.instance) {
+    // !FFmpegSingleton.instance)
+    if (true) {
       FFmpegSingleton.instance = new FFmpeg();
       logger.info('Loading FFmpeg...');
 
       await FFmpegSingleton.instance.load({
         coreURL: chrome.runtime.getURL('/ffmpeg/core/ffmpeg-core.js'),
+        wasmURL: chrome.runtime.getURL('/ffmpeg/core/ffmpeg-core.wasm'),
       });
 
       logger.info('FFmpeg loaded successfully');

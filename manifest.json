@@ -47,7 +47,11 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "ffmpeg/*"
+        "ffmpeg/core/ffmpeg-core.js",
+        "ffmpeg/core/ffmpeg-core.wasm",
+        "ffmpeg/ffmpeg/worker.js",
+        "ffmpeg/ffmpeg/*.js",
+        "ffmpeg/util/*.js"
       ],
       "matches": ["<all_urls>"]
     }

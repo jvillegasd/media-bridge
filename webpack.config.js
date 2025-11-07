@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
@@ -23,11 +24,12 @@ module.exports = (env, argv) => {
         {
           test: /\.tsx?$/,
           use: 'ts-loader',
-          exclude: /node_modules|src\/ffmpeg/,
+          exclude: /node_modules|src\/ffmpeg|public\/ffmpeg|dist\/ffmpeg/,
         },
         {
           test: /\.css$/,
           use: ['style-loader', 'css-loader'],
+          exclude: /ffmpeg/,
         },
       ],
     },
@@ -36,6 +38,8 @@ module.exports = (env, argv) => {
       alias: {
         '@': path.resolve(__dirname, 'src'),
       },
+      // Don't resolve modules in FFmpeg directories
+      modules: ['node_modules', 'src'],
     },
     plugins: [
       new CopyWebpackPlugin({
@@ -71,6 +75,14 @@ module.exports = (env, argv) => {
     devtool: isProduction ? false : 'source-map',
     optimization: {
       minimize: isProduction,
+      // Exclude FFmpeg files from optimization
+      minimizer: isProduction ? [
+        '...', // Use default minimizers
+      ] : [],
+    },
+    // Ignore FFmpeg directories in watch mode for faster rebuilds
+    watchOptions: {
+      ignored: /ffmpeg/,
     },
   };
 };
