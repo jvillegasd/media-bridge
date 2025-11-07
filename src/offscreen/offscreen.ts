@@ -4,8 +4,8 @@
 
 import { MessageType } from '../shared/messages';
 import { logger } from '../core/utils/logger';
-import { FFmpeg } from '../ffmpeg/ffmpeg/index.js';
-import { fetchFile } from '../ffmpeg/util/index.js';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
 
 // Singleton FFmpeg instance (like the competitor)
 class FFmpegSingleton {
