@@ -5,13 +5,12 @@
 import { VideoFormat, VideoMetadata, DownloadState } from '../types';
 import { FormatDetector } from './format-detector';
 import { DirectDownloadHandler } from './direct/direct-download-handler';
-import { HlsDownloadHandler } from './hls/hls-download-handler';
 import { DownloadStateManager } from '../storage/download-state';
 import { DownloadError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import {
   extractMetadataFromDirectBlob,
-} from '../merger/metadata-extractor';
+} from '../metadata/metadata-extractor';
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
@@ -111,41 +110,23 @@ export class DownloadManager {
       let finalBlob: Blob;
       let extractedMetadata: Partial<VideoMetadata> = {};
 
-      if (format === 'hls') {
-        // HLS download
-        const hlsHandler = new HlsDownloadHandler({
-          onProgress: async (hlsState) => {
-            // Update our state with HLS progress
-            const currentState = await DownloadStateManager.getDownload(state.id);
-            if (currentState) {
-              currentState.progress = hlsState.progress;
-              await DownloadStateManager.saveDownload(currentState);
-              this.notifyProgress(currentState);
-            }
-          },
-          maxConcurrency: this.maxConcurrent,
-        });
-        finalBlob = await hlsHandler.download(actualVideoUrl, state.id);
-        extractedMetadata.fileExtension = 'mp4'; // HLS always outputs MP4
-      } else {
-        // Direct download
-        const directHandler = new DirectDownloadHandler({
-          onProgress: async (directState) => {
-            // Update our state with direct download progress
-            const currentState = await DownloadStateManager.getDownload(state.id);
-            if (currentState) {
-              currentState.progress = directState.progress;
-              await DownloadStateManager.saveDownload(currentState);
-              this.notifyProgress(currentState);
-            }
-          },
-        });
-        finalBlob = await directHandler.download(actualVideoUrl, state.id);
-        // Extract metadata from direct video blob
-        const contentType = finalBlob.type;
-        const directMetadata = await extractMetadataFromDirectBlob(finalBlob, actualVideoUrl, contentType);
-        extractedMetadata.fileExtension = directMetadata.extension;
-      }
+      // Direct download
+      const directHandler = new DirectDownloadHandler({
+        onProgress: async (directState) => {
+          // Update our state with direct download progress
+          const currentState = await DownloadStateManager.getDownload(state.id);
+          if (currentState) {
+            currentState.progress = directState.progress;
+            await DownloadStateManager.saveDownload(currentState);
+            this.notifyProgress(currentState);
+          }
+        },
+      });
+      finalBlob = await directHandler.download(actualVideoUrl, state.id);
+      // Extract metadata from direct video blob
+      const contentType = finalBlob.type;
+      const directMetadata = await extractMetadataFromDirectBlob(finalBlob, actualVideoUrl, contentType);
+      extractedMetadata.fileExtension = directMetadata.extension;
 
       // Update state metadata with extracted information
       if (state.metadata) {
@@ -398,6 +379,7 @@ export class DownloadManager {
       return false;
     }
   }
+
 
   /**
    * Notify progress

@@ -87,7 +87,7 @@ async function handleAuth() {
   authBtn.textContent = 'Authenticating...';
 
   try {
-    const { GOOGLE_DRIVE_SCOPES } = await import('../lib/cloud/google-auth');
+    const { GOOGLE_DRIVE_SCOPES } = await import('../core/cloud/google-auth');
     await GoogleAuth.authenticate(GOOGLE_DRIVE_SCOPES);
     
     showStatus('Successfully authenticated with Google!', 'success');

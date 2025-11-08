@@ -94,213 +94,16 @@ function normalizeFormat(format: VideoFormat): VideoFormat {
 }
 
 function isDirectVideoUrl(url: string): boolean {
-  // Check if this is an HLS segment URL - these should not be treated as direct videos
-  if (FormatDetector.isHlsSegmentUrl(url)) {
-    return false;
-  }
-  
   return url.includes('.mp4') || url.includes('.webm') || url.includes('.mov') ||
                          url.includes('.avi') || url.includes('.mkv') || url.includes('.flv') ||
                          url.includes('.wmv') || url.includes('.ogg');
 }
 
-function isSegmentUrl(url: string): boolean {
-  const lower = url.toLowerCase();
-  if (lower.includes('.m4s')) {
-    return true;
-  }
-  if (!lower.includes('.ts')) {
-    return false;
-  }
-  return lower.includes('/seg-') || lower.includes('segment') || lower.includes('chunk');
-}
 
-function derivePlaylistCandidatesFromSegment(segmentUrl: string): string[] {
-  const candidates = new Set<string>();
 
-  try {
-    const urlObj = new URL(segmentUrl);
-    const search = urlObj.search ? urlObj.search : '';
-    const pathname = urlObj.pathname;
-    const lowerPath = pathname.toLowerCase();
-    const pathParts = pathname.split('/');
-
-    if (lowerPath.includes('.ts')) {
-      const segmentIndex = pathParts.findIndex((part) => part.includes('seg-'));
-      if (segmentIndex > 0) {
-        const basePath = pathParts.slice(0, segmentIndex).join('/');
-        if (basePath) {
-          candidates.add(`${urlObj.origin}${basePath}/index.m3u8${search}`);
-          candidates.add(`${urlObj.origin}${basePath}/master.m3u8${search}`);
-          candidates.add(`${urlObj.origin}${basePath}/playlist.m3u8${search}`);
-        }
-      }
-    }
-
-  } catch (error) {
-    console.debug('[Media Bridge] Failed to derive playlist from segment:', segmentUrl, error);
-  }
-
-  return Array.from(candidates);
-}
-
-/**
- * Check if an HLS playlist URL is a master playlist (not a quality-specific one)
- */
-function isMasterPlaylist(url: string): boolean {
-  const urlLower = url.toLowerCase();
-  
-  // Must be an .m3u8 file
-  if (!urlLower.includes('.m3u8')) {
-    return false;
-  }
-  
-  // Master playlists typically have:
-  // 1. variant_version query parameter (Twitter/X)
-  // 2. Don't have /avc1/ or /mp4a/ in the path (these are quality-specific)
-  // 3. Don't have specific codec/bitrate/resolution in path
-  
-  // Check for variant_version (master playlist indicator for Twitter/X)
-  if (url.includes('variant_version=')) {
-    return true;
-  }
-  
-  // Check for quality-specific paths (these are NOT master playlists)
-  if (urlLower.includes('/avc1/') || urlLower.includes('/mp4a/') || 
-      urlLower.includes('/h264/') || urlLower.includes('/aac/')) {
-    return false;
-  }
-  
-  // Check for resolution/bitrate in path (quality-specific)
-  // Patterns like /1080x1080/, /320x320/, /32000/, /128000/
-  if (urlLower.match(/\/\d+x\d+\//) || urlLower.match(/\/\d{5,}\//)) {
-    return false;
-  }
-  
-  // If it's a .m3u8 file and doesn't have quality-specific patterns, assume it's a master
-  // This works for platforms other than Twitter/X
-  return true;
-}
-
-/**
- * Extract video ID from Twitter/X HLS playlist URL
- */
-function extractVideoIdFromPlaylistUrl(url: string): string | null {
-  try {
-    // Twitter URLs have patterns like:
-    // .../amplify_video/{VIDEO_ID}/pl/...
-    // .../ext_tw_video/{VIDEO_ID}/pu/pl/...
-    const match = url.match(/\/(?:amplify_video|ext_tw_video)\/(\d+)\//);
-    if (match && match[1]) {
-      return match[1];
-    }
-    // Fallback: use a hash of the base URL (without quality-specific parts)
-    const urlObj = new URL(url);
-    const basePath = urlObj.pathname.split('/').slice(0, -2).join('/'); // Remove quality-specific parts
-    return `${urlObj.origin}${basePath}`;
-  } catch (error) {
-    return null;
-  }
-}
-
-function handlePlaylistCapture(url: string) {
-  if (!registerCapturedUrl(url)) {
-    return;
-  }
-
-  // Only process master playlists - skip quality-specific playlists
-  if (!isMasterPlaylist(url)) {
-    console.log('[Media Bridge] Skipping quality-specific playlist:', url);
-    return;
-  }
-
-  console.log('[Media Bridge] Captured HLS master playlist URL:', url);
-
-  const videoElements = document.querySelectorAll('video');
-  let storedToVideoElement = false;
-        
-  for (const video of Array.from(videoElements)) {
-    const vid = video as HTMLVideoElement;
-    const existing = capturedVideoUrls.get(vid);
-    if (!existing || existing.startsWith('blob:') || existing.startsWith('data:') || 
-        (!existing.includes('.m3u8') && !existing.includes('.mpd'))) {
-      capturedVideoUrls.set(vid, url);
-      storedToVideoElement = true;
-      console.log('[Media Bridge] Stored playlist URL for video element:', url);
-    }
-  }
-          
-  // Extract video ID to group playlists by video
-  const videoId = extractVideoIdFromPlaylistUrl(url);
-  
-  // Try to update existing video by video ID or URL
-  let updatedExistingVideo = false;
-  for (const existingVideo of detectedVideos) {
-    // Don't update if existing video already has HLS (prioritize HLS over direct)
-    const hasHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
-    const needsUpdate = (!isDirectVideoUrl(existingVideo.url) && !hasHls) &&
-                       (existingVideo.pageUrl === window.location.href ||
-                        (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
-    
-    // Also check if videoId matches (same video)
-    const existingVideoId = extractVideoIdFromPlaylistUrl(existingVideo.url);
-    const sameVideo = videoId && existingVideoId && videoId === existingVideoId;
-      
-    if (needsUpdate || sameVideo) {
-      // Prefer master playlist over quality-specific
-      if (isMasterPlaylist(url)) {
-        existingVideo.url = url;
-        existingVideo.format = 'hls';
-        if (videoId) {
-          existingVideo.videoId = videoId;
-        }
-        updatedExistingVideo = true;
-        
-        safeSendMessage({
-          type: MessageType.VIDEO_DETECTED,
-          payload: existingVideo,
-        });
-        break;
-      }
-    }
-  }
-            
-  // If no existing video was updated, create a new video entry
-  if (!updatedExistingVideo) {
-    // Check if we already have a video with the same video ID
-    const alreadyExists = videoId ? detectedVideos.some(v => {
-      const vId = extractVideoIdFromPlaylistUrl(v.url);
-      return vId && vId === videoId;
-    }) : detectedVideos.some(v => v.url === url);
-    
-    if (!alreadyExists) {
-      // Create a new video metadata entry for the HLS master playlist
-      const newVideo: VideoMetadata = {
-        url,
-        format: 'hls',
-        pageUrl: window.location.href,
-        title: document.title,
-        videoId: videoId || uuidv4(),
-      };
-      
-      console.log('[Media Bridge] Creating new video entry for HLS master playlist:', url);
-      addDetectedVideo(newVideo);
-    } else {
-      // Video already exists, trigger detection to refresh
-      const delay = videoElements.length > 0 ? 100 : 500;
-      setTimeout(() => detectVideos(), delay);
-    }
-  }
-}
 
 function handleDirectCapture(url: string) {
   if (!registerCapturedUrl(url)) {
-    return;
-  }
-
-  // Skip HLS segment URLs - they should not be treated as direct videos
-  if (FormatDetector.isHlsSegmentUrl(url)) {
-    console.log('[Media Bridge] Skipping HLS segment URL (not a direct video):', url);
     return;
   }
 
@@ -312,9 +115,7 @@ function handleDirectCapture(url: string) {
             for (const video of Array.from(videoElements)) {
               const vid = video as HTMLVideoElement;
         const existing = capturedVideoUrls.get(vid);
-    // Don't overwrite HLS playlist URLs with direct video URLs
-    if (!existing || existing.startsWith('blob:') || existing.startsWith('data:') || 
-        (!existing.includes('.m3u8') && !FormatDetector.isHlsSegmentUrl(existing))) {
+    if (!existing || existing.startsWith('blob:') || existing.startsWith('data:')) {
       capturedVideoUrls.set(vid, url);
       storedToVideoElement = true;
       console.log('[Media Bridge] Stored direct video URL for video element:', url);
@@ -323,9 +124,7 @@ function handleDirectCapture(url: string) {
 
       let updatedExistingVideo = false;
             for (const existingVideo of detectedVideos) {
-          // Don't update if existing video already has HLS (prioritize HLS over direct)
-          const hasHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
-          const needsUpdate = (!isDirectVideoUrl(existingVideo.url) && !hasHls) &&
+          const needsUpdate = !isDirectVideoUrl(existingVideo.url) &&
                                  (existingVideo.pageUrl === window.location.href ||
                                   (existingVideo.pageUrl && window.location.href.includes(existingVideo.pageUrl)));
               
@@ -348,42 +147,13 @@ function handleDirectCapture(url: string) {
             }
           }
 
-function handleSegmentCapture(url: string) {
-  if (!registerCapturedUrl(url)) {
-    return;
-  }
-
-  const candidates = derivePlaylistCandidatesFromSegment(url);
-  if (candidates.length === 0) {
-    return;
-  }
-
-  console.log('[Media Bridge] Detected segment URL, attempting to derive playlists:', {
-    segment: url,
-    candidates,
-  });
-
-  for (const candidate of candidates) {
-    handlePlaylistCapture(candidate);
-  }
-}
-
 function handleCapturedRequest(url: string) {
   const lowerUrl = url.toLowerCase();
-
-  // Check for HLS playlist URLs
-  if (lowerUrl.includes('.m3u8') || lowerUrl.includes('playlist.m3u8') || lowerUrl.includes('master.m3u8')) {
-    handlePlaylistCapture(url);
-  }
 
   if (isDirectVideoUrl(lowerUrl)) {
     handleDirectCapture(url);
   }
-
-  if (isSegmentUrl(lowerUrl)) {
-    handleSegmentCapture(url);
-        }
-      }
+}
       
 /**
  * Intercept fetch/XHR requests to capture video URLs
@@ -436,11 +206,7 @@ function setupResourcePerformanceObserver() {
         }
 
         const lower = url.toLowerCase();
-        if (
-          lower.includes('.m4s') ||
-          lower.includes('.ts') ||
-          isDirectVideoUrl(lower)
-        ) {
+        if (isDirectVideoUrl(lower)) {
           handleCapturedRequest(url);
         }
       }
@@ -690,56 +456,32 @@ async function detectVideos() {
       const existingVideo = detectedVideos.find(v => v.videoId === metadata.videoId);
       if (existingVideo) {
         // Update URL if it changed (e.g., blob URL resolved to direct URL)
-        // But prioritize HLS over direct - don't replace HLS with direct
-        const existingIsHls = existingVideo.format === 'hls' || existingVideo.url.includes('.m3u8');
-        const newIsHls = finalFormat === 'hls' || finalUrl.includes('.m3u8');
-        
         if (finalUrl !== existingVideo.url && finalIsRealUrl) {
-          // Only update if:
-          // 1. New is HLS and existing is not HLS (upgrade to HLS), OR
-          // 2. Both are same type, OR
-          // 3. Existing is direct and new is direct (but prefer HLS)
-          if (newIsHls && !existingIsHls) {
-            // Upgrade from direct to HLS
-            existingVideo.url = finalUrl;
-            existingVideo.format = finalFormat;
-            // Update metadata if missing
-            if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
-            if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
-            if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
-            if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
-            if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
-            if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
-            
-            addDetectedVideo(existingVideo);
-          } else if (!existingIsHls && !newIsHls) {
-            // Both are direct, update normally
-            existingVideo.url = finalUrl;
-            existingVideo.format = finalFormat;
-            // Update metadata if missing
-            if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
-            if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
-            if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
-            if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
-            if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
-            if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
-            
-            addDetectedVideo(existingVideo);
-          } else if (existingIsHls && newIsHls) {
-            // Both are HLS, update normally
-            existingVideo.url = finalUrl;
-            existingVideo.format = finalFormat;
-            // Update metadata if missing
-            if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
-            if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
-            if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
-            if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
-            if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
-            if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
-            
-            addDetectedVideo(existingVideo);
-          }
-          // If existing is HLS and new is direct, don't update (keep HLS)
+          // Update normally
+          existingVideo.url = finalUrl;
+          existingVideo.format = finalFormat;
+          // Update metadata if missing
+          if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
+          if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
+          if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
+          if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
+          if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
+          if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
+          
+          addDetectedVideo(existingVideo);
+        } else {
+          // URL unchanged, just update metadata
+          existingVideo.url = finalUrl;
+          existingVideo.format = finalFormat;
+          // Update metadata if missing
+          if (!existingVideo.title && metadata.title) existingVideo.title = metadata.title;
+          if (!existingVideo.thumbnail && metadata.thumbnail) existingVideo.thumbnail = metadata.thumbnail;
+          if (!existingVideo.width && metadata.width) existingVideo.width = metadata.width;
+          if (!existingVideo.height && metadata.height) existingVideo.height = metadata.height;
+          if (!existingVideo.duration && metadata.duration) existingVideo.duration = metadata.duration;
+          if (!existingVideo.resolution && metadata.resolution) existingVideo.resolution = metadata.resolution;
+          
+          addDetectedVideo(existingVideo);
         }
         continue;
       }
@@ -1018,31 +760,11 @@ function addDetectedVideo(video: VideoMetadata) {
     }
     
     // Update URL if it changed (e.g., blob URL resolved to direct URL)
-    // But prioritize HLS over direct - don't replace HLS with direct
-    const existingIsHls = existing.format === 'hls' || existing.url.includes('.m3u8');
-    const newIsHls = video.format === 'hls' || video.url.includes('.m3u8');
-    const newIsDirect = video.format === 'direct' || isDirectVideoUrl(video.url);
-    
     if (video.url !== existing.url && !video.url.startsWith('blob:') && !video.url.startsWith('data:')) {
-      // Only update if:
-      // 1. New is HLS and existing is not HLS (upgrade to HLS), OR
-      // 2. Both are same type (direct->direct or HLS->HLS), OR
-      // 3. Existing is direct and new is direct (but prefer HLS)
-      if (newIsHls && !existingIsHls) {
-        // Upgrade from direct to HLS
-        existing.url = video.url;
-        existing.format = video.format;
-        updated = true;
-      } else if (!existingIsHls && !newIsHls) {
-        // Both are direct, update normally
-        existing.url = video.url;
-        updated = true;
-      } else if (existingIsHls && newIsHls) {
-        // Both are HLS, update normally
-        existing.url = video.url;
-        updated = true;
-      }
-      // If existing is HLS and new is direct, don't update (keep HLS)
+      // Update normally
+      existing.url = video.url;
+      existing.format = video.format;
+      updated = true;
     }
     
     // Update videoId if missing
@@ -1110,8 +832,6 @@ setInterval(() => {
  * Tries multiple methods to extract the actual video file URL
  */
 function getVideoUrl(video: HTMLVideoElement): string | null {
-  // HLS.js and Dash.js player checks removed - only direct downloads supported
-
   // Check currentSrc (what's actually playing)
   if (video.currentSrc && !video.currentSrc.startsWith('blob:') && !video.currentSrc.startsWith('data:')) {
     return video.currentSrc;
@@ -1156,13 +876,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true; // Keep channel open for async response
     }
     
-    // Handle HLS playlist detected by background script
-    if (message.type === 'HLS_PLAYLIST_DETECTED' && message.payload?.url) {
-      console.log('[Media Bridge] Received HLS playlist from background script:', message.payload.url);
-      handlePlaylistCapture(message.payload.url);
-      sendResponse({ success: true });
-      return false;
-    }
     
     return false;
   } catch (error) {

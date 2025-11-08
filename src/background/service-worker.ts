@@ -10,7 +10,6 @@ import { MessageType } from '../shared/messages';
 import { DownloadState, StorageConfig, VideoMetadata } from '../core/types';
 import { logger } from '../core/utils/logger';
 import { normalizeUrl } from '../core/utils/url-utils';
-import { initializeHlsDetector } from './hls-detector';
 
 // Configuration keys
 const CONFIG_KEY = 'storage_config';
@@ -24,9 +23,6 @@ const activeDownloads = new Map<string, Promise<void>>();
  */
 async function init() {
   logger.info('Service worker initialized');
-  
-  // Initialize HLS detector
-  initializeHlsDetector();
   
   // Handle messages - now handled directly in addListener with async function
   // (see handleMessage function below)
@@ -173,10 +169,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // These messages are handled by content scripts or popup directly
         // Service worker doesn't need to handle them
         sendResponse({ success: true });
-        return false;
-
-      case MessageType.OFFSCREEN_MERGE_REQUEST:
-        // Forward to offscreen document; service worker does not process this request
         return false;
 
       default:

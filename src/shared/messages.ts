@@ -35,9 +35,6 @@ export enum MessageType {
   AUTH_REQUEST = 'AUTH_REQUEST',
   AUTH_COMPLETE = 'AUTH_COMPLETE',
   AUTH_FAILED = 'AUTH_FAILED',
-
-  // Offscreen processing
-  OFFSCREEN_MERGE_REQUEST = 'OFFSCREEN_MERGE_REQUEST',
 }
 
 export interface BaseMessage {

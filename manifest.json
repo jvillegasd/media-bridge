@@ -5,8 +5,6 @@
   "description": "Download videos from the web (direct downloads only) and upload to Google Drive",
   "permissions": [
     "identity",
-    "offscreen",
-
     "webRequest",
     "unlimitedStorage",
     "storage",

@@ -680,14 +680,12 @@ function getFormatDisplayName(format: VideoFormat, actualFormat?: string | null)
 }
 
 /**
- * Get link type display name (delivery method: direct, hls, etc.)
+ * Get link type display name (delivery method: direct, etc.)
  */
 function getLinkTypeDisplayName(format: VideoFormat): string {
   switch (format) {
     case 'direct':
       return 'Direct';
-    case 'hls':
-      return 'HLS';
     default:
       return format.charAt(0).toUpperCase() + format.slice(1);
   }
