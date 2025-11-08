@@ -3,6 +3,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { renameSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { build as viteBuild } from 'vite';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -16,12 +17,14 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           'background/service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
-          'content/content-script': resolve(__dirname, 'src/content/content-script.ts'),
+          // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),
           'options/options': resolve(__dirname, 'src/options/options.html'),
           'offscreen/offscreen': resolve(__dirname, 'src/offscreen/offscreen.html'),
         },
         output: {
+          // ES modules for service worker and other scripts
+          format: 'es',
           entryFileNames: (chunkInfo) => {
             // Keep HTML files in their directories, JS files follow the same structure
             if (chunkInfo.name.includes('popup')) {
@@ -32,6 +35,9 @@ export default defineConfig(({ mode }) => {
             }
             if (chunkInfo.name.includes('offscreen')) {
               return 'offscreen/offscreen.js';
+            }
+            if (chunkInfo.name.includes('service-worker')) {
+              return 'background/service-worker.js';
             }
             return '[name].js';
           },
@@ -111,6 +117,54 @@ export default defineConfig(({ mode }) => {
               writeFileSync(file, content, 'utf-8');
             }
           });
+        },
+      },
+      // Plugin to build content script separately as IIFE (content scripts can't use ES modules)
+      {
+        name: 'build-content-script-as-iife',
+        async writeBundle() {
+          // Use writeBundle instead of closeBundle to avoid recursion
+          // This runs after files are written but before closeBundle
+          const buildingContentScript = (globalThis as any).__buildingContentScript;
+          if (buildingContentScript) {
+            return;
+          }
+          
+          (globalThis as any).__buildingContentScript = true;
+          
+          try {
+            // Build content script separately with IIFE format
+            await viteBuild({
+              configFile: false, // Don't use the main config file
+              build: {
+                outDir: resolve(__dirname, 'dist/content'),
+                emptyOutDir: false,
+                rollupOptions: {
+                  input: resolve(__dirname, 'src/content/content-script.ts'),
+                  output: {
+                    format: 'iife',
+                    entryFileNames: 'content-script.js',
+                    inlineDynamicImports: true, // Bundle everything into one file
+                  },
+                },
+                minify: isProduction,
+                sourcemap: !isProduction,
+                target: 'es2020',
+              },
+              resolve: {
+                alias: {
+                  '@': resolve(__dirname, './src'),
+                },
+                extensions: ['.ts', '.tsx', '.js'],
+              },
+              optimizeDeps: {
+                exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
+              },
+              plugins: [], // No plugins to avoid recursion
+            });
+          } finally {
+            (globalThis as any).__buildingContentScript = false;
+          }
         },
       },
     ],

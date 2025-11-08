@@ -19,11 +19,9 @@ class FFmpegSingleton {
       logger.info('Loading FFmpeg...');
 
       await FFmpegSingleton.instance.load({
-        coreURL: chrome.runtime.getURL('/ffmpeg/core/ffmpeg-core.js'),
-        wasmURL: chrome.runtime.getURL('/ffmpeg/core/ffmpeg-core.wasm'),
+        coreURL: chrome.runtime.getURL('./ffmpeg/core/ffmpeg-core.js'),
+        wasmURL: chrome.runtime.getURL('./ffmpeg/core/ffmpeg-core.wasm'),
       });
-
-      logger.info('FFmpeg loaded successfully');
 
       // Set up logging
       FFmpegSingleton.instance.on('log', ({ message }) => {

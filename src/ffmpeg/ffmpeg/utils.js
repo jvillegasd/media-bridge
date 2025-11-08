@@ -1,1 +1,0 @@
-export const getMessageID=(()=>{let e=0;return()=>e++})();
