@@ -75,3 +75,26 @@ export interface MessageResponse {
 
 export type FetchFn<Data> = () => Promise<Data>;
 
+// HLS Playlist Types
+export type MediaType = 'stream' | 'audio';
+
+export interface Fragment {
+  index: number;
+  key: {
+    iv: string | null;
+    uri: string | null;
+  };
+  uri: string;
+}
+
+export interface Media {
+  type: MediaType;
+  id: string;
+  playlistID: string;
+  uri: string;
+  bitrate?: number;
+  fps?: number;
+  height?: number;
+  width?: number;
+}
+
