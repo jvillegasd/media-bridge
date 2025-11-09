@@ -2,18 +2,19 @@
  * Background service worker for download orchestration
  */
 
-import { DownloadManager } from './core/downloader/download-manager';
-import { DownloadStateManager } from './core/storage/download-state';
-import { UploadManager } from './core/cloud/upload-manager';
-import { ChromeStorage } from './core/storage/chrome-storage';
-import { MessageType } from './shared/messages';
-import { DownloadState, StorageConfig, VideoMetadata } from './core/types';
-import { logger } from './core/utils/logger';
-import { normalizeUrl } from './core/utils/url-utils';
+import { DownloadManager } from "./core/downloader/download-manager";
+import { DownloadStateManager } from "./core/storage/download-state";
+import { UploadManager } from "./core/cloud/upload-manager";
+import { ChromeStorage } from "./core/storage/chrome-storage";
+import { MessageType } from "./shared/messages";
+import { DownloadState, StorageConfig, VideoMetadata } from "./core/types";
+import { logger } from "./core/utils/logger";
+import { normalizeUrl } from "./core/utils/url-utils";
+import { FormatDetector } from "./core/downloader/format-detector";
 
 // Configuration keys
-const CONFIG_KEY = 'storage_config';
-const MAX_CONCURRENT_KEY = 'max_concurrent';
+const CONFIG_KEY = "storage_config";
+const MAX_CONCURRENT_KEY = "max_concurrent";
 
 // Active downloads
 const activeDownloads = new Map<string, Promise<void>>();
@@ -22,24 +23,24 @@ const activeDownloads = new Map<string, Promise<void>>();
  * Initialize service worker
  */
 async function init() {
-  logger.info('Service worker initialized');
-  
+  logger.info("Service worker initialized");
+
   // Handle messages - now handled directly in addListener with async function
   // (see handleMessage function below)
-  
+
   // Handle extension installation
   chrome.runtime.onInstalled.addListener(handleInstallation);
-  
-  // Set up HLS playlist detection via webRequest
-  setupHlsDetection();
+
+  // Set up video detection via webRequest
+  setupVideoDetection();
 }
 
 /**
  * Handle extension installation
  */
 function handleInstallation(details: chrome.runtime.InstalledDetails) {
-  if (details.reason === 'install') {
-    logger.info('Extension installed');
+  if (details.reason === "install") {
+    logger.info("Extension installed");
     // Open options page on first install
     chrome.runtime.openOptionsPage();
   }
@@ -61,10 +62,10 @@ async function handleDownloadRequestMessage(payload: {
     }
     return { success: true };
   } catch (error) {
-    logger.error('Download request error:', error);
+    logger.error("Download request error:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -72,15 +73,19 @@ async function handleDownloadRequestMessage(payload: {
 /**
  * Handle get downloads message
  */
-async function handleGetDownloadsMessage(): Promise<{ success: boolean; data?: DownloadState[]; error?: string }> {
+async function handleGetDownloadsMessage(): Promise<{
+  success: boolean;
+  data?: DownloadState[];
+  error?: string;
+}> {
   try {
     const downloads = await DownloadStateManager.getAllDownloads();
     return { success: true, data: downloads };
   } catch (error) {
-    logger.error('Get downloads error:', error);
+    logger.error("Get downloads error:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -88,15 +93,17 @@ async function handleGetDownloadsMessage(): Promise<{ success: boolean; data?: D
 /**
  * Handle cancel download message
  */
-async function handleCancelDownloadMessage(id: string): Promise<{ success: boolean; error?: string }> {
+async function handleCancelDownloadMessage(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
   try {
     await handleCancelDownload(id);
     return { success: true };
   } catch (error) {
-    logger.error('Cancel download error:', error);
+    logger.error("Cancel download error:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -104,15 +111,19 @@ async function handleCancelDownloadMessage(id: string): Promise<{ success: boole
 /**
  * Handle get config message
  */
-async function handleGetConfigMessage(): Promise<{ success: boolean; data?: StorageConfig; error?: string }> {
+async function handleGetConfigMessage(): Promise<{
+  success: boolean;
+  data?: StorageConfig;
+  error?: string;
+}> {
   try {
     const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
     return { success: true, data: config || undefined };
   } catch (error) {
-    logger.error('Get config error:', error);
+    logger.error("Get config error:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -120,15 +131,17 @@ async function handleGetConfigMessage(): Promise<{ success: boolean; data?: Stor
 /**
  * Handle save config message
  */
-async function handleSaveConfigMessage(payload: StorageConfig): Promise<{ success: boolean; error?: string }> {
+async function handleSaveConfigMessage(
+  payload: StorageConfig,
+): Promise<{ success: boolean; error?: string }> {
   try {
     await ChromeStorage.set(CONFIG_KEY, payload);
     return { success: true };
   } catch (error) {
-    logger.error('Save config error:', error);
+    logger.error("Save config error:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -176,14 +189,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       default:
         logger.warn(`Unknown message type: ${message.type}`);
-        sendResponse({ success: false, error: 'Unknown message type' });
+        sendResponse({ success: false, error: "Unknown message type" });
         return false;
     }
   } catch (error) {
-    logger.error('Message handling error:', error);
-    sendResponse({ 
-      success: false, 
-      error: error instanceof Error ? error.message : String(error) 
+    logger.error("Message handling error:", error);
+    sendResponse({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
     });
     return false;
   }
@@ -199,47 +212,59 @@ async function handleDownloadRequest(payload: {
   metadata?: VideoMetadata;
 }): Promise<{ error?: string } | void> {
   const { url, filename, uploadToDrive, metadata } = payload;
-  
+
   // Normalize URL for comparison (remove hash fragments)
   const normalizedUrl = normalizeUrl(url);
-  
+
   // Check for existing download - only use videoId for comparison
   if (metadata?.videoId) {
     // Check by videoId (unique identifier for each video instance)
-    const existing = await DownloadStateManager.getDownloadByVideoId(metadata.videoId);
-    
+    const existing = await DownloadStateManager.getDownloadByVideoId(
+      metadata.videoId,
+    );
+
     // Allow redownloading completed videos - remove old state first
-    if (existing && existing.progress.stage === 'completed') {
-      logger.info(`Redownloading completed video for videoId: ${metadata.videoId}`);
+    if (existing && existing.progress.stage === "completed") {
+      logger.info(
+        `Redownloading completed video for videoId: ${metadata.videoId}`,
+      );
       await DownloadStateManager.removeDownload(existing.id);
     }
-    
+
     // If download exists but failed, allow retry by removing old state
-    if (existing && existing.progress.stage === 'failed') {
+    if (existing && existing.progress.stage === "failed") {
       logger.info(`Retrying failed download for videoId: ${metadata.videoId}`);
       await DownloadStateManager.removeDownload(existing.id);
     }
-    
+
     // Check if download is already in progress (by videoId)
     for (const [activeUrl, promise] of activeDownloads) {
-      const activeDownload = await DownloadStateManager.getDownloadByUrl(activeUrl);
+      const activeDownload = await DownloadStateManager.getDownloadByUrl(
+        activeUrl,
+      );
       if (activeDownload?.metadata?.videoId === metadata.videoId) {
-        logger.info(`Download already in progress for videoId: ${metadata.videoId}`);
-        return { error: 'Download is already in progress. Please wait for it to complete.' };
+        logger.info(
+          `Download already in progress for videoId: ${metadata.videoId}`,
+        );
+        return {
+          error:
+            "Download is already in progress. Please wait for it to complete.",
+        };
       }
     }
   }
 
   // Get configuration
   const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
-  const maxConcurrent = await ChromeStorage.get<number>(MAX_CONCURRENT_KEY) || 3;
+  const maxConcurrent =
+    (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || 3;
 
   // Create download manager
   const downloadManager = new DownloadManager({
     maxConcurrent,
     onProgress: async (state) => {
       await DownloadStateManager.saveDownload(state);
-      
+
       // Broadcast progress update
       try {
         await chrome.runtime.sendMessage({
@@ -259,9 +284,15 @@ async function handleDownloadRequest(payload: {
   // Note: Upload manager would be created here if we implement upload-before-save
   // For now, uploads would need to be handled separately or we'd need to modify
   // the download flow to upload before saving to disk
-  
+
   // Start download (use normalized URL as key to prevent duplicates with different hash fragments)
-  const downloadPromise = startDownload(downloadManager, undefined, url, filename, metadata);
+  const downloadPromise = startDownload(
+    downloadManager,
+    undefined,
+    url,
+    filename,
+    metadata,
+  );
   activeDownloads.set(normalizedUrl, downloadPromise);
 
   // Clean up when done
@@ -283,11 +314,15 @@ async function startDownload(
   uploadManager: UploadManager | undefined,
   url: string,
   filename?: string,
-  metadata?: VideoMetadata
+  metadata?: VideoMetadata,
 ): Promise<void> {
   try {
     // Download video
-    const downloadState = await downloadManager.download(url, filename, metadata);
+    const downloadState = await downloadManager.download(
+      url,
+      filename,
+      metadata,
+    );
 
     // Note: Upload functionality would require storing the blob during download
     // or uploading before saving to disk. For now, uploads are not automatically
@@ -306,7 +341,7 @@ async function startDownload(
     }
   } catch (error) {
     logger.error(`Download process failed for ${url}:`, error);
-    
+
     // Notify failure
     try {
       await chrome.runtime.sendMessage({
@@ -319,7 +354,7 @@ async function startDownload(
     } catch (err) {
       // Ignore errors
     }
-    
+
     throw error;
   }
 }
@@ -338,44 +373,23 @@ async function handleCancelDownload(id: string) {
   activeDownloads.delete(normalizedUrl);
 
   // Update state
-  download.progress.stage = 'failed';
-  download.progress.error = 'Cancelled by user';
+  download.progress.stage = "failed";
+  download.progress.error = "Cancelled by user";
   await DownloadStateManager.saveDownload(download);
-  
+
   logger.info(`Download cancelled: ${id}`);
 }
 
 /**
- * Set up HLS playlist detection using webRequest API
+ * Set up video detection using webRequest API
+ * Uses FormatDetector to abstract format detection logic
  */
-function setupHlsDetection() {
+function setupVideoDetection() {
   // Listen for completed network requests
   chrome.webRequest.onCompleted.addListener(
     async (details) => {
       // Skip requests without a tab (background requests)
       if (details.tabId < 0) {
-        return;
-      }
-
-      // Check content-type header for HLS playlist
-      const contentTypeHeader = details.responseHeaders?.find(
-        (h) => h.name.toLowerCase() === 'content-type'
-      );
-
-      const contentType = contentTypeHeader?.value?.toLowerCase() || '';
-
-      // Check if it's an HLS playlist by content-type
-      const isHlsContentType =
-        contentType.includes('application/vnd.apple.mpegurl') ||
-        contentType.includes('application/x-mpegurl') ||
-        contentType.includes('audio/mpegurl') ||
-        contentType.includes('audio/x-mpegurl');
-
-      // Check if URL indicates HLS playlist
-      const urlLower = details.url.toLowerCase();
-      const isHlsUrl = urlLower.includes('.m3u8') || urlLower.match(/\.m3u8(\?|$|#)/);
-
-      if (!isHlsContentType && !isHlsUrl) {
         return;
       }
 
@@ -387,6 +401,24 @@ function setupHlsDetection() {
         return;
       }
 
+      // Extract content-type header
+      const contentTypeHeader = details.responseHeaders?.find(
+        (h) => h.name.toLowerCase() === "content-type",
+      );
+
+      const contentType = contentTypeHeader?.value || "";
+
+      // Use FormatDetector to detect format from headers and URL
+      const detectedFormat = FormatDetector.detectFromHeaders(
+        contentType,
+        details.url,
+      );
+
+      // Only process if we detected a known video format (not 'unknown')
+      if (detectedFormat === "unknown") {
+        return;
+      }
+
       try {
         // Get tab information
         const tab = await chrome.tabs.get(details.tabId);
@@ -394,7 +426,7 @@ function setupHlsDetection() {
           return;
         }
 
-        // Send message to content script to handle HLS detection
+        // Send message to content script to handle video detection
         // The content script will use DetectionManager to process it
         chrome.tabs.sendMessage(
           details.tabId,
@@ -402,7 +434,7 @@ function setupHlsDetection() {
             type: MessageType.VIDEO_DETECTED,
             payload: {
               url: details.url,
-              format: 'hls',
+              format: detectedFormat,
               pageUrl: tab.url,
               title: tab.title,
             },
@@ -411,35 +443,27 @@ function setupHlsDetection() {
             // Ignore errors (content script might not be ready or might not handle this)
             if (chrome.runtime.lastError) {
               logger.debug(
-                `Could not send HLS detection to tab ${details.tabId}:`,
-                chrome.runtime.lastError.message
+                `Could not send video detection to tab ${details.tabId}:`,
+                chrome.runtime.lastError.message,
               );
             }
-          }
+          },
         );
       } catch (error) {
-        logger.debug('Error in HLS detection:', error);
+        logger.debug("Error in video detection:", error);
       }
     },
     {
-      types: ['xmlhttprequest', 'main_frame', 'sub_frame'],
-      urls: [
-        'http://*/*.m3u8',
-        'https://*/*.m3u8',
-        'http://*/*.m3u8?*',
-        'https://*/*.m3u8?*',
-        'http://*/*',
-        'https://*/*',
-      ],
+      types: ["xmlhttprequest", "main_frame", "sub_frame"],
+      urls: ["http://*/*", "https://*/*"],
     },
-    ['responseHeaders']
+    ["responseHeaders"],
   );
 
-  logger.info('HLS detection via webRequest initialized');
+  logger.info("Video detection via webRequest initialized");
 }
 
 // Initialize service worker
-init().catch(error => {
-  logger.error('Service worker initialization failed:', error);
+init().catch((error) => {
+  logger.error("Service worker initialization failed:", error);
 });
-

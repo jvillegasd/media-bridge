@@ -485,11 +485,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true; // Keep channel open for async response
     }
 
-    // Handle HLS detection from background script (webRequest)
+    // Handle video detection from background script (webRequest)
+    // DetectionManager will route to the appropriate handler based on format
     if (message.type === MessageType.VIDEO_DETECTED && message.payload) {
       const payload = message.payload;
-      // If it's an HLS playlist detected by webRequest, process it
-      if (payload.format === 'hls' && payload.url && detectionManager) {
+      // Process any detected video format through DetectionManager
+      if (payload.url && detectionManager) {
         detectionManager.handleNetworkRequest(payload.url);
       }
       return false;
