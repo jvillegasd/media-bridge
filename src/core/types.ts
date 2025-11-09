@@ -73,4 +73,5 @@ export interface MessageResponse {
   error?: string;
 }
 
+export type FetchFn<Data> = () => Promise<Data>;
 
