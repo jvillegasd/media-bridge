@@ -4,7 +4,6 @@
 
 import { VideoFormat } from '../types';
 import { logger } from '../utils/logger';
-import { detectExtensionFromUrl as extractExtensionFromUrl } from '../metadata/metadata-extractor';
 
 export class FormatDetector {
   /**
@@ -66,26 +65,6 @@ export class FormatDetector {
     
     // Fallback to URL-based detection
     return this.detectFromUrl(url);
-  }
-
-  /**
-   * Detect format from response (async)
-   */
-  static async detectFromResponse(url: string): Promise<VideoFormat> {
-    try {
-      const response = await fetch(url, { 
-        method: 'HEAD',
-        mode: 'cors',
-        signal: AbortSignal.timeout(5000),
-      });
-      
-      const contentType = response.headers.get('content-type') || '';
-      return this.detectFromHeaders(contentType, url);
-    } catch (error) {
-      logger.warn(`Could not detect format from response for ${url}:`, error);
-      // Fallback to URL-based detection
-      return this.detectFromUrl(url);
-    }
   }
 
   /**
@@ -161,13 +140,6 @@ export class FormatDetector {
       const urlFormat = this.detectFromUrl(url);
       return urlFormat !== 'unknown' ? urlFormat : 'direct'; // Default to direct if unknown
     }
-  }
-
-  /**
-   * Extract file extension from URL
-   */
-  static detectExtensionFromUrl(url: string): string | undefined {
-    return extractExtensionFromUrl(url);
   }
 }
 

@@ -1,0 +1,110 @@
+/**
+ * Main detection manager that orchestrates video detection
+ */
+
+import { VideoFormat, VideoMetadata } from '../../core/types';
+import { FormatDetector } from '../../core/downloader/format-detector';
+import { DirectDetectionHandler } from './direct/direct-detection-handler';
+
+export interface DetectionManagerOptions {
+  onVideoDetected?: (video: VideoMetadata) => void;
+}
+
+export class DetectionManager {
+  private onVideoDetected?: (video: VideoMetadata) => void;
+  private directHandler: DirectDetectionHandler;
+
+  constructor(options: DetectionManagerOptions = {}) {
+    this.onVideoDetected = options.onVideoDetected;
+    this.directHandler = new DirectDetectionHandler({
+      onVideoDetected: (video) => this.handleVideoDetected(video),
+    });
+  }
+
+  /**
+   * Detect video from URL
+   */
+  async detectFromUrl(
+    url: string,
+    videoElement?: HTMLVideoElement,
+  ): Promise<VideoMetadata | null> {
+    // Detect format
+    const format: VideoFormat = await FormatDetector.detectWithInspection(url);
+    
+    // Route to appropriate handler based on format
+    switch (format) {
+      case 'direct':
+        return await this.directHandler.detect(url, videoElement);
+      
+      // Future: case 'hls':
+      //   return await this.hlsHandler.detect(url, videoElement);
+      
+      default:
+        // Default to direct for unknown formats
+        return await this.directHandler.detect(url, videoElement);
+    }
+  }
+
+  /**
+   * Detect videos from network request
+   */
+  handleNetworkRequest(url: string): void {
+    const format = FormatDetector.detectFromUrl(url);
+    
+    switch (format) {
+      case 'direct':
+        this.directHandler.handleNetworkRequest(url);
+        break;
+      
+      // Future: case 'hls':
+      //   this.hlsHandler.handleNetworkRequest(url);
+      //   break;
+    }
+  }
+
+  /**
+   * Scan DOM for video elements
+   */
+  async scanDOM(): Promise<VideoMetadata[]> {
+    const videoElements = document.querySelectorAll('video');
+    const detectedVideos: VideoMetadata[] = [];
+
+    for (const video of Array.from(videoElements)) {
+      const vid = video as HTMLVideoElement;
+      
+      // Skip very small videos (likely icons or UI elements)
+      if (
+        vid.videoWidth > 0 &&
+        vid.videoHeight > 0 &&
+        (vid.videoWidth < 50 || vid.videoHeight < 50)
+      ) {
+        continue;
+      }
+
+      // Skip if video element isn't ready (check if it has any URL)
+      const hasUrl = vid.currentSrc || vid.src || vid.querySelector('source');
+      if (vid.readyState === 0 && !hasUrl) {
+        continue;
+      }
+
+      // Try to detect from video element using format-specific handlers
+      // For now, try direct detection (future: try all handlers or route by format)
+      const metadata = await this.directHandler.detectFromVideoElement(vid);
+      if (metadata) {
+        detectedVideos.push(metadata);
+      }
+    }
+
+    return detectedVideos;
+  }
+
+  /**
+   * Handle detected video
+   */
+  private handleVideoDetected(video: VideoMetadata): void {
+    if (this.onVideoDetected) {
+      this.onVideoDetected(video);
+    }
+  }
+}
+
