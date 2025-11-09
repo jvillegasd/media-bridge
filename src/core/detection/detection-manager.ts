@@ -2,8 +2,8 @@
  * Main detection manager that orchestrates video detection
  */
 
-import { VideoFormat, VideoMetadata } from '../../core/types';
-import { FormatDetector } from '../../core/downloader/format-detector';
+import { VideoFormat, VideoMetadata } from '../types';
+import { FormatDetector } from '../downloader/format-detector';
 import { DirectDetectionHandler } from './direct/direct-detection-handler';
 
 export interface DetectionManagerOptions {

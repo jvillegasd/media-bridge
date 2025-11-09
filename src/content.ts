@@ -2,9 +2,9 @@
  * Content script for video detection - sends detected videos to popup
  */
 
-import { MessageType } from "../shared/messages";
-import { VideoMetadata } from "../core/types";
-import { DetectionManager } from "./detection/detection-manager";
+import { MessageType } from "./shared/messages";
+import { VideoMetadata } from "./core/types";
+import { DetectionManager } from "./core/detection/detection-manager";
 
 // Video detection state
 let detectedVideos: VideoMetadata[] = [];
@@ -501,3 +501,4 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
+

@@ -2,7 +2,7 @@
  * Direct video detection handler - orchestrates direct video detection
  */
 
-import { VideoMetadata } from '../../../core/types';
+import { VideoMetadata } from '../../types';
 import { DirectVideoDetector } from './direct-video-detector';
 
 export interface DirectDetectionHandlerOptions {

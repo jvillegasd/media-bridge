@@ -2,14 +2,14 @@
  * Background service worker for download orchestration
  */
 
-import { DownloadManager } from '../core/downloader/download-manager';
-import { DownloadStateManager } from '../core/storage/download-state';
-import { UploadManager } from '../core/cloud/upload-manager';
-import { ChromeStorage } from '../core/storage/chrome-storage';
-import { MessageType } from '../shared/messages';
-import { DownloadState, StorageConfig, VideoMetadata } from '../core/types';
-import { logger } from '../core/utils/logger';
-import { normalizeUrl } from '../core/utils/url-utils';
+import { DownloadManager } from './core/downloader/download-manager';
+import { DownloadStateManager } from './core/storage/download-state';
+import { UploadManager } from './core/cloud/upload-manager';
+import { ChromeStorage } from './core/storage/chrome-storage';
+import { MessageType } from './shared/messages';
+import { DownloadState, StorageConfig, VideoMetadata } from './core/types';
+import { logger } from './core/utils/logger';
+import { normalizeUrl } from './core/utils/url-utils';
 
 // Configuration keys
 const CONFIG_KEY = 'storage_config';

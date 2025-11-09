@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       rollupOptions: {
         input: {
-          'background/service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
+          'background': resolve(__dirname, 'src/background.ts'),
           // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),
           'options/options': resolve(__dirname, 'src/options/options.html'),
@@ -32,8 +32,8 @@ export default defineConfig(({ mode }) => {
             if (chunkInfo.name.includes('options')) {
               return 'options/options.js';
             }
-            if (chunkInfo.name.includes('service-worker')) {
-              return 'background/service-worker.js';
+            if (chunkInfo.name.includes('background')) {
+              return 'background.js';
             }
             return '[name].js';
           },
@@ -124,13 +124,13 @@ export default defineConfig(({ mode }) => {
             await viteBuild({
               configFile: false, // Don't use the main config file
               build: {
-                outDir: resolve(__dirname, 'dist/content'),
+                outDir: resolve(__dirname, 'dist'),
                 emptyOutDir: false,
                 rollupOptions: {
-                  input: resolve(__dirname, 'src/content/content-script.ts'),
+                  input: resolve(__dirname, 'src/content.ts'),
                   output: {
                     format: 'iife',
-                    entryFileNames: 'content-script.js',
+                    entryFileNames: 'content.js',
                     inlineDynamicImports: true, // Bundle everything into one file
                   },
                 },

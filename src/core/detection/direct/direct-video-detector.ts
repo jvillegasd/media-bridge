@@ -2,8 +2,8 @@
  * Direct video detector - low-level direct video detection logic
  */
 
-import { VideoMetadata } from '../../../core/types';
-import { FormatDetector } from '../../../core/downloader/format-detector';
+import { VideoMetadata } from '../../types';
+import { FormatDetector } from '../../downloader/format-detector';
 import { v4 as uuidv4 } from 'uuid';
 
 export class DirectVideoDetector {
