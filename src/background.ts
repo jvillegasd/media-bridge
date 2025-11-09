@@ -10,7 +10,7 @@ import { MessageType } from "./shared/messages";
 import { DownloadState, StorageConfig, VideoMetadata } from "./core/types";
 import { logger } from "./core/utils/logger";
 import { normalizeUrl } from "./core/utils/url-utils";
-import { FormatDetector } from "./core/downloader/format-detector";
+import { FormatDetector } from "./core/detection/format-detector";
 
 // Configuration keys
 const CONFIG_KEY = "storage_config";

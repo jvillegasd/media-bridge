@@ -3,7 +3,7 @@
  */
 
 import { VideoFormat, VideoMetadata } from '../types';
-import { FormatDetector } from '../downloader/format-detector';
+import { FormatDetector } from './format-detector';
 import { DirectDetectionHandler } from './direct/direct-detection-handler';
 import { HlsDetectionHandler } from './hls/hls-detection-handler';
 

@@ -3,7 +3,7 @@
  */
 
 import { VideoFormat, VideoMetadata, DownloadState } from '../types';
-import { FormatDetector } from './format-detector';
+import { FormatDetector } from '../detection/format-detector';
 import { DirectDownloadHandler } from './direct/direct-download-handler';
 import { DownloadStateManager } from '../storage/download-state';
 import { DownloadError } from '../utils/errors';

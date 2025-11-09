@@ -3,7 +3,7 @@
  */
 
 import { VideoMetadata } from '../../types';
-import { FormatDetector } from '../../downloader/format-detector';
+import { FormatDetector } from '../format-detector';
 import { v4 as uuidv4 } from 'uuid';
 
 export class DirectVideoDetector {
