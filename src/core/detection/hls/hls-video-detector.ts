@@ -21,9 +21,7 @@ export class HlsVideoDetector {
     const contentTypeLower = contentType.toLowerCase();
     return (
       contentTypeLower.includes('application/vnd.apple.mpegurl') ||
-      contentTypeLower.includes('application/x-mpegurl') ||
-      contentTypeLower.includes('audio/mpegurl') ||
-      contentTypeLower.includes('audio/x-mpegurl')
+      contentTypeLower.includes('application/x-mpegurl')
     );
   }
 
