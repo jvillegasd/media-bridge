@@ -29,6 +29,9 @@ async function init() {
   
   // Handle extension installation
   chrome.runtime.onInstalled.addListener(handleInstallation);
+  
+  // Set up HLS playlist detection via webRequest
+  setupHlsDetection();
 }
 
 /**
@@ -340,6 +343,99 @@ async function handleCancelDownload(id: string) {
   await DownloadStateManager.saveDownload(download);
   
   logger.info(`Download cancelled: ${id}`);
+}
+
+/**
+ * Set up HLS playlist detection using webRequest API
+ */
+function setupHlsDetection() {
+  // Listen for completed network requests
+  chrome.webRequest.onCompleted.addListener(
+    async (details) => {
+      // Skip requests without a tab (background requests)
+      if (details.tabId < 0) {
+        return;
+      }
+
+      // Check content-type header for HLS playlist
+      const contentTypeHeader = details.responseHeaders?.find(
+        (h) => h.name.toLowerCase() === 'content-type'
+      );
+
+      const contentType = contentTypeHeader?.value?.toLowerCase() || '';
+
+      // Check if it's an HLS playlist by content-type
+      const isHlsContentType =
+        contentType.includes('application/vnd.apple.mpegurl') ||
+        contentType.includes('application/x-mpegurl') ||
+        contentType.includes('audio/mpegurl') ||
+        contentType.includes('audio/x-mpegurl');
+
+      // Check if URL indicates HLS playlist
+      const urlLower = details.url.toLowerCase();
+      const isHlsUrl = urlLower.includes('.m3u8') || urlLower.match(/\.m3u8(\?|$|#)/);
+
+      if (!isHlsContentType && !isHlsUrl) {
+        return;
+      }
+
+      // Check status code
+      if (
+        details.statusCode &&
+        (details.statusCode < 200 || details.statusCode >= 300)
+      ) {
+        return;
+      }
+
+      try {
+        // Get tab information
+        const tab = await chrome.tabs.get(details.tabId);
+        if (!tab.url) {
+          return;
+        }
+
+        // Send message to content script to handle HLS detection
+        // The content script will use DetectionManager to process it
+        chrome.tabs.sendMessage(
+          details.tabId,
+          {
+            type: MessageType.VIDEO_DETECTED,
+            payload: {
+              url: details.url,
+              format: 'hls',
+              pageUrl: tab.url,
+              title: tab.title,
+            },
+          },
+          (response) => {
+            // Ignore errors (content script might not be ready or might not handle this)
+            if (chrome.runtime.lastError) {
+              logger.debug(
+                `Could not send HLS detection to tab ${details.tabId}:`,
+                chrome.runtime.lastError.message
+              );
+            }
+          }
+        );
+      } catch (error) {
+        logger.debug('Error in HLS detection:', error);
+      }
+    },
+    {
+      types: ['xmlhttprequest', 'main_frame', 'sub_frame'],
+      urls: [
+        'http://*/*.m3u8',
+        'https://*/*.m3u8',
+        'http://*/*.m3u8?*',
+        'https://*/*.m3u8?*',
+        'http://*/*',
+        'https://*/*',
+      ],
+    },
+    ['responseHeaders']
+  );
+
+  logger.info('HLS detection via webRequest initialized');
 }
 
 // Initialize service worker

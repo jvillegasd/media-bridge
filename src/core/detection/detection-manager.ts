@@ -5,6 +5,7 @@
 import { VideoFormat, VideoMetadata } from '../types';
 import { FormatDetector } from '../downloader/format-detector';
 import { DirectDetectionHandler } from './direct/direct-detection-handler';
+import { HlsDetectionHandler } from './hls/hls-detection-handler';
 
 export interface DetectionManagerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
@@ -13,10 +14,14 @@ export interface DetectionManagerOptions {
 export class DetectionManager {
   private onVideoDetected?: (video: VideoMetadata) => void;
   private directHandler: DirectDetectionHandler;
+  private hlsHandler: HlsDetectionHandler;
 
   constructor(options: DetectionManagerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
     this.directHandler = new DirectDetectionHandler({
+      onVideoDetected: (video) => this.handleVideoDetected(video),
+    });
+    this.hlsHandler = new HlsDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
     });
   }
@@ -36,8 +41,8 @@ export class DetectionManager {
       case 'direct':
         return await this.directHandler.detect(url, videoElement);
       
-      // Future: case 'hls':
-      //   return await this.hlsHandler.detect(url, videoElement);
+      case 'hls':
+        return await this.hlsHandler.detect(url, videoElement);
       
       default:
         // Default to direct for unknown formats
@@ -56,9 +61,9 @@ export class DetectionManager {
         this.directHandler.handleNetworkRequest(url);
         break;
       
-      // Future: case 'hls':
-      //   this.hlsHandler.handleNetworkRequest(url);
-      //   break;
+      case 'hls':
+        this.hlsHandler.handleNetworkRequest(url);
+        break;
     }
   }
 
@@ -88,8 +93,11 @@ export class DetectionManager {
       }
 
       // Try to detect from video element using format-specific handlers
-      // For now, try direct detection (future: try all handlers or route by format)
-      const metadata = await this.directHandler.detectFromVideoElement(vid);
+      // Try HLS first (more specific), then direct (fallback)
+      let metadata = await this.hlsHandler.detectFromVideoElement(vid);
+      if (!metadata) {
+        metadata = await this.directHandler.detectFromVideoElement(vid);
+      }
       if (metadata) {
         detectedVideos.push(metadata);
       }

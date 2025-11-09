@@ -31,6 +31,11 @@ export class FormatDetector {
       return 'direct';
     }
     
+    // Check for HLS playlist files (.m3u8)
+    if (urlLower.includes('.m3u8') || urlLower.match(/\.m3u8(\?|$|#)/)) {
+      return 'hls';
+    }
+    
     // Check for common video extensions
     const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv', '.flv', '.wmv'];
     if (videoExtensions.some(ext => urlLower.includes(ext))) {
@@ -57,6 +62,16 @@ export class FormatDetector {
    */
   static detectFromHeaders(contentType: string, url: string): VideoFormat {
     const contentTypeLower = contentType.toLowerCase();
+    
+    // HLS playlist detection
+    if (
+      contentTypeLower.includes('application/vnd.apple.mpegurl') ||
+      contentTypeLower.includes('application/x-mpegurl') ||
+      contentTypeLower.includes('audio/mpegurl') ||
+      contentTypeLower.includes('audio/x-mpegurl')
+    ) {
+      return 'hls';
+    }
     
     // Direct video detection
     if (contentTypeLower.match(/video\/(mp4|webm|ogg|quicktime|x-msvideo|x-matroska)/)) {
