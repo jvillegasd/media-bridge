@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       rollupOptions: {
         input: {
-          'background': resolve(__dirname, 'src/background.ts'),
+          'background': resolve(__dirname, 'src/service-worker.ts'),
           // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),
           'options/options': resolve(__dirname, 'src/options/options.html'),

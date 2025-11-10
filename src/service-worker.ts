@@ -517,3 +517,4 @@ function setupVideoDetection() {
 init().catch((error) => {
   logger.error("Service worker initialization failed:", error);
 });
+
