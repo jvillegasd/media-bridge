@@ -35,6 +35,9 @@ export enum MessageType {
   AUTH_REQUEST = 'AUTH_REQUEST',
   AUTH_COMPLETE = 'AUTH_COMPLETE',
   AUTH_FAILED = 'AUTH_FAILED',
+  
+  // Fetch resource (for CORS bypass in content scripts)
+  FETCH_RESOURCE = 'FETCH_RESOURCE',
 }
 
 export interface BaseMessage {

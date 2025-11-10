@@ -187,6 +187,66 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
         return false;
 
+      case MessageType.FETCH_RESOURCE:
+        // Handle fetch request from content script (for CORS bypass)
+        (async () => {
+          try {
+            const { input, init } = message.payload;
+            
+            // Convert body array back to ArrayBuffer if present
+            let body: BodyInit | null = null;
+            if (init.body) {
+              body = new Uint8Array(init.body).buffer;
+            }
+            
+            // Reconstruct init object
+            const fetchInit: RequestInit = {
+              method: init.method || 'GET',
+              headers: init.headers || {},
+              body: body,
+              mode: init.mode,
+              credentials: init.credentials,
+              cache: init.cache,
+              redirect: init.redirect,
+              referrer: init.referrer,
+              referrerPolicy: init.referrerPolicy,
+              integrity: init.integrity,
+            };
+
+            // Add timeout if specified (using AbortSignal.timeout)
+            if (init.timeout) {
+              fetchInit.signal = AbortSignal.timeout(init.timeout);
+            }
+
+            const response = await fetch(input, fetchInit);
+            
+            // Get response text
+            const text = await response.text();
+            
+            // Convert headers to plain object
+            const headersObj: Record<string, string> = {};
+            response.headers.forEach((value, key) => {
+              headersObj[key] = value;
+            });
+
+            sendResponse([
+              {
+                body: text,
+                status: response.status,
+                statusText: response.statusText,
+                headers: headersObj,
+              },
+              null,
+            ]);
+          } catch (error) {
+            sendResponse([
+              null,
+              error instanceof Error ? error : new Error(String(error)),
+            ]);
+          }
+        })();
+        return true; // Keep channel open for async response
+
       default:
         logger.warn(`Unknown message type: ${message.type}`);
         sendResponse({ success: false, error: "Unknown message type" });
@@ -444,8 +504,8 @@ function setupVideoDetection() {
       }
     },
     {
-      types: ["xmlhttprequest", "main_frame", "sub_frame"],
-      urls: ["http://*/*", "https://*/*"],
+      types: ["xmlhttprequest"],
+       urls: ["http://*/*", "https://*/*"],
     },
     ["responseHeaders"],
   );

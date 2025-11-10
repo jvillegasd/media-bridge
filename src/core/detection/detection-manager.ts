@@ -42,7 +42,7 @@ export class DetectionManager {
         return await this.directHandler.detect(url, videoElement);
       
       case 'hls':
-        return await this.hlsHandler.detect(url, videoElement);
+        return await this.hlsHandler.detect(url);
       
       default:
         // Default to direct for unknown formats
@@ -93,11 +93,9 @@ export class DetectionManager {
       }
 
       // Try to detect from video element using format-specific handlers
-      // Try HLS first (more specific), then direct (fallback)
-      let metadata = await this.hlsHandler.detectFromVideoElement(vid);
-      if (!metadata) {
-        metadata = await this.directHandler.detectFromVideoElement(vid);
-      }
+      // HLS detection only cares about URLs, so skip it for video elements
+      // Only try direct detection from video elements
+      const metadata = await this.directHandler.detectFromVideoElement(vid);
       if (metadata) {
         detectedVideos.push(metadata);
       }

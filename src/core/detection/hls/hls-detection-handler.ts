@@ -4,6 +4,8 @@
 
 import { VideoMetadata } from '../../types';
 import { HlsVideoDetector } from './hls-video-detector';
+import { isMasterPlaylist } from '../../utils/m3u8-parser';
+import { fetchText } from '../../utils/fetch-utils';
 
 export interface HlsDetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
@@ -12,7 +14,6 @@ export interface HlsDetectionHandlerOptions {
 export class HlsDetectionHandler {
   private onVideoDetected?: (video: VideoMetadata) => void;
   private detector: HlsVideoDetector;
-  private capturedUrls = new Map<HTMLVideoElement, string>();
 
   constructor(options: HlsDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
@@ -22,22 +23,30 @@ export class HlsDetectionHandler {
   /**
    * Detect HLS playlist from URL
    */
-  async detect(
-    url: string,
-    videoElement?: HTMLVideoElement,
-  ): Promise<VideoMetadata | null> {
+  async detect(url: string): Promise<VideoMetadata | null> {
     // Check if URL is an HLS playlist URL
     if (!this.detector.isHlsUrl(url)) {
       return null;
     }
 
-    // Store captured URL if we have a video element
-    if (videoElement) {
-      this.capturedUrls.set(videoElement, url);
+    // Validate that this is a master playlist before proceeding
+    try {
+      const playlistText = await fetchText(url, 1);
+      console.log('[Media Bridge] HLS playlist text:', playlistText);
+      const isMaster = isMasterPlaylist(playlistText);
+      
+      // If it's not a master playlist, don't add it to the UI
+      if (!isMaster) {
+        return null;
+      }
+    } catch (error) {
+      // If we can't fetch or parse the playlist, don't add it to the UI
+      console.debug('[Media Bridge] Failed to validate HLS playlist as master:', error);
+      return null;
     }
 
     // Extract metadata
-    const metadata = await this.detector.extractMetadata(url, videoElement);
+    const metadata = await this.detector.extractMetadata(url);
     
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
@@ -51,107 +60,9 @@ export class HlsDetectionHandler {
    */
   handleNetworkRequest(url: string): void {
     if (this.detector.isHlsUrl(url)) {
-      // Try to associate with video elements
-      const videoElements = document.querySelectorAll('video');
-      for (const video of Array.from(videoElements)) {
-        const vid = video as HTMLVideoElement;
-        const existing = this.capturedUrls.get(vid);
-        
-        if (!existing || existing.startsWith('blob:') || existing.startsWith('data:')) {
-          this.capturedUrls.set(vid, url);
-          // Trigger detection
-          this.detect(url, vid);
-        }
-      }
-      
-      // Also detect even if no video element is found (playlist might be loaded via JS)
+      // Trigger detection for HLS URL
       this.detect(url);
     }
-  }
-
-  /**
-   * Get captured URL for video element
-   */
-  getCapturedUrl(videoElement: HTMLVideoElement): string | undefined {
-    return this.capturedUrls.get(videoElement);
-  }
-
-  /**
-   * Check if we have a captured URL for this video element
-   */
-  hasCapturedUrl(videoElement: HTMLVideoElement): boolean {
-    return this.capturedUrls.has(videoElement);
-  }
-
-  /**
-   * Detect video from video element
-   */
-  async detectFromVideoElement(
-    video: HTMLVideoElement,
-  ): Promise<VideoMetadata | null> {
-    // First check if we have a captured URL for this video element
-    const capturedUrl = this.getCapturedUrl(video);
-    if (capturedUrl) {
-      return await this.detect(capturedUrl, video);
-    }
-
-    // Try to get URL from video element
-    const url = this.getVideoUrl(video);
-    if (!url) {
-      return null;
-    }
-
-    // If it's a blob URL, we need a captured URL
-    if (url.startsWith('blob:') || url.startsWith('data:')) {
-      // Check if we have a captured URL
-      if (this.hasCapturedUrl(video)) {
-        const captured = this.getCapturedUrl(video);
-        if (captured) {
-          return await this.detect(captured, video);
-        }
-      }
-      return null;
-    }
-
-    return await this.detect(url, video);
-  }
-
-  /**
-   * Get video URL from video element
-   */
-  private getVideoUrl(video: HTMLVideoElement): string | null {
-    // Check currentSrc (what's actually playing)
-    if (
-      video.currentSrc &&
-      !video.currentSrc.startsWith('blob:') &&
-      !video.currentSrc.startsWith('data:')
-    ) {
-      return video.currentSrc;
-    }
-
-    // Check src attribute
-    if (
-      video.src &&
-      !video.src.startsWith('blob:') &&
-      !video.src.startsWith('data:')
-    ) {
-      return video.src;
-    }
-
-    // Check all source elements
-    const sources = video.querySelectorAll('source');
-    for (const sourceEl of Array.from(sources)) {
-      const source = sourceEl as HTMLSourceElement;
-      if (
-        source.src &&
-        !source.src.startsWith('blob:') &&
-        !source.src.startsWith('data:')
-      ) {
-        return source.src;
-      }
-    }
-
-    return null;
   }
 }
 

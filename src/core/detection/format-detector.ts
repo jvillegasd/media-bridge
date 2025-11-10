@@ -4,6 +4,7 @@
 
 import { VideoFormat } from '../types';
 import { logger } from '../utils/logger';
+import { fetchResource } from '../utils/fetch-utils';
 
 export class FormatDetector {
   /**
@@ -103,7 +104,7 @@ export class FormatDetector {
 
       // If URL-based detection failed, try fetching headers
       try {
-        const response = await fetch(url, {
+        const response = await fetchResource(url, {
           method: 'HEAD',
           mode: 'cors',
           signal: AbortSignal.timeout(5000),
@@ -122,7 +123,7 @@ export class FormatDetector {
 
       // If HEAD failed, try GET with range request
       try {
-        const response = await fetch(url, {
+        const response = await fetchResource(url, {
           method: 'GET',
           headers: { Range: 'bytes=0-1024' }, // First 1KB
           mode: 'cors',
