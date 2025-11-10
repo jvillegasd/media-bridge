@@ -6,7 +6,6 @@ import { DownloadState, VideoMetadata, VideoFormat } from '../core/types';
 import { DownloadStateManager } from '../core/storage/download-state';
 import { MessageType } from '../shared/messages';
 import { normalizeUrl } from '../core/utils/url-utils';
-import { v4 as uuidv4 } from 'uuid';
 
 
 // DOM elements
@@ -20,8 +19,8 @@ let downloadsBtn: HTMLButtonElement | null = null;
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
 
-// Detected videos storage
-let detectedVideos: VideoMetadata[] = [];
+// Detected videos storage - using URL as the unique key
+let detectedVideos: Record<string, VideoMetadata> = {}; // url -> VideoMetadata
 let downloadStates: DownloadState[] = [];
 
 // Quality selection removed - only direct downloads supported
@@ -229,21 +228,25 @@ async function requestDetectedVideos() {
       if (response && response.videos && Array.isArray(response.videos)) {
         // Clear existing videos from this tab and merge
         const currentUrl = tab.url || '';
-        detectedVideos = detectedVideos.filter(v => !v.pageUrl || !v.pageUrl.includes(currentUrl));
+        const filteredVideos: Record<string, VideoMetadata> = {};
+        for (const [url, video] of Object.entries(detectedVideos)) {
+          if (!video.pageUrl || !video.pageUrl.includes(currentUrl)) {
+            filteredVideos[url] = video;
+          }
+        }
+        detectedVideos = filteredVideos;
         
-        // Add all videos from content script with improved deduplication
+        // Add all videos from content script - store uses URL as key, so duplicates are automatically handled
         response.videos.forEach((video: VideoMetadata) => {
-          getOrCreateVideoId(video);
-
-          // Use normalized URLs for comparison to prevent duplicates
+          // Use normalized URLs as key to prevent duplicates
           const normalizedVideoUrl = normalizeUrl(video.url);
-          const existingIndex = detectedVideos.findIndex(v => normalizeUrl(v.url) === normalizedVideoUrl);
+          const existing = detectedVideos[normalizedVideoUrl];
           
-          if (existingIndex < 0) {
-            detectedVideos.push(video);
+          if (!existing) {
+            // New video - add to store
+            detectedVideos[normalizedVideoUrl] = video;
           } else {
             // Update existing entry with latest metadata if needed
-            const existing = detectedVideos[existingIndex];
             if (video.title && !existing.title) {
               existing.title = video.title;
             }
@@ -278,11 +281,47 @@ async function requestDetectedVideos() {
  * Add detected video
  */
 function addDetectedVideo(video: VideoMetadata) {
-  // Check if video already exists
-  if (!detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(video.url))) {
-    getOrCreateVideoId(video);
-    detectedVideos.push(video);
+  // Use normalized URL as key
+  const normalizedUrl = normalizeUrl(video.url);
+  
+  // Pre-check: Check if video already exists
+  if (!detectedVideos[normalizedUrl]) {
+    // New video - add to store
+    detectedVideos[normalizedUrl] = video;
     renderDetectedVideos();
+  } else {
+    // Update existing entry with latest metadata if needed
+    const existing = detectedVideos[normalizedUrl];
+    let updated = false;
+    
+    if (video.title && !existing.title) {
+      existing.title = video.title;
+      updated = true;
+    }
+    if (video.thumbnail && !existing.thumbnail) {
+      existing.thumbnail = video.thumbnail;
+      updated = true;
+    }
+    if (video.resolution && !existing.resolution) {
+      existing.resolution = video.resolution;
+      updated = true;
+    }
+    if (video.width && !existing.width) {
+      existing.width = video.width;
+      updated = true;
+    }
+    if (video.height && !existing.height) {
+      existing.height = video.height;
+      updated = true;
+    }
+    if (video.duration && !existing.duration) {
+      existing.duration = video.duration;
+      updated = true;
+    }
+    
+    if (updated) {
+      renderDetectedVideos();
+    }
   }
 }
 
@@ -302,33 +341,15 @@ async function loadDownloadStates() {
 }
 
 /**
- * Get or generate a unique video ID
- * If video doesn't have an ID, generate one
- */
-function getOrCreateVideoId(video: VideoMetadata): string {
-  // Use existing videoId if available
-  if (video.videoId) {
-    return video.videoId;
-  }
-  
-  // Generate a new UUID v4 for this video instance
-  const videoId = uuidv4();
-  video.videoId = videoId;
-  return videoId;
-}
-
-/**
  * Get download state for a video
- * Uses unique video ID to match only the exact video that was downloaded
+ * Uses URL to match the video that was downloaded
  */
 function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefined {
-  const videoId = video.videoId || getOrCreateVideoId(video);
-
-  if (!videoId) {
-    return undefined;
-  }
-
-  return downloadStates.find(d => d.metadata?.videoId === videoId);
+  const normalizedUrl = normalizeUrl(video.url);
+  return downloadStates.find(d => {
+    if (!d.metadata) return false;
+    return normalizeUrl(d.metadata.url) === normalizedUrl;
+  });
 }
 
 // Quality selection functions removed - only direct downloads supported
@@ -337,16 +358,12 @@ function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefin
  * Render detected videos with download status
  */
 function renderDetectedVideos() {
-  // Deduplicate videos before rendering using normalized URLs
-  const seenUrls = new Set<string>();
-  const uniqueVideos = detectedVideos.filter(video => {
-    const normalizedUrl = normalizeUrl(video.url);
-    if (seenUrls.has(normalizedUrl)) {
-      return false;
-    }
-    seenUrls.add(normalizedUrl);
-    return true;
-  });
+  // Store already uses URL as key, so it's already deduplicated
+  const uniqueVideos = Object.values(detectedVideos);
+
+  // Temporary: Print raw detected videos data for debugging
+  console.log('[Media Bridge] Raw detected videos store:', detectedVideos);
+  console.log('[Media Bridge] Detected videos array:', uniqueVideos);
 
   if (uniqueVideos.length === 0) {
     detectedVideosList.innerHTML = `
@@ -359,7 +376,7 @@ function renderDetectedVideos() {
   }
 
   detectedVideosList.innerHTML = uniqueVideos.map(video => {
-    const videoId = video.videoId || getOrCreateVideoId(video);
+    const normalizedUrl = normalizeUrl(video.url);
     const downloadState = getDownloadStateForVideo(video);
     const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
     const isCompleted = downloadState && downloadState.progress.stage === 'completed';
@@ -453,7 +470,6 @@ function renderDetectedVideos() {
         ` : ''}
         <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
                 data-url="${escapeHtml(video.url)}" 
-                data-video-id="${escapeHtml(videoId)}"
                 ${buttonDisabled ? 'disabled' : ''}>
           ${buttonText}
         </button>
@@ -468,16 +484,10 @@ function renderDetectedVideos() {
       const button = e.target as HTMLButtonElement;
       if (button.disabled) return;
       const url = button.getAttribute('data-url')!;
-      const videoId = button.getAttribute('data-video-id');
+      const normalizedUrl = normalizeUrl(url);
 
-      let videoMetadata: VideoMetadata | undefined;
-      if (videoId) {
-        videoMetadata = detectedVideos.find(v => v.videoId === videoId);
-      }
-
-      if (!videoMetadata) {
-        videoMetadata = detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(url));
-      }
+      // Find video by URL (the key)
+      const videoMetadata = detectedVideos[normalizedUrl];
 
       // Quality selection removed - only direct downloads supported
       startDownload(url, videoMetadata, { triggerButton: button });

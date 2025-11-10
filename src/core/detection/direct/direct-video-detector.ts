@@ -4,7 +4,6 @@
 
 import { VideoMetadata } from '../../types';
 import { FormatDetector } from '../format-detector';
-import { v4 as uuidv4 } from 'uuid';
 
 export class DirectVideoDetector {
   /**
@@ -69,7 +68,6 @@ export class DirectVideoDetector {
       url,
       format,
       pageUrl: window.location.href,
-      videoId: uuidv4(),
       title: document.title,
     };
 

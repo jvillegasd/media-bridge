@@ -5,12 +5,12 @@
 import { Parser } from 'm3u8-parser';
 import { buildAbsoluteURL } from 'url-toolkit';
 import { v4 as uuidv4 } from 'uuid';
-import { Fragment, Media, MediaType } from '../types';
+import { Fragment, Level, LevelType } from '../types';
 
 /**
- * Parse a level playlist (media playlist) into fragments
+ * Parse a level playlist into fragments
  */
-export function parseMediaPlaylist(
+export function parseLevelsPlaylist(
   playlistText: string,
   baseUrl: string
 ): Fragment[] {
@@ -79,12 +79,12 @@ export function parseMediaPlaylist(
 }
 
 /**
- * Parse a master playlist into media (variants/qualities)
+ * Parse a master playlist into levels (variants/qualities)
  */
 export function parseMasterPlaylist(
   playlistText: string,
   baseUrl: string
-): Media[] {
+): Level[] {
   const parser = new Parser();
   parser.push(playlistText);
   parser.end();
@@ -93,8 +93,8 @@ export function parseMasterPlaylist(
   const audioPlaylists = parser.manifest?.mediaGroups?.AUDIO || {};
 
   // Parse video stream playlists
-  const streamMedia: Media[] = playlists.map((playlist) => ({
-    type: 'stream' as MediaType,
+  const streamLevels: Level[] = playlists.map((playlist) => ({
+    type: 'stream' as LevelType,
     id: uuidv4(),
     playlistID: baseUrl,
     uri: buildAbsoluteURL(baseUrl, playlist.uri),
@@ -105,11 +105,11 @@ export function parseMasterPlaylist(
   }));
 
   // Parse audio playlists
-  const audioMedia: Media[] = Object.entries(audioPlaylists).flatMap(
+  const audioLevels: Level[] = Object.entries(audioPlaylists).flatMap(
     ([key, entries]) => {
       return Object.entries(entries).map(([label, entry]: [string, any]) => {
         return {
-          type: 'audio' as MediaType,
+          type: 'audio' as LevelType,
           id: `${label}-${key}`,
           playlistID: baseUrl,
           uri: buildAbsoluteURL(baseUrl, entry.uri),
@@ -122,7 +122,7 @@ export function parseMasterPlaylist(
     }
   );
 
-  return [...streamMedia, ...audioMedia];
+  return [...streamLevels, ...audioLevels];
 }
 
 /**
@@ -143,7 +143,7 @@ export function isMasterPlaylist(playlistText: string): boolean {
 }
 
 export const M3u8Parser = {
-  parseMediaPlaylist,
+  parseLevelsPlaylist,
   parseMasterPlaylist,
   isMasterPlaylist,
 };

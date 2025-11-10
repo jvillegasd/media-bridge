@@ -3,7 +3,6 @@
  */
 
 import { VideoMetadata } from '../../types';
-import { v4 as uuidv4 } from 'uuid';
 
 export class HlsVideoDetector {
   /**
@@ -36,7 +35,6 @@ export class HlsVideoDetector {
       url,
       format: 'hls',
       pageUrl: window.location.href,
-      videoId: uuidv4(),
       title: document.title,
       fileExtension: 'm3u8',
     };

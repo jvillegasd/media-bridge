@@ -5,16 +5,14 @@
 import { MessageType } from "./shared/messages";
 import { VideoMetadata } from "./core/types";
 import { DetectionManager } from "./core/detection/detection-manager";
+import { normalizeUrl } from "./core/utils/url-utils";
 
-// Video detection state
-let detectedVideos: VideoMetadata[] = [];
+// Video detection state - using URL as the unique key
+let detectedVideos: Record<string, VideoMetadata> = {}; // url -> VideoMetadata
 let detectionManager: DetectionManager;
 
 // Track videos that have been sent to popup to avoid redundant updates
 const sentToPopup = new Set<string>();
-
-// Track videos by stable identifier to prevent duplicates
-const videoIdMap = new Map<string, VideoMetadata>(); // videoId -> VideoMetadata
 
 /**
  * Safely send message to runtime, handling extension context invalidation
@@ -231,145 +229,88 @@ async function detectVideos() {
     return;
   }
 
-  // Build set of already detected URLs to avoid duplicates within this detection run
-  const detectedUrls = new Set<string>(detectedVideos.map((v) => v.url));
-
-  // Also track by videoId to prevent duplicates even if URL changes slightly
-  const existingVideoIds = new Set<string>(
-    detectedVideos.map((v) => v.videoId || "").filter((id) => id),
-  );
-
   // Use DetectionManager to scan DOM
   const newVideos = await detectionManager.scanDOM();
 
   for (const metadata of newVideos) {
-    // Skip if we already have this video by URL
-    if (detectedUrls.has(metadata.url)) {
-      continue;
-    }
-
-    // Generate or get stable videoId for tracking
-    if (!metadata.videoId) {
-      const stableId = extractStableId(metadata.url) || metadata.url;
-      metadata.videoId = stableId;
-    }
-
-    // Skip if we already have this video by videoId
-    if (existingVideoIds.has(metadata.videoId)) {
-      // Update existing video if needed, but don't add duplicate
-      const existingVideo = detectedVideos.find(
-        (v) => v.videoId === metadata.videoId,
-      );
-      if (existingVideo) {
-        // Update URL if it changed (e.g., blob URL resolved to direct URL)
-        if (metadata.url !== existingVideo.url && !metadata.url.startsWith("blob:") && !metadata.url.startsWith("data:")) {
-          existingVideo.url = metadata.url;
-          existingVideo.format = metadata.format;
-          // Update metadata if missing
-          if (!existingVideo.title && metadata.title)
-            existingVideo.title = metadata.title;
-          if (!existingVideo.thumbnail && metadata.thumbnail)
-            existingVideo.thumbnail = metadata.thumbnail;
-          if (!existingVideo.width && metadata.width)
-            existingVideo.width = metadata.width;
-          if (!existingVideo.height && metadata.height)
-            existingVideo.height = metadata.height;
-          if (!existingVideo.duration && metadata.duration)
-            existingVideo.duration = metadata.duration;
-          if (!existingVideo.resolution && metadata.resolution)
-            existingVideo.resolution = metadata.resolution;
-
-          addDetectedVideo(existingVideo);
-        }
-        continue;
+    // Normalize URL to use as key
+    const normalizedUrl = normalizeUrl(metadata.url);
+    
+    // Pre-check: Skip if we already have this video by URL
+    if (detectedVideos[normalizedUrl]) {
+      // Update existing video metadata if needed
+      const existing = detectedVideos[normalizedUrl];
+      let updated = false;
+      
+      if (!existing.title && metadata.title) {
+        existing.title = metadata.title;
+        updated = true;
       }
+      if (!existing.thumbnail && metadata.thumbnail) {
+        existing.thumbnail = metadata.thumbnail;
+        updated = true;
+      }
+      if (!existing.width && metadata.width) {
+        existing.width = metadata.width;
+        updated = true;
+      }
+      if (!existing.height && metadata.height) {
+        existing.height = metadata.height;
+        updated = true;
+      }
+      if (!existing.duration && metadata.duration) {
+        existing.duration = metadata.duration;
+        updated = true;
+      }
+      if (!existing.resolution && metadata.resolution) {
+        existing.resolution = metadata.resolution;
+        updated = true;
+      }
+      
+      // Only dispatch if something meaningful changed
+      if (updated) {
+        addDetectedVideo(existing);
+      }
+      continue;
     }
 
     console.log("[Media Bridge] Detected video:", {
       url: metadata.url,
       format: metadata.format,
-      videoId: metadata.videoId,
       pageUrl: metadata.pageUrl,
     });
-
-    // Track both identifier and final URL to avoid duplicates in subsequent runs
-    detectedUrls.add(metadata.url);
-    existingVideoIds.add(metadata.videoId);
 
     addDetectedVideo(metadata);
   }
 }
 
-/**
- * Extract stable identifier from URL (works generically across sites)
- */
-function extractStableId(url: string): string | null {
-  // Look for common ID patterns in URLs (works across many sites)
-  const patterns = [
-    /\/(?:status|post|video|watch|id|p)\/([^\/?#]+)/, // Twitter, Instagram, YouTube, etc.
-    /[#&]video[=#]([^&?#]+)/, // Video ID in hash/query
-    /\/embed\/([^\/?#]+)/, // Embed IDs
-  ];
-
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match && match[1]) {
-      return match[1];
-    }
-  }
-
-  return null;
-}
 
 /**
- * Add detected video and notify popup (generic duplicate detection)
+ * Add detected video and notify popup
+ * Uses URL as the unique key - pre-checks before adding/dispatching
  */
 function addDetectedVideo(video: VideoMetadata) {
-  // Ensure video has a stable ID
-  if (!video.videoId) {
-    video.videoId = extractStableId(video.url) || video.url;
-  }
-
-  // Check if already exists by videoId (most reliable)
-  let existingIndex = -1;
-  if (video.videoId) {
-    existingIndex = detectedVideos.findIndex(
-      (v) => v.videoId === video.videoId,
-    );
-  }
-
-  // Fallback: check by URL if no videoId match
-  if (existingIndex < 0) {
-    existingIndex = detectedVideos.findIndex((v) => v.url === video.url);
-  }
-
-  // Fallback: check by stable ID pattern if URL contains one
-  if (existingIndex < 0) {
-    const videoId = extractStableId(video.url);
-    if (videoId) {
-      existingIndex = detectedVideos.findIndex((v) => {
-        const vId = extractStableId(v.url) || v.videoId;
-        return vId && vId === videoId && v.pageUrl === video.pageUrl;
-      });
-    }
-  }
-
-  if (existingIndex >= 0) {
-    // Update existing entry - keep the same object reference to prevent flickering
-    const existing = detectedVideos[existingIndex];
+  // Normalize URL to use as key
+  const normalizedUrl = normalizeUrl(video.url);
+  
+  // Pre-check: Check if already exists by URL
+  const existing = detectedVideos[normalizedUrl];
+  
+  if (existing) {
+    // Update existing entry metadata if needed
+    let updated = false;
 
     // Update title - prefer browser tab title (document.title) over any other title
-    // Browser tab title is more reliable and consistent
     if (
       video.title === document.title ||
       !existing.title ||
       existing.title.trim().length === 0
     ) {
       existing.title = video.title || document.title;
+      updated = true;
     }
 
     // Update other metadata if missing
-    let updated = false;
     if (!existing.thumbnail && video.thumbnail) {
       existing.thumbnail = video.thumbnail;
       updated = true;
@@ -397,22 +338,15 @@ function addDetectedVideo(video: VideoMetadata) {
       !video.url.startsWith("blob:") &&
       !video.url.startsWith("data:")
     ) {
-      // Update normally
+      // Update URL and format
       existing.url = video.url;
       existing.format = video.format;
       updated = true;
     }
 
-    // Update videoId if missing
-    if (!existing.videoId && video.videoId) {
-      existing.videoId = video.videoId;
-    }
-
     // Only send update if something meaningful changed AND we haven't sent this recently
-    // Use videoId as key for tracking sent videos
-    const trackingKey = existing.videoId || existing.url;
-    if (updated && !sentToPopup.has(trackingKey)) {
-      sentToPopup.add(trackingKey);
+    if (updated && !sentToPopup.has(normalizedUrl)) {
+      sentToPopup.add(normalizedUrl);
       safeSendMessage({
         type: MessageType.VIDEO_DETECTED,
         payload: existing,
@@ -422,18 +356,12 @@ function addDetectedVideo(video: VideoMetadata) {
     return;
   }
 
-  // New video - add to list
-  detectedVideos.push(video);
+  // New video - add to store using URL as key
+  detectedVideos[normalizedUrl] = video;
 
-  // Track in videoIdMap
-  if (video.videoId) {
-    videoIdMap.set(video.videoId, video);
-  }
-
-  // Only send to popup if we haven't sent this video recently
-  const trackingKey = video.videoId || video.url;
-  if (!sentToPopup.has(trackingKey)) {
-    sentToPopup.add(trackingKey);
+  // Pre-check before dispatching: Only send to popup if we haven't sent this video recently
+  if (!sentToPopup.has(normalizedUrl)) {
+    sentToPopup.add(normalizedUrl);
 
     // Send to popup
     safeSendMessage({
@@ -448,7 +376,6 @@ function addDetectedVideo(video: VideoMetadata) {
  */
 function clearSentToPopupTracking() {
   sentToPopup.clear();
-  videoIdMap.clear();
 }
 
 // Clear tracking when page URL changes
@@ -459,7 +386,13 @@ setInterval(() => {
     lastUrl = currentUrl;
     clearSentToPopupTracking();
     // Also clear detected videos from previous page
-    detectedVideos = detectedVideos.filter((v) => v.pageUrl === currentUrl);
+    const currentPageVideos: Record<string, VideoMetadata> = {};
+    for (const [url, video] of Object.entries(detectedVideos)) {
+      if (video.pageUrl === currentUrl) {
+        currentPageVideos[url] = video;
+      }
+    }
+    detectedVideos = currentPageVideos;
   }
 }, 1000);
 
@@ -481,7 +414,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   try {
     if (message.type === MessageType.GET_DETECTED_VIDEOS) {
-      sendResponse({ videos: detectedVideos });
+      // Convert Record to array for response
+      sendResponse({ videos: Object.values(detectedVideos) });
       return true; // Keep channel open for async response
     }
 

@@ -216,42 +216,32 @@ async function handleDownloadRequest(payload: {
   // Normalize URL for comparison (remove hash fragments)
   const normalizedUrl = normalizeUrl(url);
 
-  // Check for existing download - only use videoId for comparison
-  if (metadata?.videoId) {
-    // Check by videoId (unique identifier for each video instance)
-    const existing = await DownloadStateManager.getDownloadByVideoId(
-      metadata.videoId,
+  // Check for existing download - use URL as the key
+  const existing = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
+
+  // Allow redownloading completed videos - remove old state first
+  if (existing && existing.progress.stage === "completed") {
+    logger.info(
+      `Redownloading completed video for URL: ${normalizedUrl}`,
     );
+    await DownloadStateManager.removeDownload(existing.id);
+  }
 
-    // Allow redownloading completed videos - remove old state first
-    if (existing && existing.progress.stage === "completed") {
-      logger.info(
-        `Redownloading completed video for videoId: ${metadata.videoId}`,
-      );
-      await DownloadStateManager.removeDownload(existing.id);
-    }
+  // If download exists but failed, allow retry by removing old state
+  if (existing && existing.progress.stage === "failed") {
+    logger.info(`Retrying failed download for URL: ${normalizedUrl}`);
+    await DownloadStateManager.removeDownload(existing.id);
+  }
 
-    // If download exists but failed, allow retry by removing old state
-    if (existing && existing.progress.stage === "failed") {
-      logger.info(`Retrying failed download for videoId: ${metadata.videoId}`);
-      await DownloadStateManager.removeDownload(existing.id);
-    }
-
-    // Check if download is already in progress (by videoId)
-    for (const [activeUrl, promise] of activeDownloads) {
-      const activeDownload = await DownloadStateManager.getDownloadByUrl(
-        activeUrl,
-      );
-      if (activeDownload?.metadata?.videoId === metadata.videoId) {
-        logger.info(
-          `Download already in progress for videoId: ${metadata.videoId}`,
-        );
-        return {
-          error:
-            "Download is already in progress. Please wait for it to complete.",
-        };
-      }
-    }
+  // Check if download is already in progress (by URL)
+  if (activeDownloads.has(normalizedUrl)) {
+    logger.info(
+      `Download already in progress for URL: ${normalizedUrl}`,
+    );
+    return {
+      error:
+        "Download is already in progress. Please wait for it to complete.",
+    };
   }
 
   // Get configuration
