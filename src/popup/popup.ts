@@ -1,5 +1,5 @@
 /**
- * Popup UI logic with tabs for Detected Videos, Downloads, and Errors
+ * Popup UI for displaying detected videos and managing downloads
  */
 
 import { DownloadState, VideoMetadata, VideoFormat } from '../core/types';
@@ -19,11 +19,8 @@ let downloadsBtn: HTMLButtonElement | null = null;
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
 
-// Detected videos storage - using URL as the unique key
-let detectedVideos: Record<string, VideoMetadata> = {}; // url -> VideoMetadata
+let detectedVideos: Record<string, VideoMetadata> = {};
 let downloadStates: DownloadState[] = [];
-
-// Quality selection removed - only direct downloads supported
 
 /**
  * Initialize popup
@@ -100,15 +97,12 @@ async function init() {
   // Get detected videos from current tab
   await requestDetectedVideos();
 
-  // Refresh data periodically
   setInterval(async () => {
     await loadDownloadStates();
     renderDetectedVideos();
     await requestDetectedVideos();
   }, 2000);
 }
-
-// Tab switching removed - only video cards shown
 
 function showNoVideoNotice() {
   if (!noVideoNotice) return;
@@ -226,7 +220,6 @@ async function requestDetectedVideos() {
       
       // Merge received videos with existing ones
       if (response && response.videos && Array.isArray(response.videos)) {
-        // Clear existing videos from this tab and merge
         const currentUrl = tab.url || '';
         const filteredVideos: Record<string, VideoMetadata> = {};
         for (const [url, video] of Object.entries(detectedVideos)) {
@@ -236,17 +229,13 @@ async function requestDetectedVideos() {
         }
         detectedVideos = filteredVideos;
         
-        // Add all videos from content script - store uses URL as key, so duplicates are automatically handled
         response.videos.forEach((video: VideoMetadata) => {
-          // Use normalized URLs as key to prevent duplicates
           const normalizedVideoUrl = normalizeUrl(video.url);
           const existing = detectedVideos[normalizedVideoUrl];
           
           if (!existing) {
-            // New video - add to store
             detectedVideos[normalizedVideoUrl] = video;
           } else {
-            // Update existing entry with latest metadata if needed
             if (video.title && !existing.title) {
               existing.title = video.title;
             }
@@ -278,19 +267,15 @@ async function requestDetectedVideos() {
 }
 
 /**
- * Add detected video
+ * Add or update detected video in store and refresh UI
  */
 function addDetectedVideo(video: VideoMetadata) {
-  // Use normalized URL as key
   const normalizedUrl = normalizeUrl(video.url);
   
-  // Pre-check: Check if video already exists
   if (!detectedVideos[normalizedUrl]) {
-    // New video - add to store
     detectedVideos[normalizedUrl] = video;
     renderDetectedVideos();
   } else {
-    // Update existing entry with latest metadata if needed
     const existing = detectedVideos[normalizedUrl];
     let updated = false;
     
@@ -326,10 +311,9 @@ function addDetectedVideo(video: VideoMetadata) {
 }
 
 /**
- * Load detected videos
+ * Load detected videos from memory and render
  */
 async function loadDetectedVideos() {
-  // Get from storage or use in-memory
   renderDetectedVideos();
 }
 
@@ -341,8 +325,7 @@ async function loadDownloadStates() {
 }
 
 /**
- * Get download state for a video
- * Uses URL to match the video that was downloaded
+ * Find download state for a video by matching normalized URLs
  */
 function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefined {
   const normalizedUrl = normalizeUrl(video.url);
@@ -352,18 +335,11 @@ function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefin
   });
 }
 
-// Quality selection functions removed - only direct downloads supported
-
 /**
- * Render detected videos with download status
+ * Render detected videos with download status and progress
  */
 function renderDetectedVideos() {
-  // Store already uses URL as key, so it's already deduplicated
   const uniqueVideos = Object.values(detectedVideos);
-
-  // Temporary: Print raw detected videos data for debugging
-  console.log('[Media Bridge] Raw detected videos store:', detectedVideos);
-  console.log('[Media Bridge] Detected videos array:', uniqueVideos);
 
   if (uniqueVideos.length === 0) {
     detectedVideosList.innerHTML = `
@@ -381,8 +357,6 @@ function renderDetectedVideos() {
     const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
     const isCompleted = downloadState && downloadState.progress.stage === 'completed';
     const isFailed = downloadState && downloadState.progress.stage === 'failed';
-    
-    // Get actual file format for display (from download state or video URL)
     const actualFormat = getActualFileFormat(video, downloadState);
 
     const displayResolution = (video.resolution || '').trim();
@@ -422,8 +396,6 @@ function renderDetectedVideos() {
       statusBadge = `<span class="video-status status-failed">Failed</span>`;
       buttonText = 'Retry';
     }
-    
-    // Quality selection removed - only direct downloads supported
 
     return `
     <div class="video-item">
@@ -485,21 +457,13 @@ function renderDetectedVideos() {
       if (button.disabled) return;
       const url = button.getAttribute('data-url')!;
       const normalizedUrl = normalizeUrl(url);
-
-      // Find video by URL (the key)
       const videoMetadata = detectedVideos[normalizedUrl];
-
-      // Quality selection removed - only direct downloads supported
       startDownload(url, videoMetadata, { triggerButton: button });
     });
   });
 }
-
-
-// Error handling functions removed - errors tab removed
-
 /**
- * Start download
+ * Start download for a video URL
  */
 async function startDownload(
   url: string,
@@ -531,10 +495,9 @@ async function startDownload(
         type: MessageType.DOWNLOAD_REQUEST,
         payload: {
           url,
-          metadata: videoMetadata, // Include video metadata so download state can track which video was downloaded
+          metadata: videoMetadata,
         },
       }, (response) => {
-        // Check for extension context invalidation
         if (chrome.runtime.lastError) {
           const errorMessage = chrome.runtime.lastError.message || '';
           if (errorMessage.includes('Extension context invalidated')) {
@@ -547,7 +510,6 @@ async function startDownload(
         resolve(response);
       });
     }).catch((error: any) => {
-      // Handle extension context invalidated
       if (error?.message?.includes('Extension context invalidated')) {
         throw new Error('Extension context invalidated. Please reload the extension and try again.');
       }
@@ -557,16 +519,11 @@ async function startDownload(
     if (response && response.success) {
       await loadDownloadStates();
       renderDetectedVideos();
-      // Don't show error popup if download started successfully
-      // Progress will be updated via DOWNLOAD_PROGRESS messages
     } else if (response && response.error) {
-      // Only show error if there's actually an error (like duplicate download)
-      // Don't show errors for warnings that don't prevent the download
       const errorMessage = response.error;
       if (!errorMessage.includes('already') && !errorMessage.includes('in progress')) {
         alert(response.error);
       }
-      // Still refresh the UI in case download state changed
       await loadDownloadStates();
       renderDetectedVideos();
       shouldResetButton = true;
