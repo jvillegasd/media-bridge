@@ -80,7 +80,10 @@ export async function fetchResource(
           reject(error || new Error('Unknown fetch error'));
         } else {
           // Use undefined on a 204 - No Content
-          const body = response.body ? new Blob([response.body]) : undefined;
+          // Convert array of bytes back to ArrayBuffer
+          const body = response.body 
+            ? new Uint8Array(response.body).buffer
+            : undefined;
           resolve(
             new Response(body, {
               status: response.status,

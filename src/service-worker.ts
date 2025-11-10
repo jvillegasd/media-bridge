@@ -209,8 +209,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             const response = await fetch(input, fetchInit);
             
-            // Get response text
-            const text = await response.text();
+            // Get response as ArrayBuffer to preserve binary data
+            const arrayBuffer = await response.arrayBuffer();
             
             // Convert headers to plain object
             const headersObj: Record<string, string> = {};
@@ -220,7 +220,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             sendResponse([
               {
-                body: text,
+                body: Array.from(new Uint8Array(arrayBuffer)), // Send as array of bytes
                 status: response.status,
                 statusText: response.statusText,
                 headers: headersObj,
