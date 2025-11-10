@@ -107,7 +107,6 @@ export class FormatDetector {
         const response = await fetchResource(url, {
           method: 'HEAD',
           mode: 'cors',
-          signal: AbortSignal.timeout(5000),
         });
         
         const contentType = response.headers.get('content-type') || '';
@@ -127,7 +126,6 @@ export class FormatDetector {
           method: 'GET',
           headers: { Range: 'bytes=0-1024' }, // First 1KB
           mode: 'cors',
-          signal: AbortSignal.timeout(5000),
         });
         
         const contentType = response.headers.get('content-type') || '';

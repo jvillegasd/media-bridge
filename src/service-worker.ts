@@ -205,18 +205,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               headers: init.headers || {},
               body: body,
               mode: init.mode,
-              credentials: init.credentials,
-              cache: init.cache,
-              redirect: init.redirect,
-              referrer: init.referrer,
-              referrerPolicy: init.referrerPolicy,
-              integrity: init.integrity,
             };
-
-            // Add timeout if specified (using AbortSignal.timeout)
-            if (init.timeout) {
-              fetchInit.signal = AbortSignal.timeout(init.timeout);
-            }
 
             const response = await fetch(input, fetchInit);
             
