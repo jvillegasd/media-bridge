@@ -7,10 +7,7 @@ import { DirectDownloadHandler } from "./direct/direct-download-handler";
 import { DownloadStateManager } from "../storage/download-state";
 import { DownloadError } from "../utils/errors";
 import { logger } from "../utils/logger";
-import {
-  DownloadResult,
-  DownloadProgressCallback,
-} from "./types";
+import { DownloadResult, DownloadProgressCallback } from "./types";
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
@@ -41,25 +38,22 @@ export class DownloadManager {
 
     try {
       // Create and initialize download state
-      let state = await this.createInitialDownloadState(downloadId, url, metadata);
+      let state = await this.createInitialDownloadState(
+        downloadId,
+        url,
+        metadata,
+      );
 
       // Validate format from metadata (should already be set by detection)
       if (metadata.format === "unknown") {
-        const failedState: DownloadState = {
-          id: state.id,
+        const error = new Error(`Video format is unknown for URL: ${url}`);
+        return await this.createFailedState(
+          state.id,
           url,
-          metadata: state.metadata,
-          progress: {
-            url,
-            stage: "failed",
-            error: `Video format is unknown for URL: ${url}`,
-          },
-          createdAt: state.createdAt,
-          updatedAt: Date.now(),
-        };
-        await DownloadStateManager.saveDownload(failedState);
-        this.notifyProgress(failedState);
-        return failedState;
+          state.metadata,
+          state.createdAt,
+          error,
+        );
       }
 
       const format = metadata.format;
@@ -91,7 +85,14 @@ export class DownloadManager {
 
       return completedState;
     } catch (error) {
-      await this.handleDownloadError(downloadId, url, metadata, error);
+      logger.error("Download failed:", error);
+      await this.createFailedState(
+        downloadId,
+        url,
+        metadata,
+        Date.now(),
+        error,
+      );
       throw error; // Re-throw after handling
     }
   }
@@ -122,7 +123,6 @@ export class DownloadManager {
 
     return state;
   }
-
 
   /**
    * Execute the actual download using appropriate handler
@@ -226,15 +226,16 @@ export class DownloadManager {
   }
 
   /**
-   * Handle download errors and create failed state
+   * Create and save a failed download state
    */
-  private async handleDownloadError(
+  private async createFailedState(
     downloadId: string,
     url: string,
     metadata: VideoMetadata,
+    createdAt: number,
     error: unknown,
-  ): Promise<void> {
-    logger.error("Download failed:", error);
+  ): Promise<DownloadState> {
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
     const failedState: DownloadState = {
       id: downloadId,
@@ -243,20 +244,24 @@ export class DownloadManager {
       progress: {
         url,
         stage: "failed",
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       },
-      createdAt: Date.now(),
+      createdAt,
       updatedAt: Date.now(),
     };
 
     await DownloadStateManager.saveDownload(failedState);
     this.notifyProgress(failedState);
+
+    return failedState;
   }
 
   /**
    * Wait for Chrome download to complete
    */
-  private waitForDownload(downloadId: chrome.downloads.DownloadItem["id"]): Promise<void> {
+  private waitForDownload(
+    downloadId: chrome.downloads.DownloadItem["id"],
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       const checkDownload = () => {
         chrome.downloads.search({ id: downloadId }, (results) => {
