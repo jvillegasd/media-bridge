@@ -2,6 +2,8 @@
  * Message types for communication between extension components
  */
 
+import { VideoMetadata } from '../core/types';
+
 export enum MessageType {
   // Download messages
   DOWNLOAD_REQUEST = 'DOWNLOAD_REQUEST',
@@ -50,8 +52,8 @@ export interface DownloadRequestMessage extends BaseMessage {
   payload: {
     url: string;
     filename?: string;
-    format?: string;
     uploadToDrive?: boolean;
+    metadata: VideoMetadata;
   };
 }
 

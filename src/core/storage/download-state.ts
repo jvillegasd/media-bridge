@@ -43,7 +43,7 @@ export class DownloadStateManager {
    */
   static async getDownloadByVideoId(videoId: string): Promise<DownloadState | null> {
     const downloads = await this.getAllDownloads();
-    return downloads.find(d => d.metadata?.videoId === videoId) ?? null;
+    return downloads.find(d => d.metadata.videoId === videoId) ?? null;
   }
 
   /**

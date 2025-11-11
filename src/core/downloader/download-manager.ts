@@ -2,26 +2,30 @@
  * Main download manager that orchestrates downloads
  */
 
-import { VideoFormat, VideoMetadata, DownloadState } from '../types';
-import { FormatDetector } from '../detection/format-detector';
-import { DirectDownloadHandler } from './direct/direct-download-handler';
-import { DownloadStateManager } from '../storage/download-state';
-import { DownloadError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { VideoFormat, VideoMetadata, DownloadState } from "../types";
+import { FormatDetector } from "../detection/format-detector";
+import { DirectDownloadHandler } from "./direct/direct-download-handler";
+import { DownloadStateManager } from "../storage/download-state";
+import { DownloadError } from "../utils/errors";
+import { logger } from "../utils/logger";
 import {
-  extractMetadataFromDirectBlob,
-} from '../metadata/metadata-extractor';
+  FormatDetectionResult,
+  DownloadResult,
+  DownloadProgressCallback,
+  ok,
+  err,
+} from "./types";
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
-  onProgress?: (state: DownloadState) => void;
+  onProgress?: DownloadProgressCallback;
   uploadToDrive?: boolean;
 }
 
 export class DownloadManager {
-  private maxConcurrent: number;
-  private onProgress?: (state: DownloadState) => void;
-  private uploadToDrive: boolean;
+  private readonly maxConcurrent: number;
+  private readonly onProgress?: DownloadProgressCallback;
+  private readonly uploadToDrive: boolean;
 
   constructor(options: DownloadManagerOptions = {}) {
     this.maxConcurrent = options.maxConcurrent || 3;
@@ -32,261 +36,263 @@ export class DownloadManager {
   /**
    * Download video from URL
    */
-  async download(url: string, filename?: string, metadata?: VideoMetadata): Promise<DownloadState> {
+  async download(
+    url: string,
+    filename: string,
+    metadata: VideoMetadata,
+  ): Promise<DownloadState> {
     const downloadId = this.generateDownloadId(url);
-    
+
     try {
-      // Create initial download state
-      let state: DownloadState = {
-        id: downloadId,
+      // Create and initialize download state
+      let state = await this.createInitialDownloadState(downloadId, url, metadata);
+
+      // Detect format and validate
+      const formatResult = await this.detectAndValidateFormat(
         url,
+        state,
+        metadata,
+      );
+      if (!formatResult.ok) {
+        return formatResult.error;
+      }
+
+      const { format, state: updatedState } = formatResult.data;
+      state = updatedState;
+
+      // metadata.url is always the actual video URL
+      const actualVideoUrl = metadata.url;
+
+      // Execute download
+      const { blob: finalBlob, extractedMetadata } = await this.executeDownload(
+        actualVideoUrl,
+        state.id,
+      );
+
+      // Get updated state with metadata (already updated by DirectDownloadHandler)
+      const latestState = await DownloadStateManager.getDownload(state.id);
+      if (latestState) {
+        state = latestState;
+      }
+
+      // Save file to disk
+      await this.saveFileToDisk(finalBlob, filename, state);
+
+      // Complete download
+      const completedState = await this.completeDownload(state);
+
+      return completedState;
+    } catch (error) {
+      await this.handleDownloadError(downloadId, url, metadata, error);
+      throw error; // Re-throw after handling
+    }
+  }
+
+  /**
+   * Create initial download state
+   */
+  private async createInitialDownloadState(
+    downloadId: string,
+    url: string,
+    metadata: VideoMetadata,
+  ): Promise<DownloadState> {
+    const state: DownloadState = {
+      id: downloadId,
+      url,
+      metadata,
+      progress: {
+        url,
+        stage: "detecting",
+        percentage: 0,
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await DownloadStateManager.saveDownload(state);
+    this.notifyProgress(state);
+
+    return state;
+  }
+
+  /**
+   * Detect format and validate, updating state accordingly
+   */
+  private async detectAndValidateFormat(
+    url: string,
+    state: DownloadState,
+    metadata: VideoMetadata,
+  ): Promise<FormatDetectionResult> {
+    logger.info(`Detecting format for ${url}`);
+    const format: VideoFormat = FormatDetector.detectFromUrl(url);
+
+    if (format === "unknown") {
+      const failedState: DownloadState = {
+        id: state.id,
+        url,
+        metadata: state.metadata,
         progress: {
           url,
-          stage: 'detecting',
-          percentage: 0,
+          stage: "failed",
+          error: `Could not determine video format for URL: ${url}`,
         },
-        createdAt: Date.now(),
+        createdAt: state.createdAt,
         updatedAt: Date.now(),
       };
+      await DownloadStateManager.saveDownload(failedState);
+      this.notifyProgress(failedState);
+      return err(failedState);
+    }
 
-      await DownloadStateManager.saveDownload(state);
-      this.notifyProgress(state);
+    logger.info(`Detected format: ${format} for URL: ${url}`);
 
-      // Detect format
-      logger.info(`Detecting format for ${url}`);
-      const format: VideoFormat = FormatDetector.detectFromUrl(url);
-      
-      if (format === 'unknown') {
-        const failedState: DownloadState = {
-          id: downloadId,
-          url,
-          progress: {
-            url,
-            stage: 'failed',
-            error: `Could not determine video format for URL: ${url}`,
-          },
-          createdAt: state.createdAt,
-          updatedAt: Date.now(),
-        };
-        await DownloadStateManager.saveDownload(failedState);
-        this.notifyProgress(failedState);
-        return failedState;
-      }
-      
-      logger.info(`Detected format: ${format} for URL: ${url}`);
-      
-      // Use provided metadata if available, otherwise create minimal metadata
-      if (metadata) {
-        // Merge provided metadata with detected format
-        state.metadata = {
-          ...metadata,
-          format,
-        };
-      } else {
-        // Create minimal metadata from URL
-        state.metadata = {
-          url,
-          format,
-        };
-      }
-      state.progress.stage = 'downloading';
-      state.progress.message = `Detected format: ${format}`;
-      
-      await DownloadStateManager.saveDownload(state);
-      this.notifyProgress(state);
+    // Merge provided metadata with detected format
+    state.metadata = {
+      ...metadata,
+      format,
+    };
+    state.progress.stage = "downloading";
+    state.progress.message = `Detected format: ${format}`;
 
-      // Check if URL is a page URL - if so, try to extract actual video URL from metadata
-      const isPageUrl = this.isPageUrl(url);
-      let actualVideoUrl = url;
-      
-      if (isPageUrl && format === 'direct' && metadata) {
-        // Try to find actual video URL from metadata or video element
-        // For now, log a warning - in the future we could request content script to extract it
-        logger.warn(`URL appears to be a page URL: ${url}`);
-        
-        // If metadata has a real video URL stored separately, use it
-        // This would require content script to extract and store it
-        if (metadata.url && !this.isPageUrl(metadata.url) && metadata.url !== url) {
-          actualVideoUrl = metadata.url;
-          logger.info(`Using actual video URL from metadata: ${actualVideoUrl}`);
-        } else {
-          throw new Error('Cannot download page URLs directly. The video URL appears to be a page URL, not a direct video file. Please ensure the actual video file URL is detected.');
+    await DownloadStateManager.saveDownload(state);
+    this.notifyProgress(state);
+
+    return ok({ format, state });
+  }
+
+  /**
+   * Execute the actual download using appropriate handler
+   */
+  private async executeDownload(
+    url: string,
+    stateId: string,
+  ): Promise<DownloadResult> {
+    const directHandler = new DirectDownloadHandler({
+      onProgress: async (directState) => {
+        // Update our state with direct download progress
+        const currentState = await DownloadStateManager.getDownload(stateId);
+        if (currentState) {
+          currentState.progress = directState.progress;
+          await DownloadStateManager.saveDownload(currentState);
+          this.notifyProgress(currentState);
         }
-      }
+      },
+    });
 
-      // Download video - route to appropriate handler based on format
-      let finalBlob: Blob;
-      let extractedMetadata: Partial<VideoMetadata> = {};
+    return await directHandler.download(url, stateId);
+  }
 
-      // Direct download
-      const directHandler = new DirectDownloadHandler({
-        onProgress: async (directState) => {
-          // Update our state with direct download progress
-          const currentState = await DownloadStateManager.getDownload(state.id);
-          if (currentState) {
-            currentState.progress = directState.progress;
-            await DownloadStateManager.saveDownload(currentState);
-            this.notifyProgress(currentState);
-          }
-        },
-      });
-      finalBlob = await directHandler.download(actualVideoUrl, state.id);
-      // Extract metadata from direct video blob
-      const contentType = finalBlob.type;
-      const directMetadata = await extractMetadataFromDirectBlob(finalBlob, actualVideoUrl, contentType);
-      extractedMetadata.fileExtension = directMetadata.extension;
+  /**
+   * Save file to disk using Chrome downloads API
+   */
+  private async saveFileToDisk(
+    blob: Blob,
+    filename: string,
+    state: DownloadState,
+  ): Promise<void> {
+    state.progress.stage = "saving";
+    state.progress.message = "Saving file...";
+    await DownloadStateManager.saveDownload(state);
+    this.notifyProgress(state);
 
-      // Update state metadata with extracted information
-      if (state.metadata) {
-        state.metadata = {
-          ...state.metadata,
-          ...extractedMetadata,
-        };
-      } else {
-        state.metadata = {
-          url: actualVideoUrl,
-          format,
-          ...extractedMetadata,
-        };
-      }
+    // Create blob URL
+    const blobUrl = URL.createObjectURL(blob);
 
-      // Save updated metadata
-      state.updatedAt = Date.now();
-      await DownloadStateManager.saveDownload(state);
-
-      // Save file locally (using Chrome downloads API)
-      // Use detected extension if available, otherwise use mp4
-      const detectedExtension = extractedMetadata.fileExtension || 'mp4';
-      const downloadFilename = filename || this.generateFilenameWithExtension(url, format, detectedExtension);
-      
-      state.progress.stage = 'saving';
-      state.progress.message = 'Saving file...';
-      await DownloadStateManager.saveDownload(state);
-      this.notifyProgress(state);
-
-      // Create blob URL with fallback for service worker contexts
-      let blobUrl: string;
-      try {
-        // Check if URL.createObjectURL is available
-        if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
-          blobUrl = URL.createObjectURL(finalBlob);
-          logger.debug('Created blob URL using URL.createObjectURL');
-        } else {
-          // Fallback: convert to data URL (for small files only)
-          // Note: This has size limitations, but works when URL.createObjectURL isn't available
-          const MAX_DATA_URL_SIZE = 100 * 1024 * 1024; // 100MB limit for data URLs
-          if (finalBlob.size > MAX_DATA_URL_SIZE) {
-            throw new Error(
-              `File too large (${(finalBlob.size / 1024 / 1024).toFixed(2)}MB) for data URL conversion. ` +
-              `URL.createObjectURL is not available in this context.`
-            );
-          }
-          
-          // Convert blob to base64 using chunked approach for large files
-          const arrayBuffer = await finalBlob.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
-          
-          // Convert in chunks to avoid stack overflow
-          let binaryString = '';
-          const chunkSize = 8192; // Process 8KB at a time
-          for (let i = 0; i < uint8Array.length; i += chunkSize) {
-            const chunk = uint8Array.slice(i, i + chunkSize);
-            binaryString += String.fromCharCode.apply(null, Array.from(chunk));
-          }
-          
-          const base64 = btoa(binaryString);
-          const mimeType = finalBlob.type || 'video/mp4';
-          blobUrl = `data:${mimeType};base64,${base64}`;
-          logger.warn('Using data URL fallback for blob saving (URL.createObjectURL not available)');
-        }
-      } catch (error) {
-        logger.error('Failed to create blob URL:', error);
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to create blob URL for download: ${errorMessage}`);
-      }
-
+    try {
       // Use Chrome downloads API to save file
       const chromeDownloadId = await new Promise<number>((resolve, reject) => {
-        chrome.downloads.download({
-          url: blobUrl,
-          filename: downloadFilename,
-          saveAs: false,
-        }, (id) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else {
-            resolve(id!);
-          }
-        });
+        chrome.downloads.download(
+          {
+            url: blobUrl,
+            filename,
+            saveAs: false,
+          },
+          (id) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(id!);
+            }
+          },
+        );
       });
 
       // Wait for download to complete
       await this.waitForDownload(chromeDownloadId);
 
       // Get final download path
-      const downloadItem = await new Promise<chrome.downloads.DownloadItem>((resolve, reject) => {
-        chrome.downloads.search({ id: chromeDownloadId }, (results) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (results && results[0]) {
-            resolve(results[0]);
-          } else {
-            reject(new Error('Download not found'));
-          }
-        });
-      });
+      const downloadItem = await new Promise<chrome.downloads.DownloadItem>(
+        (resolve, reject) => {
+          chrome.downloads.search({ id: chromeDownloadId }, (results) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (results && results[0]) {
+              resolve(results[0]);
+            } else {
+              reject(new Error("Download not found"));
+            }
+          });
+        },
+      );
 
       state.localPath = downloadItem.filename;
-      state.progress.stage = 'completed';
-      state.progress.percentage = 100;
-      state.progress.message = 'Download completed';
-
-      await DownloadStateManager.saveDownload(state);
-      this.notifyProgress(state);
-
-      // Note: Google Drive upload would need to be handled separately
-      // as we can't easily read the downloaded file back
-      // The blob is available in finalBlob, but it's already saved
-      // A better approach would be to upload first, then save, or store blob for upload
-
-      // Revoke blob URL if it was created with URL.createObjectURL
-      try {
-        if (typeof URL !== 'undefined' && URL.revokeObjectURL && blobUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(blobUrl);
-        }
-      } catch (error) {
-        // Ignore errors when revoking
-        logger.debug('Error revoking blob URL:', error);
-      }
-
-      return state;
-    } catch (error) {
-      logger.error('Download failed:', error);
-      
-      const failedState: DownloadState = {
-        id: downloadId,
-        url,
-        progress: {
-          url,
-          stage: 'failed',
-          error: error instanceof Error ? error.message : String(error),
-        },
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      await DownloadStateManager.saveDownload(failedState);
-      this.notifyProgress(failedState);
-
-      throw error;
+    } finally {
+      // Revoke blob URL to free memory
+      URL.revokeObjectURL(blobUrl);
     }
   }
 
+  /**
+   * Complete download and update final state
+   */
+  private async completeDownload(state: DownloadState): Promise<DownloadState> {
+    state.progress.stage = "completed";
+    state.progress.percentage = 100;
+    state.progress.message = "Download completed";
+
+    await DownloadStateManager.saveDownload(state);
+    this.notifyProgress(state);
+
+    // Note: Google Drive upload would need to be handled separately
+    // as we can't easily read the downloaded file back
+    // The blob is available in finalBlob, but it's already saved
+    // A better approach would be to upload first, then save, or store blob for upload
+
+    return state;
+  }
+
+  /**
+   * Handle download errors and create failed state
+   */
+  private async handleDownloadError(
+    downloadId: string,
+    url: string,
+    metadata: VideoMetadata,
+    error: unknown,
+  ): Promise<void> {
+    logger.error("Download failed:", error);
+
+    const failedState: DownloadState = {
+      id: downloadId,
+      url,
+      metadata,
+      progress: {
+        url,
+        stage: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await DownloadStateManager.saveDownload(failedState);
+    this.notifyProgress(failedState);
+  }
 
   /**
    * Wait for Chrome download to complete
    */
-  private waitForDownload(downloadId: number): Promise<void> {
+  private waitForDownload(downloadId: chrome.downloads.DownloadItem["id"]): Promise<void> {
     return new Promise((resolve, reject) => {
       const checkDownload = () => {
         chrome.downloads.search({ id: downloadId }, (results) => {
@@ -296,14 +302,14 @@ export class DownloadManager {
           }
 
           if (!results || results.length === 0) {
-            reject(new Error('Download not found'));
+            reject(new Error("Download not found"));
             return;
           }
 
           const item = results[0];
-          if (item.state === 'complete') {
+          if (item.state === "complete") {
             resolve();
-          } else if (item.state === 'interrupted') {
+          } else if (item.state === "interrupted") {
             reject(new Error(`Download interrupted: ${item.error}`));
           } else {
             setTimeout(checkDownload, 500);
@@ -319,75 +325,10 @@ export class DownloadManager {
    * Generate download ID
    */
   private generateDownloadId(url: string): string {
-    return `dl_${Date.now()}_${url.substring(0, 20).replace(/[^a-z0-9]/gi, '')}`;
+    return `dl_${Date.now()}_${url
+      .substring(0, 20)
+      .replace(/[^a-z0-9]/gi, "")}`;
   }
-
-  /**
-   * Generate filename from URL with specific extension
-   */
-  private generateFilenameWithExtension(url: string, format: VideoFormat, extension: string): string {
-    try {
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname;
-      const filename = pathname.split('/').pop() || 'video';
-      
-      // Remove query parameters and existing extension
-      const baseName = filename.split('?')[0].split('.')[0];
-      
-      return `${baseName}.${extension}`;
-    } catch {
-      // Fallback if URL parsing fails
-      const timestamp = Date.now();
-      return `video_${timestamp}.${extension}`;
-    }
-  }
-
-
-  /**
-   * Check if URL is a page URL (like view_video.php) vs actual video file
-   */
-  private isPageUrl(url: string): boolean {
-    try {
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname.toLowerCase();
-      const hostname = urlObj.hostname.toLowerCase();
-      
-      // Check for common page URL patterns
-      const pagePatterns = [
-        /view_video/i,
-        /watch/i,
-        /video\.php/i,
-        /embed/i,
-        /\.html$/i,
-        /\.php$/i,
-      ];
-      
-      // Check pathname
-      if (pagePatterns.some(pattern => pattern.test(pathname))) {
-        return true;
-      }
-      
-      // Check for hash fragments that indicate page anchors (not video files)
-      if (urlObj.hash && urlObj.hash.includes('video-')) {
-        return true;
-      }
-      
-      // Check if it's a known video site page URL
-      if (hostname.includes('pornhub.com') && pathname.includes('/view_video')) {
-        return true;
-      }
-      
-      if ((hostname.includes('youtube.com') || hostname.includes('youtu.be')) && pathname.includes('/watch')) {
-        return true;
-      }
-      
-      return false;
-    } catch {
-      // If URL parsing fails, assume it's not a page URL
-      return false;
-    }
-  }
-
 
   /**
    * Notify progress
@@ -398,4 +339,3 @@ export class DownloadManager {
     }
   }
 }
-

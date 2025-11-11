@@ -45,7 +45,7 @@ export interface DownloadProgress {
 export interface DownloadState {
   id: string;
   url: string;
-  metadata?: VideoMetadata;
+  metadata: VideoMetadata;
   progress: DownloadProgress;
   localPath?: string;
   cloudId?: string;

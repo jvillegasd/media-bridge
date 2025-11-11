@@ -4,13 +4,14 @@
 
 import { DownloadError, NetworkError } from '../../utils/errors';
 import { logger } from '../../utils/logger';
+import { DirectDownloadProgressCallback } from '../types';
 
 export interface DirectDownloadOptions {
-  onProgress?: (loaded: number, total: number, percentage: number) => void;
+  onProgress?: DirectDownloadProgressCallback;
 }
 
 export class DirectDownloader {
-  private onProgress?: (loaded: number, total: number, percentage: number) => void;
+  private readonly onProgress?: DirectDownloadProgressCallback;
 
   constructor(options: DirectDownloadOptions = {}) {
     this.onProgress = options.onProgress;

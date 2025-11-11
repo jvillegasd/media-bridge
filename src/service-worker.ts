@@ -10,6 +10,7 @@ import { MessageType } from "./shared/messages";
 import { DownloadState, StorageConfig, VideoMetadata } from "./core/types";
 import { logger } from "./core/utils/logger";
 import { normalizeUrl } from "./core/utils/url-utils";
+import { generateFilenameWithExtension } from "./core/utils/file-utils";
 
 const CONFIG_KEY = "storage_config";
 const MAX_CONCURRENT_KEY = "max_concurrent";
@@ -42,7 +43,7 @@ async function handleDownloadRequestMessage(payload: {
   url: string;
   filename?: string;
   uploadToDrive?: boolean;
-  metadata?: VideoMetadata;
+  metadata: VideoMetadata;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const downloadResult = await handleDownloadRequest(payload);
@@ -247,7 +248,7 @@ async function handleDownloadRequest(payload: {
   url: string;
   filename?: string;
   uploadToDrive?: boolean;
-  metadata?: VideoMetadata;
+  metadata: VideoMetadata;
 }): Promise<{ error?: string } | void> {
   const { url, filename, uploadToDrive, metadata } = payload;
   const normalizedUrl = normalizeUrl(url);
@@ -342,13 +343,20 @@ function isDownloadFailed(downloadState: DownloadState): boolean {
 async function startDownload(
   downloadManager: DownloadManager,
   url: string,
-  filename?: string,
-  metadata?: VideoMetadata,
+  filename: string | undefined,
+  metadata: VideoMetadata,
 ): Promise<void> {
   try {
+    // Generate filename if not provided
+    let finalFilename = filename;
+    if (!finalFilename) {
+      const extension = metadata.fileExtension || "mp4";
+      finalFilename = generateFilenameWithExtension(url, extension);
+    }
+
     const downloadState = await downloadManager.download(
       url,
-      filename,
+      finalFilename,
       metadata,
     );
 

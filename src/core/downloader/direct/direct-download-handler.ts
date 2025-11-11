@@ -4,24 +4,26 @@
 
 import { DirectDownloader } from './direct-downloader';
 import { DownloadStateManager } from '../../storage/download-state';
-import { DownloadState } from '../../types';
+import { DownloadState, VideoFormat } from '../../types';
 import { logger } from '../../utils/logger';
+import { extractMetadataFromDirectBlob } from '../../metadata/metadata-extractor';
+import { DownloadProgressCallback, DownloadResult } from '../types';
 
 export interface DirectDownloadHandlerOptions {
-  onProgress?: (state: DownloadState) => void;
+  onProgress?: DownloadProgressCallback;
 }
 
 export class DirectDownloadHandler {
-  private onProgress?: (state: DownloadState) => void;
+  private readonly onProgress?: DownloadProgressCallback;
 
   constructor(options: DirectDownloadHandlerOptions = {}) {
     this.onProgress = options.onProgress;
   }
 
   /**
-   * Download direct video and return blob
+   * Download direct video and return blob with extracted metadata
    */
-  async download(url: string, stateId: string): Promise<Blob> {
+  async download(url: string, stateId: string): Promise<DownloadResult> {
     const directDownloader = new DirectDownloader({
       onProgress: async (loaded, total, percentage) => {
         logger.debug(`Direct download: ${percentage.toFixed(2)}%`);
@@ -63,7 +65,29 @@ export class DirectDownloadHandler {
       },
     });
 
-    return await directDownloader.download(url);
+    const blob = await directDownloader.download(url);
+    
+    // Extract metadata from direct video blob
+    const contentType = blob.type;
+    const directMetadata = await extractMetadataFromDirectBlob(blob, url, contentType);
+    
+    // Update state with extracted metadata
+    const currentState = await DownloadStateManager.getDownload(stateId);
+    if (currentState) {
+      currentState.metadata = {
+        ...currentState.metadata,
+        fileExtension: directMetadata.extension,
+      };
+      currentState.updatedAt = Date.now();
+      await DownloadStateManager.saveDownload(currentState);
+    }
+    
+    return {
+      blob,
+      extractedMetadata: {
+        fileExtension: directMetadata.extension,
+      },
+    };
   }
 
   /**
