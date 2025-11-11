@@ -3,7 +3,7 @@
  */
 
 import { VideoFormat, VideoMetadata } from '../types';
-import { FormatDetector } from './format-detector';
+import { detectFormatFromUrl } from '../utils/url-utils';
 import { DirectDetectionHandler } from './direct/direct-detection-handler';
 import { HlsDetectionHandler } from './hls/hls-detection-handler';
 
@@ -34,7 +34,7 @@ export class DetectionManager {
     videoElement?: HTMLVideoElement,
   ): Promise<VideoMetadata | null> {
     // Detect format
-    const format: VideoFormat = FormatDetector.detectFromUrl(url);
+    const format: VideoFormat = detectFormatFromUrl(url);
     
     // Route to appropriate handler based on format
     switch (format) {
@@ -53,7 +53,7 @@ export class DetectionManager {
    * Detect videos from network request
    */
   handleNetworkRequest(url: string): void {
-    const format = FormatDetector.detectFromUrl(url);
+    const format = detectFormatFromUrl(url);
     
     switch (format) {
       case 'direct':

@@ -3,7 +3,7 @@
  */
 
 import { VideoMetadata } from '../../types';
-import { FormatDetector } from '../format-detector';
+import { detectFormatFromUrl } from '../../utils/url-utils';
 
 export class DirectVideoDetector {
   /**
@@ -61,7 +61,7 @@ export class DirectVideoDetector {
     url: string,
     videoElement?: HTMLVideoElement,
   ): Promise<VideoMetadata | null> {
-    const format = FormatDetector.detectFromUrl(url);
+    const format = detectFormatFromUrl(url);
     
     // Reject unknown formats
     if (format === 'unknown') {
