@@ -23,31 +23,17 @@ function safeSendMessage(message: any): Promise<void> {
       return;
     }
 
-    try {
-      chrome.runtime.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message || "";
-          if (errorMessage.includes("Extension context invalidated")) {
-            console.debug("Extension context invalidated");
-            resolve();
-            return;
-          }
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        const errorMessage = chrome.runtime.lastError.message || "";
+        if (errorMessage.includes("Extension context invalidated")) {
+          console.debug("Extension context invalidated");
         }
-        resolve();
-      });
-    } catch (error: any) {
-      if (
-        error?.message?.includes("Extension context invalidated") ||
-        chrome.runtime.lastError?.message?.includes(
-          "Extension context invalidated",
-        )
-      ) {
-        console.debug("Extension context invalidated");
         resolve();
         return;
       }
       resolve();
-    }
+    });
   });
 }
 
