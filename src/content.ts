@@ -48,7 +48,6 @@ function handleCapturedRequest(url: string) {
 
 /**
  * Intercept fetch and XMLHttpRequest to capture video URLs
- * Also sets up PerformanceObserver to monitor resource loading
  */
 function setupNetworkInterceptor() {
   const originalFetch = window.fetch;
@@ -92,64 +91,12 @@ function setupNetworkInterceptor() {
       password,
     );
   };
-
-  setupResourcePerformanceObserver();
 }
 
 /**
- * Set up PerformanceObserver to monitor resource loading
- * Captures URLs of loaded resources for video detection
+ * Set up MutationObserver to monitor DOM changes for dynamically added video elements
  */
-function setupResourcePerformanceObserver() {
-  if (typeof PerformanceObserver === "undefined") {
-    return;
-  }
-
-  try {
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        const resource = entry as PerformanceResourceTiming;
-        const url = resource?.name;
-        if (url) {
-          handleCapturedRequest(url);
-        }
-      }
-    });
-
-    try {
-      observer.observe({
-        type: "resource",
-        buffered: true,
-      } as PerformanceObserverInit);
-    } catch (err) {
-      try {
-        observer.observe({ type: "resource" } as PerformanceObserverInit);
-      } catch (err2) {
-        observer.observe({ entryTypes: ["resource"] });
-      }
-    }
-    console.log("[Media Bridge] PerformanceObserver initialized");
-  } catch (error) {
-    console.debug("[Media Bridge] PerformanceObserver initialization failed:", error);
-  }
-}
-
-/**
- * Initialize content script
- * Sets up detection manager, performs initial scan, and monitors DOM changes
- */
-function init() {
-  detectionManager = new DetectionManager({
-    onVideoDetected: (video) => {
-      addDetectedVideo(video);
-    },
-  });
-
-  detectVideos();
-  setTimeout(() => {
-    detectVideos();
-  }, 1000);
-
+function setupDOMObserver() {
   const observer = new MutationObserver((mutations) => {
     let shouldDetect = false;
     for (const mutation of mutations) {
@@ -177,10 +124,21 @@ function init() {
     childList: true,
     subtree: true,
   });
+}
 
-  setInterval(() => {
-    detectVideos();
-  }, 3000);
+/**
+ * Initialize content script
+ * Sets up detection manager, performs initial scan, and monitors DOM changes
+ */
+function init() {
+  detectionManager = new DetectionManager({
+    onVideoDetected: (video) => {
+      addDetectedVideo(video);
+    },
+  });
+
+  detectVideos();
+  setupDOMObserver();
 }
 
 /**
