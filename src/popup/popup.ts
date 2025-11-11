@@ -270,6 +270,17 @@ async function requestDetectedVideos() {
  * Add or update detected video in store and refresh UI
  */
 function addDetectedVideo(video: VideoMetadata) {
+  // Reject unknown formats - don't show them in UI
+  if (video.format === 'unknown') {
+    // If it already exists, remove it
+    const normalizedUrl = normalizeUrl(video.url);
+    if (detectedVideos[normalizedUrl]) {
+      delete detectedVideos[normalizedUrl];
+      renderDetectedVideos();
+    }
+    return;
+  }
+  
   const normalizedUrl = normalizeUrl(video.url);
   
   if (!detectedVideos[normalizedUrl]) {

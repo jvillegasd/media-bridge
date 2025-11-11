@@ -61,8 +61,12 @@ export class DirectVideoDetector {
     url: string,
     videoElement?: HTMLVideoElement,
   ): Promise<VideoMetadata | null> {
-    const rawFormat = FormatDetector.detectFromUrl(url);
-    const format = rawFormat === 'unknown' ? 'direct' : rawFormat;
+    const format = FormatDetector.detectFromUrl(url);
+    
+    // Reject unknown formats
+    if (format === 'unknown') {
+      return null;
+    }
     
     const metadata: VideoMetadata = {
       url,

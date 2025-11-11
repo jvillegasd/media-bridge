@@ -34,7 +34,7 @@ export class DetectionManager {
     videoElement?: HTMLVideoElement,
   ): Promise<VideoMetadata | null> {
     // Detect format
-    const format: VideoFormat = await FormatDetector.detectWithInspection(url);
+    const format: VideoFormat = FormatDetector.detectFromUrl(url);
     
     // Route to appropriate handler based on format
     switch (format) {
@@ -44,9 +44,8 @@ export class DetectionManager {
       case 'hls':
         return await this.hlsHandler.detect(url);
       
-      default:
-        // Default to direct for unknown formats
-        return await this.directHandler.detect(url, videoElement);
+      case 'unknown':
+        return null;
     }
   }
 
@@ -63,6 +62,10 @@ export class DetectionManager {
       
       case 'hls':
         this.hlsHandler.handleNetworkRequest(url);
+        break;
+      
+      case 'unknown':
+        // Reject unknown formats - don't process them
         break;
     }
   }

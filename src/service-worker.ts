@@ -136,6 +136,64 @@ async function handleSaveConfigMessage(
 }
 
 /**
+ * Handle fetch resource message (CORS bypass)
+ * Content scripts send fetch requests through service worker to bypass CORS
+ */
+async function handleFetchResourceMessage(payload: {
+  input: string;
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: number[];
+    mode?: RequestMode;
+  };
+}): Promise<[{
+  body: number[];
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+} | null, Error | null]> {
+  try {
+    const { input, init } = payload;
+    
+    let body: BodyInit | null = null;
+    if (init.body) {
+      body = new Uint8Array(init.body).buffer;
+    }
+    
+    const fetchInit: RequestInit = {
+      method: init.method || 'GET',
+      headers: init.headers || {},
+      body: body,
+      mode: init.mode,
+    };
+
+    const response = await fetch(input, fetchInit);
+    const arrayBuffer = await response.arrayBuffer();
+    
+    const headersObj: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      headersObj[key] = value;
+    });
+
+    return [
+      {
+        body: Array.from(new Uint8Array(arrayBuffer)),
+        status: response.status,
+        statusText: response.statusText,
+        headers: headersObj,
+      },
+      null,
+    ];
+  } catch (error) {
+    return [
+      null,
+      error instanceof Error ? error : new Error(String(error)),
+    ];
+  }
+}
+
+/**
  * Handle messages from popup and content scripts
  * Processes download requests, state queries, config management, and CORS bypass requests
  */
@@ -163,47 +221,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
 
       case MessageType.FETCH_RESOURCE:
-        // CORS bypass: content scripts send fetch requests through service worker
-        (async () => {
-          try {
-            const { input, init } = message.payload;
-            
-            let body: BodyInit | null = null;
-            if (init.body) {
-              body = new Uint8Array(init.body).buffer;
-            }
-            
-            const fetchInit: RequestInit = {
-              method: init.method || 'GET',
-              headers: init.headers || {},
-              body: body,
-              mode: init.mode,
-            };
-
-            const response = await fetch(input, fetchInit);
-            const arrayBuffer = await response.arrayBuffer();
-            
-            const headersObj: Record<string, string> = {};
-            response.headers.forEach((value, key) => {
-              headersObj[key] = value;
-            });
-
-            sendResponse([
-              {
-                body: Array.from(new Uint8Array(arrayBuffer)),
-                status: response.status,
-                statusText: response.statusText,
-                headers: headersObj,
-              },
-              null,
-            ]);
-          } catch (error) {
-            sendResponse([
-              null,
-              error instanceof Error ? error : new Error(String(error)),
-            ]);
-          }
-        })();
+        handleFetchResourceMessage(message.payload).then(sendResponse);
         return true;
 
       default:
@@ -260,17 +278,14 @@ async function handleDownloadRequest(payload: {
     maxConcurrent,
     onProgress: async (state) => {
       await DownloadStateManager.saveDownload(state);
-      try {
-        await chrome.runtime.sendMessage({
-          type: MessageType.DOWNLOAD_PROGRESS,
-          payload: {
-            id: state.id,
-            progress: state.progress,
-          },
-        });
-      } catch (error) {
-        // No listeners available
-      }
+      // Send progress update - let errors propagate
+      chrome.runtime.sendMessage({
+        type: MessageType.DOWNLOAD_PROGRESS,
+        payload: {
+          id: state.id,
+          progress: state.progress,
+        },
+      });
     },
     uploadToDrive: uploadToDrive || config?.googleDrive?.enabled || false,
   });
@@ -294,6 +309,33 @@ async function handleDownloadRequest(payload: {
 }
 
 /**
+ * Send download completion message to popup
+ */
+function sendDownloadComplete(downloadId: string): void {
+  chrome.runtime.sendMessage({
+    type: MessageType.DOWNLOAD_COMPLETE,
+    payload: { id: downloadId },
+  });
+}
+
+/**
+ * Send download failure message to popup
+ */
+function sendDownloadFailed(url: string, error: string): void {
+  chrome.runtime.sendMessage({
+    type: MessageType.DOWNLOAD_FAILED,
+    payload: { url, error },
+  });
+}
+
+/**
+ * Check if download state indicates failure
+ */
+function isDownloadFailed(downloadState: DownloadState): boolean {
+  return downloadState.progress.stage === 'failed';
+}
+
+/**
  * Execute download using download manager
  * Sends completion or failure notifications to popup
  */
@@ -310,29 +352,23 @@ async function startDownload(
       metadata,
     );
 
-    try {
-      await chrome.runtime.sendMessage({
-        type: MessageType.DOWNLOAD_COMPLETE,
-        payload: { id: downloadState.id },
-      });
-    } catch (error) {
-      // No listeners available
+    // Handle failed downloads (e.g., unknown format)
+    if (isDownloadFailed(downloadState)) {
+      const errorMessage = downloadState.progress.error || 'Download failed';
+      sendDownloadFailed(url, errorMessage);
+      return;
     }
+
+    // Handle successful downloads
+    sendDownloadComplete(downloadState.id);
   } catch (error) {
     logger.error(`Download process failed for ${url}:`, error);
 
-    try {
-      await chrome.runtime.sendMessage({
-        type: MessageType.DOWNLOAD_FAILED,
-        payload: {
-          url,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
-    } catch (err) {
-      // No listeners available
-    }
-
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : String(error);
+    
+    sendDownloadFailed(url, errorMessage);
     throw error;
   }
 }

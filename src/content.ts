@@ -262,6 +262,11 @@ async function detectVideos() {
  * Uses normalized URL as unique key to prevent duplicates
  */
 function addDetectedVideo(video: VideoMetadata) {
+  // Reject unknown formats - don't show them in UI
+  if (video.format === 'unknown') {
+    return;
+  }
+  
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
   

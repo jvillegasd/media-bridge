@@ -54,15 +54,23 @@ export class DownloadManager {
 
       // Detect format
       logger.info(`Detecting format for ${url}`);
-      // detectWithInspection always returns a valid VideoFormat (never 'unknown')
-      // It defaults to 'direct' if format can't be determined
-      let format: VideoFormat = await FormatDetector.detectWithInspection(url);
+      const format: VideoFormat = FormatDetector.detectFromUrl(url);
       
-      // If we got 'unknown' from URL detection (shouldn't happen with detectWithInspection, but handle it)
-      // Try URL-based detection as additional fallback
-      const urlBasedFormat = FormatDetector.detectFromUrl(url);
-      if (urlBasedFormat !== 'unknown') {
-        format = urlBasedFormat;
+      if (format === 'unknown') {
+        const failedState: DownloadState = {
+          id: downloadId,
+          url,
+          progress: {
+            url,
+            stage: 'failed',
+            error: `Could not determine video format for URL: ${url}`,
+          },
+          createdAt: state.createdAt,
+          updatedAt: Date.now(),
+        };
+        await DownloadStateManager.saveDownload(failedState);
+        this.notifyProgress(failedState);
+        return failedState;
       }
       
       logger.info(`Detected format: ${format} for URL: ${url}`);
