@@ -3,17 +3,13 @@
  */
 
 import { VideoFormat, VideoMetadata, DownloadState } from "../types";
-import { FormatDetector } from "../detection/format-detector";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
 import { DownloadStateManager } from "../storage/download-state";
 import { DownloadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import {
-  FormatDetectionResult,
   DownloadResult,
   DownloadProgressCallback,
-  ok,
-  err,
 } from "./types";
 
 export interface DownloadManagerOptions {
@@ -47,18 +43,30 @@ export class DownloadManager {
       // Create and initialize download state
       let state = await this.createInitialDownloadState(downloadId, url, metadata);
 
-      // Detect format and validate
-      const formatResult = await this.detectAndValidateFormat(
-        url,
-        state,
-        metadata,
-      );
-      if (!formatResult.ok) {
-        return formatResult.error;
+      // Validate format from metadata (should already be set by detection)
+      if (metadata.format === "unknown") {
+        const failedState: DownloadState = {
+          id: state.id,
+          url,
+          metadata: state.metadata,
+          progress: {
+            url,
+            stage: "failed",
+            error: `Video format is unknown for URL: ${url}`,
+          },
+          createdAt: state.createdAt,
+          updatedAt: Date.now(),
+        };
+        await DownloadStateManager.saveDownload(failedState);
+        this.notifyProgress(failedState);
+        return failedState;
       }
 
-      const { format, state: updatedState } = formatResult.data;
-      state = updatedState;
+      const format = metadata.format;
+      state.progress.stage = "downloading";
+      state.progress.message = `Format: ${format}`;
+      await DownloadStateManager.saveDownload(state);
+      this.notifyProgress(state);
 
       // metadata.url is always the actual video URL
       const actualVideoUrl = metadata.url;
@@ -115,50 +123,6 @@ export class DownloadManager {
     return state;
   }
 
-  /**
-   * Detect format and validate, updating state accordingly
-   */
-  private async detectAndValidateFormat(
-    url: string,
-    state: DownloadState,
-    metadata: VideoMetadata,
-  ): Promise<FormatDetectionResult> {
-    logger.info(`Detecting format for ${url}`);
-    const format: VideoFormat = FormatDetector.detectFromUrl(url);
-
-    if (format === "unknown") {
-      const failedState: DownloadState = {
-        id: state.id,
-        url,
-        metadata: state.metadata,
-        progress: {
-          url,
-          stage: "failed",
-          error: `Could not determine video format for URL: ${url}`,
-        },
-        createdAt: state.createdAt,
-        updatedAt: Date.now(),
-      };
-      await DownloadStateManager.saveDownload(failedState);
-      this.notifyProgress(failedState);
-      return err(failedState);
-    }
-
-    logger.info(`Detected format: ${format} for URL: ${url}`);
-
-    // Merge provided metadata with detected format
-    state.metadata = {
-      ...metadata,
-      format,
-    };
-    state.progress.stage = "downloading";
-    state.progress.message = `Detected format: ${format}`;
-
-    await DownloadStateManager.saveDownload(state);
-    this.notifyProgress(state);
-
-    return ok({ format, state });
-  }
 
   /**
    * Execute the actual download using appropriate handler
