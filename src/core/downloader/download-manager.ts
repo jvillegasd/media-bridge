@@ -3,11 +3,11 @@
  */
 
 import { VideoFormat, VideoMetadata, DownloadState } from "../types";
-import { DirectDownloadHandler } from "./direct/direct-download-handler";
 import { DownloadStateManager } from "../storage/download-state";
 import { DownloadError } from "../utils/errors";
 import { logger } from "../utils/logger";
-import { DownloadResult, DownloadProgressCallback } from "./types";
+import { DownloadProgressCallback } from "./types";
+import { detectExtensionFromUrl, detectExtensionFromContentType } from "../metadata/metadata-extractor";
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
@@ -19,11 +19,15 @@ export class DownloadManager {
   private readonly maxConcurrent: number;
   private readonly onProgress?: DownloadProgressCallback;
   private readonly uploadToDrive: boolean;
+  private downloadProgressListeners: Map<number, string> = new Map(); // chromeDownloadId -> stateId
 
   constructor(options: DownloadManagerOptions = {}) {
     this.maxConcurrent = options.maxConcurrent || 3;
     this.onProgress = options.onProgress;
     this.uploadToDrive = options.uploadToDrive || false;
+    
+    // Set up Chrome downloads progress tracking
+    this.setupDownloadProgressTracking();
   }
 
   /**
@@ -65,25 +69,25 @@ export class DownloadManager {
       // metadata.url is always the actual video URL
       const actualVideoUrl = metadata.url;
 
-      // Execute download
-      const { blob: finalBlob, extractedMetadata } = await this.executeDownload(
-        actualVideoUrl,
-        state.id,
-      );
-
-      // Get updated state with metadata (already updated by DirectDownloadHandler)
-      const latestState = await DownloadStateManager.getDownload(state.id);
-      if (latestState) {
-        state = latestState;
+      // Get metadata from HTTP headers (HEAD request)
+      const headerMetadata = await this.getMetadataFromHeaders(actualVideoUrl);
+      
+      // Update metadata if we got extension from headers
+      if (headerMetadata.extension) {
+        state.metadata = {
+          ...state.metadata,
+          fileExtension: headerMetadata.extension,
+        };
+        await DownloadStateManager.saveDownload(state);
       }
 
-      // Save file to disk
-      await this.saveFileToDisk(finalBlob, filename, state);
+      // Use direct URL with Chrome downloads API (most efficient - no blob download)
+      // Progress tracking and completion are handled by Chrome downloads API listeners
+      await this.saveFileToDisk(actualVideoUrl, filename, state);
 
-      // Complete download
-      const completedState = await this.completeDownload(state);
-
-      return completedState;
+      // Get final state (may have been updated by progress tracking)
+      const finalState = await DownloadStateManager.getDownload(state.id);
+      return finalState || state;
     } catch (error) {
       logger.error("Download failed:", error);
       await this.createFailedState(
@@ -125,85 +129,170 @@ export class DownloadManager {
   }
 
   /**
-   * Execute the actual download using appropriate handler
+   * Get metadata from HTTP headers (HEAD request)
    */
-  private async executeDownload(
-    url: string,
-    stateId: string,
-  ): Promise<DownloadResult> {
-    const directHandler = new DirectDownloadHandler({
-      onProgress: async (directState) => {
-        // Update our state with direct download progress
-        const currentState = await DownloadStateManager.getDownload(stateId);
-        if (currentState) {
-          currentState.progress = directState.progress;
-          await DownloadStateManager.saveDownload(currentState);
-          this.notifyProgress(currentState);
-        }
-      },
-    });
-
-    return await directHandler.download(url, stateId);
+  private async getMetadataFromHeaders(url: string): Promise<{ extension?: string; total?: number }> {
+    try {
+      const response = await fetch(url, { method: 'HEAD' });
+      const contentType = response.headers.get('content-type') || '';
+      const contentLength = response.headers.get('content-length');
+      
+      const extension = detectExtensionFromUrl(url) || detectExtensionFromContentType(contentType);
+      const total = contentLength ? parseInt(contentLength, 10) : undefined;
+      
+      return { extension, total };
+    } catch (error) {
+      logger.warn(`Failed to get headers for ${url}:`, error);
+      // Fallback to URL-based detection
+      const extension = detectExtensionFromUrl(url);
+      return { extension };
+    }
   }
 
   /**
-   * Save file to disk using Chrome downloads API
+   * Set up Chrome downloads progress tracking
+   */
+  private setupDownloadProgressTracking(): void {
+    chrome.downloads.onChanged.addListener((downloadDelta) => {
+      const chromeDownloadId = downloadDelta.id;
+      const stateId = this.downloadProgressListeners.get(chromeDownloadId);
+      
+      if (!stateId) {
+        return; // Not one of our tracked downloads
+      }
+
+      // Update progress based on Chrome download state
+      this.updateProgressFromChromeDownload(chromeDownloadId, stateId, downloadDelta);
+    });
+  }
+
+  /**
+   * Update progress from Chrome download state
+   */
+  private async updateProgressFromChromeDownload(
+    chromeDownloadId: number,
+    stateId: string,
+    delta: chrome.downloads.DownloadDelta,
+  ): Promise<void> {
+    const state = await DownloadStateManager.getDownload(stateId);
+    if (!state) {
+      return;
+    }
+
+    // Get current download item
+    const downloadItem = await new Promise<chrome.downloads.DownloadItem | null>((resolve) => {
+      chrome.downloads.search({ id: chromeDownloadId }, (results) => {
+        if (chrome.runtime.lastError || !results || results.length === 0) {
+          resolve(null);
+        } else {
+          resolve(results[0]);
+        }
+      });
+    });
+
+    if (!downloadItem) {
+      return;
+    }
+
+    // Update progress
+    const now = Date.now();
+    if (downloadItem.totalBytes && downloadItem.bytesReceived !== undefined) {
+      const percentage = (downloadItem.bytesReceived / downloadItem.totalBytes) * 100;
+      
+      // Calculate speed
+      let speed = state.progress.speed || 0;
+      if (state.progress.lastUpdateTime && state.progress.lastDownloaded !== undefined) {
+        const elapsed = (now - state.progress.lastUpdateTime) / 1000;
+        if (elapsed > 0.5 && downloadItem.bytesReceived > state.progress.lastDownloaded) {
+          const bytesDelta = downloadItem.bytesReceived - state.progress.lastDownloaded;
+          speed = bytesDelta / elapsed;
+        }
+      }
+
+      state.progress.downloaded = downloadItem.bytesReceived;
+      state.progress.total = downloadItem.totalBytes;
+      state.progress.percentage = percentage;
+      state.progress.speed = speed;
+      state.progress.lastUpdateTime = now;
+      state.progress.lastDownloaded = downloadItem.bytesReceived;
+    }
+
+    // Update stage based on state
+    if (delta.state) {
+      if (delta.state.current === 'in_progress') {
+        state.progress.stage = 'downloading';
+      } else if (delta.state.current === 'complete') {
+        state.progress.stage = 'completed';
+        state.progress.percentage = 100;
+        state.localPath = downloadItem.filename;
+        this.downloadProgressListeners.delete(chromeDownloadId);
+      } else if (delta.state.current === 'interrupted') {
+        state.progress.stage = 'failed';
+        state.progress.error = downloadItem.error || 'Download interrupted';
+        this.downloadProgressListeners.delete(chromeDownloadId);
+      }
+    }
+
+    await DownloadStateManager.saveDownload(state);
+    this.notifyProgress(state);
+  }
+
+  /**
+   * Save file to disk using Chrome downloads API with direct URL
+   * This is the most efficient approach - no blob download, Chrome handles everything
    */
   private async saveFileToDisk(
-    blob: Blob,
+    url: string,
     filename: string,
     state: DownloadState,
   ): Promise<void> {
-    state.progress.stage = "saving";
-    state.progress.message = "Saving file...";
+    state.progress.stage = "downloading";
+    state.progress.message = "Starting download...";
     await DownloadStateManager.saveDownload(state);
     this.notifyProgress(state);
 
-    // Create blob URL
-    const blobUrl = URL.createObjectURL(blob);
-
-    try {
-      // Use Chrome downloads API to save file
-      const chromeDownloadId = await new Promise<number>((resolve, reject) => {
-        chrome.downloads.download(
-          {
-            url: blobUrl,
-            filename,
-            saveAs: false,
-          },
-          (id) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else {
-              resolve(id!);
-            }
-          },
-        );
-      });
-
-      // Wait for download to complete
-      await this.waitForDownload(chromeDownloadId);
-
-      // Get final download path
-      const downloadItem = await new Promise<chrome.downloads.DownloadItem>(
-        (resolve, reject) => {
-          chrome.downloads.search({ id: chromeDownloadId }, (results) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else if (results && results[0]) {
-              resolve(results[0]);
-            } else {
-              reject(new Error("Download not found"));
-            }
-          });
+    // Use Chrome downloads API with direct URL (most efficient)
+    logger.info(`Starting download with direct URL: ${url}`);
+    const chromeDownloadId = await new Promise<number>((resolve, reject) => {
+      chrome.downloads.download(
+        {
+          url,
+          filename,
+          saveAs: false,
+        },
+        (id) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(id!);
+          }
         },
       );
+    });
 
-      state.localPath = downloadItem.filename;
-    } finally {
-      // Revoke blob URL to free memory
-      URL.revokeObjectURL(blobUrl);
-    }
+    // Track this download for progress updates
+    this.downloadProgressListeners.set(chromeDownloadId, state.id);
+
+    // Wait for download to complete
+    await this.waitForDownload(chromeDownloadId);
+
+    // Get final download path
+    const downloadItem = await new Promise<chrome.downloads.DownloadItem>(
+      (resolve, reject) => {
+        chrome.downloads.search({ id: chromeDownloadId }, (results) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (results && results[0]) {
+            resolve(results[0]);
+          } else {
+            reject(new Error("Download not found"));
+          }
+        });
+      },
+    );
+
+    state.localPath = downloadItem.filename;
+    this.downloadProgressListeners.delete(chromeDownloadId);
   }
 
   /**
