@@ -2,10 +2,10 @@
  * HLS detection handler - orchestrates HLS playlist detection
  */
 
-import { VideoMetadata } from '../../types';
-import { HlsVideoDetector } from './hls-video-detector';
-import { isMasterPlaylist } from '../../utils/m3u8-parser';
-import { fetchText } from '../../utils/fetch-utils';
+import { VideoMetadata } from "../../types";
+import { HlsVideoDetector } from "./hls-video-detector";
+import { isMasterPlaylist } from "../../utils/m3u8-parser";
+import { fetchText } from "../../utils/fetch-utils";
 
 export interface HlsDetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
@@ -32,22 +32,25 @@ export class HlsDetectionHandler {
     // Validate that this is a master playlist before proceeding
     try {
       const playlistText = await fetchText(url, 1);
-      console.log('[Media Bridge] HLS playlist text:', playlistText);
+      console.log("[Media Bridge] HLS playlist text:", playlistText);
       const isMaster = isMasterPlaylist(playlistText);
-      
+
       // If it's not a master playlist, don't add it to the UI
       if (!isMaster) {
         return null;
       }
     } catch (error) {
       // If we can't fetch or parse the playlist, don't add it to the UI
-      console.debug('[Media Bridge] Failed to validate HLS playlist as master:', error);
+      console.debug(
+        "[Media Bridge] Failed to validate HLS playlist as master:",
+        error,
+      );
       return null;
     }
 
     // Extract metadata
     const metadata = await this.detector.extractMetadata(url);
-    
+
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
     }
@@ -65,4 +68,3 @@ export class HlsDetectionHandler {
     }
   }
 }
-

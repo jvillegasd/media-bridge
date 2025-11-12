@@ -2,7 +2,7 @@
  * HLS video detector - low-level HLS playlist detection logic
  */
 
-import { VideoMetadata } from '../../types';
+import { VideoMetadata } from "../../types";
 
 export class HlsVideoDetector {
   /**
@@ -10,7 +10,7 @@ export class HlsVideoDetector {
    */
   isHlsUrl(url: string): boolean {
     const urlLower = url.toLowerCase();
-    return urlLower.includes('.m3u8') || !!urlLower.match(/\.m3u8(\?|$|#)/);
+    return urlLower.includes(".m3u8") || !!urlLower.match(/\.m3u8(\?|$|#)/);
   }
 
   /**
@@ -19,8 +19,8 @@ export class HlsVideoDetector {
   isHlsContentType(contentType: string): boolean {
     const contentTypeLower = contentType.toLowerCase();
     return (
-      contentTypeLower.includes('application/vnd.apple.mpegurl') ||
-      contentTypeLower.includes('application/x-mpegurl')
+      contentTypeLower.includes("application/vnd.apple.mpegurl") ||
+      contentTypeLower.includes("application/x-mpegurl")
     );
   }
 
@@ -30,10 +30,10 @@ export class HlsVideoDetector {
   async extractMetadata(url: string): Promise<VideoMetadata | null> {
     const metadata: VideoMetadata = {
       url,
-      format: 'hls',
+      format: "hls",
       pageUrl: window.location.href,
       title: document.title,
-      fileExtension: 'm3u8',
+      fileExtension: "m3u8",
     };
 
     // Try to find thumbnail in page
@@ -49,8 +49,8 @@ export class HlsVideoDetector {
       const element = document.querySelector(selector);
       if (element) {
         const thumbnailUrl =
-          element.getAttribute('content') ||
-          element.getAttribute('href') ||
+          element.getAttribute("content") ||
+          element.getAttribute("href") ||
           (element as HTMLImageElement).src;
         if (thumbnailUrl) {
           metadata.thumbnail = thumbnailUrl;
@@ -71,4 +71,3 @@ export class HlsVideoDetector {
     return metadata;
   }
 }
-

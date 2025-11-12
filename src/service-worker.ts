@@ -9,7 +9,7 @@ import { ChromeStorage } from "./core/storage/chrome-storage";
 import { MessageType } from "./shared/messages";
 import { DownloadState, StorageConfig, VideoMetadata } from "./core/types";
 import { logger } from "./core/utils/logger";
-import { normalizeUrl } from "./core/utils/url-utils";
+import { normalizeUrl, detectFormatFromUrl } from "./core/utils/url-utils";
 import { generateFilenameWithExtension } from "./core/utils/file-utils";
 
 const CONFIG_KEY = "storage_config";
@@ -23,6 +23,7 @@ const activeDownloads = new Map<string, Promise<void>>();
 async function init() {
   logger.info("Service worker initialized");
   chrome.runtime.onInstalled.addListener(handleInstallation);
+  setupNetworkInterceptor();
 }
 
 /**
@@ -148,22 +149,27 @@ async function handleFetchResourceMessage(payload: {
     body?: number[];
     mode?: RequestMode;
   };
-}): Promise<[{
-  body: number[];
-  status: number;
-  statusText: string;
-  headers: Record<string, string>;
-} | null, Error | null]> {
+}): Promise<
+  [
+    {
+      body: number[];
+      status: number;
+      statusText: string;
+      headers: Record<string, string>;
+    } | null,
+    Error | null,
+  ]
+> {
   try {
     const { input, init } = payload;
-    
+
     let body: BodyInit | null = null;
     if (init.body) {
       body = new Uint8Array(init.body).buffer;
     }
-    
+
     const fetchInit: RequestInit = {
-      method: init.method || 'GET',
+      method: init.method || "GET",
       headers: init.headers || {},
       body: body,
       mode: init.mode,
@@ -171,7 +177,7 @@ async function handleFetchResourceMessage(payload: {
 
     const response = await fetch(input, fetchInit);
     const arrayBuffer = await response.arrayBuffer();
-    
+
     const headersObj: Record<string, string> = {};
     response.headers.forEach((value, key) => {
       headersObj[key] = value;
@@ -187,10 +193,7 @@ async function handleFetchResourceMessage(payload: {
       null,
     ];
   } catch (error) {
-    return [
-      null,
-      error instanceof Error ? error : new Error(String(error)),
-    ];
+    return [null, error instanceof Error ? error : new Error(String(error))];
   }
 }
 
@@ -281,18 +284,21 @@ async function handleDownloadRequest(payload: {
       await DownloadStateManager.saveDownload(state);
       // Send progress update - handle errors gracefully (popup might be closed)
       try {
-        chrome.runtime.sendMessage({
-          type: MessageType.DOWNLOAD_PROGRESS,
-          payload: {
-            id: state.id,
-            progress: state.progress,
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.DOWNLOAD_PROGRESS,
+            payload: {
+              id: state.id,
+              progress: state.progress,
+            },
           },
-        }, () => {
-          // Check for errors in callback
-          if (chrome.runtime.lastError) {
-            // Ignore - popup/content script might not be listening
-          }
-        });
+          () => {
+            // Check for errors in callback
+            if (chrome.runtime.lastError) {
+              // Ignore - popup/content script might not be listening
+            }
+          },
+        );
       } catch (error) {
         // Ignore errors - popup/content script might not be listening
       }
@@ -323,15 +329,18 @@ async function handleDownloadRequest(payload: {
  */
 function sendDownloadComplete(downloadId: string): void {
   try {
-    chrome.runtime.sendMessage({
-      type: MessageType.DOWNLOAD_COMPLETE,
-      payload: { id: downloadId },
-    }, () => {
-      // Check for errors in callback
-      if (chrome.runtime.lastError) {
-        // Ignore - popup/content script might not be listening
-      }
-    });
+    chrome.runtime.sendMessage(
+      {
+        type: MessageType.DOWNLOAD_COMPLETE,
+        payload: { id: downloadId },
+      },
+      () => {
+        // Check for errors in callback
+        if (chrome.runtime.lastError) {
+          // Ignore - popup/content script might not be listening
+        }
+      },
+    );
   } catch (error) {
     // Ignore errors - popup/content script might not be listening
   }
@@ -342,15 +351,18 @@ function sendDownloadComplete(downloadId: string): void {
  */
 function sendDownloadFailed(url: string, error: string): void {
   try {
-    chrome.runtime.sendMessage({
-      type: MessageType.DOWNLOAD_FAILED,
-      payload: { url, error },
-    }, () => {
-      // Check for errors in callback
-      if (chrome.runtime.lastError) {
-        // Ignore - popup/content script might not be listening
-      }
-    });
+    chrome.runtime.sendMessage(
+      {
+        type: MessageType.DOWNLOAD_FAILED,
+        payload: { url, error },
+      },
+      () => {
+        // Check for errors in callback
+        if (chrome.runtime.lastError) {
+          // Ignore - popup/content script might not be listening
+        }
+      },
+    );
   } catch (error) {
     // Ignore errors - popup/content script might not be listening
   }
@@ -360,7 +372,7 @@ function sendDownloadFailed(url: string, error: string): void {
  * Check if download state indicates failure
  */
 function isDownloadFailed(downloadState: DownloadState): boolean {
-  return downloadState.progress.stage === 'failed';
+  return downloadState.progress.stage === "failed";
 }
 
 /**
@@ -389,7 +401,7 @@ async function startDownload(
 
     // Handle failed downloads (e.g., unknown format)
     if (isDownloadFailed(downloadState)) {
-      const errorMessage = downloadState.progress.error || 'Download failed';
+      const errorMessage = downloadState.progress.error || "Download failed";
       sendDownloadFailed(url, errorMessage);
       return;
     }
@@ -399,10 +411,8 @@ async function startDownload(
   } catch (error) {
     logger.error(`Download process failed for ${url}:`, error);
 
-    const errorMessage = error instanceof Error 
-      ? error.message 
-      : String(error);
-    
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
     sendDownloadFailed(url, errorMessage);
     throw error;
   }
@@ -428,9 +438,42 @@ async function handleCancelDownload(id: string) {
   logger.info(`Download cancelled: ${id}`);
 }
 
+/**
+ * Set up network interceptor to detect video URLs
+ * Intercepts network requests and sends valid video URLs to content scripts
+ */
+function setupNetworkInterceptor(): void {
+  // Intercept all HTTP/HTTPS requests
+  chrome.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      const url = details.url;
+
+      // Detect if this is a video URL
+      const format = detectFormatFromUrl(url);
+      if (format === "unknown") {
+        return;
+      }
+
+      // Send URL to content script in the tab that made the request
+      if (details.tabId && details.tabId > 0) {
+        chrome.tabs.sendMessage(
+          details.tabId,
+          {
+            type: MessageType.NETWORK_URL_DETECTED,
+            payload: { url },
+          },
+          (response) => {},
+        );
+      }
+    },
+    {
+      urls: ["http://*/*", "https://*/*"],
+      types: ["main_frame", "sub_frame", "xmlhttprequest", "media", "other"],
+    },
+  );
+}
 
 // Initialize service worker
 init().catch((error) => {
   logger.error("Service worker initialization failed:", error);
 });
-

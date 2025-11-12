@@ -176,7 +176,7 @@ function init() {
 }
 
 /**
- * Listen for messages from popup
+ * Listen for messages from popup and service worker
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Check if extension context is still valid
@@ -195,6 +195,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Convert Record to array for response
       sendResponse({ videos: Object.values(detectedVideos) });
       return true; // Keep channel open for async response
+    }
+
+    if (message.type === MessageType.NETWORK_URL_DETECTED) {
+      // Handle URL detected from service worker network interceptor
+      const url = message.payload?.url;
+      if (url && detectionManager) {
+        // Process URL through detection manager
+        detectionManager.handleNetworkRequest(url);
+      }
+      return false; // No response needed
     }
 
     return false;
