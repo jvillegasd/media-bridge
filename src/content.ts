@@ -98,24 +98,24 @@ function setupNetworkInterceptor() {
  */
 function setupDOMObserver() {
   const observer = new MutationObserver((mutations) => {
-    let shouldDetect = false;
+    let shouldScan = false;
     for (const mutation of mutations) {
       for (const node of Array.from(mutation.addedNodes)) {
         if (node.nodeType === Node.ELEMENT_NODE) {
           const element = node as Element;
           if (element.tagName === "VIDEO" || element.querySelector("video")) {
-            shouldDetect = true;
+            shouldScan = true;
             break;
           }
         }
       }
-      if (shouldDetect) break;
+      if (shouldScan) break;
     }
 
-    if (shouldDetect) {
+    if (shouldScan) {
       clearTimeout((observer as any).timeout);
       (observer as any).timeout = setTimeout(() => {
-        detectVideos();
+        scanDOMForVideos();
       }, 1000);
     }
   });
@@ -130,7 +130,7 @@ function setupDOMObserver() {
  * Scan DOM for video elements using DetectionManager
  * Updates existing videos with new metadata if found
  */
-async function detectVideos() {
+async function scanDOMForVideos() {
   if (!detectionManager) {
     return;
   }
@@ -138,43 +138,6 @@ async function detectVideos() {
   const newVideos = await detectionManager.scanDOM();
 
   for (const metadata of newVideos) {
-    const normalizedUrl = normalizeUrl(metadata.url);
-
-    if (detectedVideos[normalizedUrl]) {
-      const existing = detectedVideos[normalizedUrl];
-      let updated = false;
-
-      if (!existing.title && metadata.title) {
-        existing.title = metadata.title;
-        updated = true;
-      }
-      if (!existing.thumbnail && metadata.thumbnail) {
-        existing.thumbnail = metadata.thumbnail;
-        updated = true;
-      }
-      if (!existing.width && metadata.width) {
-        existing.width = metadata.width;
-        updated = true;
-      }
-      if (!existing.height && metadata.height) {
-        existing.height = metadata.height;
-        updated = true;
-      }
-      if (!existing.duration && metadata.duration) {
-        existing.duration = metadata.duration;
-        updated = true;
-      }
-      if (!existing.resolution && metadata.resolution) {
-        existing.resolution = metadata.resolution;
-        updated = true;
-      }
-
-      if (updated) {
-        addDetectedVideo(existing);
-      }
-      continue;
-    }
-
     console.log("[Media Bridge] Detected video:", {
       url: metadata.url,
       format: metadata.format,
@@ -317,7 +280,7 @@ function init() {
     },
   });
 
-  detectVideos();
+  scanDOMForVideos();
   setupDOMObserver();
   setupUrlChangeMonitor();
 }
