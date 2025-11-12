@@ -79,6 +79,10 @@ async function init() {
         loadDownloadStates();
         renderDetectedVideos();
       }
+      if (message.type === MessageType.DOWNLOAD_COMPLETE) {
+        loadDownloadStates();
+        renderDetectedVideos();
+      }
       if (message.type === MessageType.VIDEO_DETECTED) {
         addDetectedVideo(message.payload);
       }

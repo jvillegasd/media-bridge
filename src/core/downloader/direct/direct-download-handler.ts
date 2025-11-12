@@ -42,29 +42,7 @@ export class DirectDownloadHandler {
           currentState.progress.total = total;
           currentState.progress.percentage = percentage;
           currentState.progress.stage = "downloading";
-
-          // Calculate speed (bytes per second) - use a rolling window
-          const now = Date.now();
-          if (
-            currentState.progress.lastUpdateTime &&
-            currentState.progress.lastDownloaded !== undefined
-          ) {
-            const elapsed = (now - currentState.progress.lastUpdateTime) / 1000;
-            if (elapsed > 0.5) {
-              // Only update speed every 0.5 seconds to avoid too frequent updates
-              const bytesDelta = loaded - currentState.progress.lastDownloaded;
-              if (bytesDelta > 0) {
-                currentState.progress.speed = bytesDelta / elapsed;
-                currentState.progress.lastUpdateTime = now;
-                currentState.progress.lastDownloaded = loaded;
-              }
-            }
-          } else {
-            // First update - initialize tracking
-            currentState.progress.lastUpdateTime = now;
-            currentState.progress.lastDownloaded = loaded;
-            currentState.progress.speed = 0;
-          }
+          currentState.progress.message = "Downloading...";
 
           await DownloadStateManager.saveDownload(currentState);
           this.notifyProgress(currentState);
@@ -89,7 +67,7 @@ export class DirectDownloadHandler {
     // Download using Chrome downloads API
     const result = await directDownloader.download(url, filename);
 
-    // Update state with extracted metadata and file path
+    // Update state with extracted metadata, file path, and mark as completed
     const currentState = await DownloadStateManager.getDownload(stateId);
     if (currentState) {
       if (fileExtension) {
@@ -99,6 +77,13 @@ export class DirectDownloadHandler {
         };
       }
       currentState.localPath = result.filePath;
+      currentState.progress.stage = "completed";
+      currentState.progress.message = "Download completed";
+      currentState.progress.percentage = 100;
+      if (result.totalBytes) {
+        currentState.progress.total = result.totalBytes;
+        currentState.progress.downloaded = result.totalBytes;
+      }
       currentState.updatedAt = Date.now();
       await DownloadStateManager.saveDownload(currentState);
       this.notifyProgress(currentState);
