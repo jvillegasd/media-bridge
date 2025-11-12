@@ -120,6 +120,39 @@ export class DirectDetectionHandler {
   }
 
   /**
+   * Set up MutationObserver to monitor DOM changes for dynamically added video elements
+   */
+  setupDOMObserver(onVideoDetected: () => void): void {
+    const observer = new MutationObserver((mutations) => {
+      let shouldScan = false;
+      for (const mutation of mutations) {
+        for (const node of Array.from(mutation.addedNodes)) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const element = node as Element;
+            if (element.tagName === "VIDEO" || element.querySelector("video")) {
+              shouldScan = true;
+              break;
+            }
+          }
+        }
+        if (shouldScan) break;
+      }
+
+      if (shouldScan) {
+        clearTimeout((observer as any).timeout);
+        (observer as any).timeout = setTimeout(() => {
+          onVideoDetected();
+        }, 1000);
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  /**
    * Get video URL from video element
    */
   private getVideoUrl(video: HTMLVideoElement): string | null {

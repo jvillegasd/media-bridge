@@ -13,7 +13,7 @@ export interface DetectionManagerOptions {
 
 export class DetectionManager {
   private onVideoDetected?: (video: VideoMetadata) => void;
-  private directHandler: DirectDetectionHandler;
+  public readonly directHandler: DirectDetectionHandler;
   private hlsHandler: HlsDetectionHandler;
 
   constructor(options: DetectionManagerOptions = {}) {
@@ -71,11 +71,10 @@ export class DetectionManager {
   }
 
   /**
-   * Scan DOM for video elements
+   * Scan DOM for video elements and trigger onVideoDetected callback
    */
-  async scanDOM(): Promise<VideoMetadata[]> {
+  async scanDOMForVideos(): Promise<void> {
     const videoElements = document.querySelectorAll('video');
-    const detectedVideos: VideoMetadata[] = [];
 
     for (const video of Array.from(videoElements)) {
       const vid = video as HTMLVideoElement;
@@ -100,11 +99,79 @@ export class DetectionManager {
       // Only try direct detection from video elements
       const metadata = await this.directHandler.detectFromVideoElement(vid);
       if (metadata) {
-        detectedVideos.push(metadata);
+        console.log("[Media Bridge] Detected video:", {
+          url: metadata.url,
+          format: metadata.format,
+          pageUrl: metadata.pageUrl,
+        });
+        this.handleVideoDetected(metadata);
       }
     }
+  }
 
-    return detectedVideos;
+  /**
+   * Initialize all detection mechanisms
+   * Sets up network interceptors, DOM observer, and performs initial scan
+   */
+  init(): void {
+    // Set up network interceptors (for both direct and HLS detection)
+    this.setupNetworkInterceptor();
+
+    // Set up DOM observer (for direct video detection)
+    this.directHandler.setupDOMObserver(() => {
+      this.scanDOMForVideos();
+    });
+
+    // Perform initial scan
+    this.scanDOMForVideos();
+  }
+
+  /**
+   * Set up network interceptors (fetch and XMLHttpRequest) to capture video URLs
+   */
+  setupNetworkInterceptor(): void {
+    const manager = this;
+    const originalFetch = window.fetch;
+    window.fetch = async function (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> {
+      let url: string | null = null;
+      if (typeof input === "string") {
+        url = input;
+      } else if (input instanceof URL) {
+        url = input.href;
+      } else if (input instanceof Request) {
+        url = input.url;
+      }
+
+      if (url) {
+        manager.handleNetworkRequest(url);
+      }
+      return originalFetch.call(this, input, init);
+    };
+
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (
+      method: string,
+      url: string | URL,
+      async?: boolean,
+      username?: string | null,
+      password?: string | null,
+    ) {
+      const urlString = typeof url === "string" ? url : url.toString();
+      if (urlString) {
+        manager.handleNetworkRequest(urlString);
+      }
+      return originalXHROpen.call(
+        this,
+        method,
+        url,
+        async !== undefined ? async : true,
+        username,
+        password,
+      );
+    };
   }
 
   /**

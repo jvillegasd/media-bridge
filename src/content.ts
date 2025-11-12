@@ -38,117 +38,6 @@ function safeSendMessage(message: any): Promise<void> {
 }
 
 /**
- * Process captured network request URL for video detection
- */
-function handleCapturedRequest(url: string) {
-  if (detectionManager) {
-    detectionManager.handleNetworkRequest(url);
-  }
-}
-
-/**
- * Intercept fetch and XMLHttpRequest to capture video URLs
- */
-function setupNetworkInterceptor() {
-  const originalFetch = window.fetch;
-  window.fetch = async function (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> {
-    let url: string | null = null;
-    if (typeof input === "string") {
-      url = input;
-    } else if (input instanceof URL) {
-      url = input.href;
-    } else if (input instanceof Request) {
-      url = input.url;
-    }
-
-    if (url) {
-      handleCapturedRequest(url);
-    }
-    return originalFetch.call(this, input, init);
-  };
-
-  const originalXHROpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function (
-    method: string,
-    url: string | URL,
-    async?: boolean,
-    username?: string | null,
-    password?: string | null,
-  ) {
-    const urlString = typeof url === "string" ? url : url.toString();
-    if (urlString) {
-      handleCapturedRequest(urlString);
-    }
-    return originalXHROpen.call(
-      this,
-      method,
-      url,
-      async !== undefined ? async : true,
-      username,
-      password,
-    );
-  };
-}
-
-/**
- * Set up MutationObserver to monitor DOM changes for dynamically added video elements
- */
-function setupDOMObserver() {
-  const observer = new MutationObserver((mutations) => {
-    let shouldScan = false;
-    for (const mutation of mutations) {
-      for (const node of Array.from(mutation.addedNodes)) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const element = node as Element;
-          if (element.tagName === "VIDEO" || element.querySelector("video")) {
-            shouldScan = true;
-            break;
-          }
-        }
-      }
-      if (shouldScan) break;
-    }
-
-    if (shouldScan) {
-      clearTimeout((observer as any).timeout);
-      (observer as any).timeout = setTimeout(() => {
-        scanDOMForVideos();
-      }, 1000);
-    }
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
-}
-
-/**
- * Scan DOM for video elements using DetectionManager
- * Updates existing videos with new metadata if found
- */
-async function scanDOMForVideos() {
-  if (!detectionManager) {
-    return;
-  }
-
-  const newVideos = await detectionManager.scanDOM();
-
-  for (const metadata of newVideos) {
-    console.log("[Media Bridge] Detected video:", {
-      url: metadata.url,
-      format: metadata.format,
-      pageUrl: metadata.pageUrl,
-    });
-
-    addDetectedVideo(metadata);
-  }
-}
-
-/**
  * Add or update detected video and notify popup
  * Uses normalized URL as unique key to prevent duplicates
  */
@@ -280,8 +169,9 @@ function init() {
     },
   });
 
-  scanDOMForVideos();
-  setupDOMObserver();
+  // Initialize all detection mechanisms
+  detectionManager.init();
+
   setupUrlChangeMonitor();
 }
 
@@ -313,8 +203,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 });
-
-setupNetworkInterceptor();
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
