@@ -96,6 +96,31 @@ async function init() {
 
   // Get detected videos from current tab
   await requestDetectedVideos();
+
+  // Refresh state when popup regains focus (e.g., after being closed by download)
+  // This ensures the UI shows current download progress when reopened
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden) {
+      // Popup became visible - refresh download states
+      await loadDownloadStates();
+      renderDetectedVideos();
+    }
+  });
+
+  // Also refresh on window focus (for better compatibility)
+  window.addEventListener('focus', async () => {
+    await loadDownloadStates();
+    renderDetectedVideos();
+  });
+
+  // Periodic refresh while popup is open (every 2 seconds)
+  // This ensures progress updates even if messages are missed
+  setInterval(async () => {
+    if (!document.hidden) {
+      await loadDownloadStates();
+      renderDetectedVideos();
+    }
+  }, 2000);
 }
 
 function showNoVideoNotice() {
@@ -371,7 +396,6 @@ function renderDetectedVideos() {
     
     let statusBadge = '';
     let progressBar = '';
-    let speedInfo = '';
     let buttonText = 'Download';
     let buttonDisabled = false;
     
@@ -379,19 +403,21 @@ function renderDetectedVideos() {
       const stage = downloadState.progress.stage;
       statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
       
-      if (downloadState.progress.percentage !== undefined) {
-        progressBar = `
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: ${downloadState.progress.percentage}%"></div>
-          </div>
-        `;
-      }
+      // Show animated dots and file size (no "Downloading" text, no button)
+      const fileSize = downloadState.progress.total || video.size;
+      const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
       
-      if (downloadState.progress.speed) {
-        speedInfo = `<div class="download-speed">${formatSpeed(downloadState.progress.speed)}</div>`;
-      }
+      progressBar = `
+        <div class="downloading-label">
+          <span class="downloading-dots">
+            <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+          </span>
+          ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ''}
+        </div>
+      `;
       
-      buttonText = getStatusText(stage);
+      // Hide button while downloading
+      buttonText = '';
       buttonDisabled = true;
     } else if (isCompleted) {
       statusBadge = `<span class="video-status status-completed">Completed</span>`;
@@ -434,22 +460,18 @@ function renderDetectedVideos() {
           </div>
         ` : ''}
         ${progressBar}
-        ${speedInfo}
-        ${downloadState && downloadState.progress.message ? `
-          <div style="font-size: 11px; color: #666; margin-top: 4px;">
-            ${escapeHtml(downloadState.progress.message)}
-          </div>
-        ` : ''}
         ${isFailed && downloadState.progress.error ? `
           <div style="font-size: 11px; color: #d32f2f; margin-top: 4px;">
             ${escapeHtml(downloadState.progress.error)}
           </div>
         ` : ''}
-        <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
-                data-url="${escapeHtml(video.url)}" 
-                ${buttonDisabled ? 'disabled' : ''}>
-          ${buttonText}
-        </button>
+        ${!isDownloading ? `
+          <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
+                  data-url="${escapeHtml(video.url)}" 
+                  ${buttonDisabled ? 'disabled' : ''}>
+            ${buttonText}
+          </button>
+        ` : ''}
       </div>
     </div>
   `;
@@ -678,17 +700,17 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Format speed in bytes per second to readable format
+ * Format file size in bytes to readable format
  */
-function formatSpeed(bytesPerSecond: number): string {
-  if (bytesPerSecond < 1024) {
-    return `${bytesPerSecond.toFixed(0)} B/s`;
-  } else if (bytesPerSecond < 1024 * 1024) {
-    return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
-  } else if (bytesPerSecond < 1024 * 1024 * 1024) {
-    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes.toFixed(0)} B`;
+  } else if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  } else if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   } else {
-    return `${(bytesPerSecond / (1024 * 1024 * 1024)).toFixed(2)} GB/s`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 }
 

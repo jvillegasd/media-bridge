@@ -20,6 +20,7 @@ export class DownloadManager {
   private readonly onProgress?: DownloadProgressCallback;
   private readonly uploadToDrive: boolean;
   private downloadProgressListeners: Map<number, string> = new Map(); // chromeDownloadId -> stateId
+  private downloadCompletionPromises: Map<number, { resolve: (path: string) => void; reject: (error: Error) => void }> = new Map(); // chromeDownloadId -> promise resolvers
 
   constructor(options: DownloadManagerOptions = {}) {
     this.maxConcurrent = options.maxConcurrent || 3;
@@ -161,8 +162,11 @@ export class DownloadManager {
         return; // Not one of our tracked downloads
       }
 
-      // Update progress based on Chrome download state
-      this.updateProgressFromChromeDownload(chromeDownloadId, stateId, downloadDelta);
+      // Update progress on any change (bytesReceived, state, etc.)
+      // This ensures we get frequent updates for progress bar
+      this.updateProgressFromChromeDownload(chromeDownloadId, stateId, downloadDelta).catch((error) => {
+        logger.error(`Error updating progress for download ${chromeDownloadId}:`, error);
+      });
     });
   }
 
@@ -194,42 +198,52 @@ export class DownloadManager {
       return;
     }
 
-    // Update progress
-    const now = Date.now();
-    if (downloadItem.totalBytes && downloadItem.bytesReceived !== undefined) {
-      const percentage = (downloadItem.bytesReceived / downloadItem.totalBytes) * 100;
-      
-      // Calculate speed
-      let speed = state.progress.speed || 0;
-      if (state.progress.lastUpdateTime && state.progress.lastDownloaded !== undefined) {
-        const elapsed = (now - state.progress.lastUpdateTime) / 1000;
-        if (elapsed > 0.5 && downloadItem.bytesReceived > state.progress.lastDownloaded) {
-          const bytesDelta = downloadItem.bytesReceived - state.progress.lastDownloaded;
-          speed = bytesDelta / elapsed;
-        }
-      }
-
-      state.progress.downloaded = downloadItem.bytesReceived;
+    // For direct downloads: just keep total file size, clear other progress values
+    // Chrome's download bar already shows all progress info
+    state.progress.percentage = undefined;
+    state.progress.speed = undefined;
+    state.progress.downloaded = undefined;
+    
+    if (downloadItem.totalBytes) {
       state.progress.total = downloadItem.totalBytes;
-      state.progress.percentage = percentage;
-      state.progress.speed = speed;
-      state.progress.lastUpdateTime = now;
-      state.progress.lastDownloaded = downloadItem.bytesReceived;
+    }
+    
+    if (state.progress.stage === 'downloading' && 
+        (!state.progress.message || state.progress.message === 'Starting download...')) {
+      state.progress.message = 'Downloading...';
     }
 
     // Update stage based on state
     if (delta.state) {
       if (delta.state.current === 'in_progress') {
         state.progress.stage = 'downloading';
+        if (!state.progress.message || state.progress.message === 'Starting download...') {
+          state.progress.message = 'Downloading...';
+        }
       } else if (delta.state.current === 'complete') {
         state.progress.stage = 'completed';
-        state.progress.percentage = 100;
+        state.progress.message = 'Download completed';
         state.localPath = downloadItem.filename;
         this.downloadProgressListeners.delete(chromeDownloadId);
+        
+        // Resolve completion promise if waiting
+        const completionPromise = this.downloadCompletionPromises.get(chromeDownloadId);
+        if (completionPromise) {
+          completionPromise.resolve(downloadItem.filename);
+          this.downloadCompletionPromises.delete(chromeDownloadId);
+        }
       } else if (delta.state.current === 'interrupted') {
         state.progress.stage = 'failed';
         state.progress.error = downloadItem.error || 'Download interrupted';
+        state.progress.message = `Download failed: ${downloadItem.error || 'Unknown error'}`;
         this.downloadProgressListeners.delete(chromeDownloadId);
+        
+        // Reject completion promise if waiting
+        const completionPromise = this.downloadCompletionPromises.get(chromeDownloadId);
+        if (completionPromise) {
+          completionPromise.reject(new Error(downloadItem.error || 'Download interrupted'));
+          this.downloadCompletionPromises.delete(chromeDownloadId);
+        }
       }
     }
 
@@ -272,46 +286,22 @@ export class DownloadManager {
 
     // Track this download for progress updates
     this.downloadProgressListeners.set(chromeDownloadId, state.id);
+    
+    // Wait for download to complete using onChanged callback (no polling needed)
+    const localPath = await new Promise<string>((resolve, reject) => {
+      // Store promise resolvers for onChanged callback to use
+      this.downloadCompletionPromises.set(chromeDownloadId, { resolve, reject });
+      
+      // Set timeout as fallback in case onChanged doesn't fire
+      setTimeout(() => {
+        if (this.downloadCompletionPromises.has(chromeDownloadId)) {
+          this.downloadCompletionPromises.delete(chromeDownloadId);
+          reject(new Error('Download timeout - completion event not received'));
+        }
+      }, 300000); // 5 minute timeout
+    });
 
-    // Wait for download to complete
-    await this.waitForDownload(chromeDownloadId);
-
-    // Get final download path
-    const downloadItem = await new Promise<chrome.downloads.DownloadItem>(
-      (resolve, reject) => {
-        chrome.downloads.search({ id: chromeDownloadId }, (results) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (results && results[0]) {
-            resolve(results[0]);
-          } else {
-            reject(new Error("Download not found"));
-          }
-        });
-      },
-    );
-
-    state.localPath = downloadItem.filename;
-    this.downloadProgressListeners.delete(chromeDownloadId);
-  }
-
-  /**
-   * Complete download and update final state
-   */
-  private async completeDownload(state: DownloadState): Promise<DownloadState> {
-    state.progress.stage = "completed";
-    state.progress.percentage = 100;
-    state.progress.message = "Download completed";
-
-    await DownloadStateManager.saveDownload(state);
-    this.notifyProgress(state);
-
-    // Note: Google Drive upload would need to be handled separately
-    // as we can't easily read the downloaded file back
-    // The blob is available in finalBlob, but it's already saved
-    // A better approach would be to upload first, then save, or store blob for upload
-
-    return state;
+    state.localPath = localPath;
   }
 
   /**
@@ -345,39 +335,6 @@ export class DownloadManager {
     return failedState;
   }
 
-  /**
-   * Wait for Chrome download to complete
-   */
-  private waitForDownload(
-    downloadId: chrome.downloads.DownloadItem["id"],
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const checkDownload = () => {
-        chrome.downloads.search({ id: downloadId }, (results) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-
-          if (!results || results.length === 0) {
-            reject(new Error("Download not found"));
-            return;
-          }
-
-          const item = results[0];
-          if (item.state === "complete") {
-            resolve();
-          } else if (item.state === "interrupted") {
-            reject(new Error(`Download interrupted: ${item.error}`));
-          } else {
-            setTimeout(checkDownload, 500);
-          }
-        });
-      };
-
-      checkDownload();
-    });
-  }
 
   /**
    * Generate download ID

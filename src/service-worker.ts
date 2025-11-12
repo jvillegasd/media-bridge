@@ -279,14 +279,23 @@ async function handleDownloadRequest(payload: {
     maxConcurrent,
     onProgress: async (state) => {
       await DownloadStateManager.saveDownload(state);
-      // Send progress update - let errors propagate
-      chrome.runtime.sendMessage({
-        type: MessageType.DOWNLOAD_PROGRESS,
-        payload: {
-          id: state.id,
-          progress: state.progress,
-        },
-      });
+      // Send progress update - handle errors gracefully (popup might be closed)
+      try {
+        chrome.runtime.sendMessage({
+          type: MessageType.DOWNLOAD_PROGRESS,
+          payload: {
+            id: state.id,
+            progress: state.progress,
+          },
+        }, () => {
+          // Check for errors in callback
+          if (chrome.runtime.lastError) {
+            // Ignore - popup/content script might not be listening
+          }
+        });
+      } catch (error) {
+        // Ignore errors - popup/content script might not be listening
+      }
     },
     uploadToDrive: uploadToDrive || config?.googleDrive?.enabled || false,
   });
@@ -313,20 +322,38 @@ async function handleDownloadRequest(payload: {
  * Send download completion message to popup
  */
 function sendDownloadComplete(downloadId: string): void {
-  chrome.runtime.sendMessage({
-    type: MessageType.DOWNLOAD_COMPLETE,
-    payload: { id: downloadId },
-  });
+  try {
+    chrome.runtime.sendMessage({
+      type: MessageType.DOWNLOAD_COMPLETE,
+      payload: { id: downloadId },
+    }, () => {
+      // Check for errors in callback
+      if (chrome.runtime.lastError) {
+        // Ignore - popup/content script might not be listening
+      }
+    });
+  } catch (error) {
+    // Ignore errors - popup/content script might not be listening
+  }
 }
 
 /**
  * Send download failure message to popup
  */
 function sendDownloadFailed(url: string, error: string): void {
-  chrome.runtime.sendMessage({
-    type: MessageType.DOWNLOAD_FAILED,
-    payload: { url, error },
-  });
+  try {
+    chrome.runtime.sendMessage({
+      type: MessageType.DOWNLOAD_FAILED,
+      payload: { url, error },
+    }, () => {
+      // Check for errors in callback
+      if (chrome.runtime.lastError) {
+        // Ignore - popup/content script might not be listening
+      }
+    });
+  } catch (error) {
+    // Ignore errors - popup/content script might not be listening
+  }
 }
 
 /**
