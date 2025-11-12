@@ -2,8 +2,8 @@
  * Direct video detection handler - orchestrates direct video detection
  */
 
-import { VideoMetadata } from '../../types';
-import { DirectVideoDetector } from './direct-video-detector';
+import { VideoMetadata } from "../../types";
+import { DirectVideoDetector } from "./direct-video-detector";
 
 export interface DirectDetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
@@ -33,7 +33,7 @@ export class DirectDetectionHandler {
 
     // Check if it's audio-only (skip it)
     if (this.detector.isAudioOnlyUrl(url)) {
-      console.log('[Media Bridge] Skipping audio-only URL:', url);
+      console.log("[Media Bridge] Skipping audio-only URL:", url);
       return null;
     }
 
@@ -44,7 +44,7 @@ export class DirectDetectionHandler {
 
     // Extract metadata
     const metadata = await this.detector.extractMetadata(url, videoElement);
-    
+
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
     }
@@ -56,14 +56,21 @@ export class DirectDetectionHandler {
    * Handle network request for direct video
    */
   handleNetworkRequest(url: string): void {
-    if (this.detector.isDirectVideoUrl(url) && !this.detector.isAudioOnlyUrl(url)) {
+    if (
+      this.detector.isDirectVideoUrl(url) &&
+      !this.detector.isAudioOnlyUrl(url)
+    ) {
       // Try to associate with video elements
-      const videoElements = document.querySelectorAll('video');
+      const videoElements = document.querySelectorAll("video");
       for (const video of Array.from(videoElements)) {
         const vid = video as HTMLVideoElement;
         const existing = this.capturedUrls.get(vid);
-        
-        if (!existing || existing.startsWith('blob:') || existing.startsWith('data:')) {
+
+        if (
+          !existing ||
+          existing.startsWith("blob:") ||
+          existing.startsWith("data:")
+        ) {
           this.capturedUrls.set(vid, url);
           // Trigger detection
           this.detect(url, vid);
@@ -105,7 +112,7 @@ export class DirectDetectionHandler {
     }
 
     // If it's a blob URL, we need a captured URL
-    if (url.startsWith('blob:') || url.startsWith('data:')) {
+    if (url.startsWith("blob:") || url.startsWith("data:")) {
       // Check if we have a captured URL
       if (this.hasCapturedUrl(video)) {
         const captured = this.getCapturedUrl(video);
@@ -120,9 +127,40 @@ export class DirectDetectionHandler {
   }
 
   /**
+   * Scan DOM for video elements and trigger onVideoDetected callback
+   */
+  async scanDOMForVideos(): Promise<void> {
+    const videoElements = document.querySelectorAll("video");
+
+    for (const video of Array.from(videoElements)) {
+      const vid = video as HTMLVideoElement;
+
+      // Skip if video element isn't ready (check if it has any URL)
+      const hasUrl = vid.currentSrc || vid.src || vid.querySelector("source");
+      if (vid.readyState === 0 && !hasUrl) {
+        continue;
+      }
+
+      // Try to detect from video element
+      const metadata = await this.detectFromVideoElement(vid);
+      if (metadata) {
+        console.log("[Media Bridge] Detected video:", {
+          url: metadata.url,
+          format: metadata.format,
+          pageUrl: metadata.pageUrl,
+        });
+        if (this.onVideoDetected) {
+          this.onVideoDetected(metadata);
+        }
+      }
+    }
+  }
+
+  /**
    * Set up MutationObserver to monitor DOM changes for dynamically added video elements
    */
-  setupDOMObserver(onVideoDetected: () => void): void {
+  setupDOMObserver(): void {
+    const handler = this;
     const observer = new MutationObserver((mutations) => {
       let shouldScan = false;
       for (const mutation of mutations) {
@@ -141,7 +179,7 @@ export class DirectDetectionHandler {
       if (shouldScan) {
         clearTimeout((observer as any).timeout);
         (observer as any).timeout = setTimeout(() => {
-          onVideoDetected();
+          handler.scanDOMForVideos();
         }, 1000);
       }
     });
@@ -159,8 +197,8 @@ export class DirectDetectionHandler {
     // Check currentSrc (what's actually playing)
     if (
       video.currentSrc &&
-      !video.currentSrc.startsWith('blob:') &&
-      !video.currentSrc.startsWith('data:')
+      !video.currentSrc.startsWith("blob:") &&
+      !video.currentSrc.startsWith("data:")
     ) {
       return video.currentSrc;
     }
@@ -168,20 +206,20 @@ export class DirectDetectionHandler {
     // Check src attribute
     if (
       video.src &&
-      !video.src.startsWith('blob:') &&
-      !video.src.startsWith('data:')
+      !video.src.startsWith("blob:") &&
+      !video.src.startsWith("data:")
     ) {
       return video.src;
     }
 
     // Check all source elements
-    const sources = video.querySelectorAll('source');
+    const sources = video.querySelectorAll("source");
     for (const sourceEl of Array.from(sources)) {
       const source = sourceEl as HTMLSourceElement;
       if (
         source.src &&
-        !source.src.startsWith('blob:') &&
-        !source.src.startsWith('data:')
+        !source.src.startsWith("blob:") &&
+        !source.src.startsWith("data:")
       ) {
         return source.src;
       }
@@ -190,4 +228,3 @@ export class DirectDetectionHandler {
     return null;
   }
 }
-
