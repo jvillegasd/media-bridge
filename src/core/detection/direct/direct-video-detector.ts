@@ -179,36 +179,9 @@ export class DirectVideoDetector {
           }
         }
       }
-
-      // Check for YouTube thumbnail pattern
-      if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        const videoId = this.extractYouTubeVideoId(url);
-        if (videoId) {
-          metadata.thumbnail = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-        }
-      }
     }
 
     return metadata;
-  }
-
-  /**
-   * Extract YouTube video ID from URL
-   */
-  private extractYouTubeVideoId(url: string): string | null {
-    const patterns = [
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
-      /youtube\.com\/embed\/([^&\n?#]+)/,
-    ];
-
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match && match[1]) {
-        return match[1];
-      }
-    }
-
-    return null;
   }
 }
 

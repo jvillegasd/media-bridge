@@ -80,27 +80,13 @@ export class DirectDetectionHandler {
   }
 
   /**
-   * Get captured URL for video element
-   */
-  getCapturedUrl(videoElement: HTMLVideoElement): string | undefined {
-    return this.capturedUrls.get(videoElement);
-  }
-
-  /**
-   * Check if we have a captured URL for this video element
-   */
-  hasCapturedUrl(videoElement: HTMLVideoElement): boolean {
-    return this.capturedUrls.has(videoElement);
-  }
-
-  /**
    * Detect video from video element
    */
-  async detectFromVideoElement(
+  private async detectFromVideoElement(
     video: HTMLVideoElement,
   ): Promise<VideoMetadata | null> {
     // First check if we have a captured URL for this video element
-    const capturedUrl = this.getCapturedUrl(video);
+    const capturedUrl = this.capturedUrls.get(video);
     if (capturedUrl) {
       return await this.detect(capturedUrl, video);
     }
@@ -114,11 +100,9 @@ export class DirectDetectionHandler {
     // If it's a blob URL, we need a captured URL
     if (url.startsWith("blob:") || url.startsWith("data:")) {
       // Check if we have a captured URL
-      if (this.hasCapturedUrl(video)) {
-        const captured = this.getCapturedUrl(video);
-        if (captured) {
-          return await this.detect(captured, video);
-        }
+      const captured = this.capturedUrls.get(video);
+      if (captured) {
+        return await this.detect(captured, video);
       }
       return null;
     }
