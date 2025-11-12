@@ -127,21 +127,6 @@ function setupDOMObserver() {
 }
 
 /**
- * Initialize content script
- * Sets up detection manager, performs initial scan, and monitors DOM changes
- */
-function init() {
-  detectionManager = new DetectionManager({
-    onVideoDetected: (video) => {
-      addDetectedVideo(video);
-    },
-  });
-
-  detectVideos();
-  setupDOMObserver();
-}
-
-/**
  * Scan DOM for video elements using DetectionManager
  * Updates existing videos with new metadata if found
  */
@@ -154,11 +139,11 @@ async function detectVideos() {
 
   for (const metadata of newVideos) {
     const normalizedUrl = normalizeUrl(metadata.url);
-    
+
     if (detectedVideos[normalizedUrl]) {
       const existing = detectedVideos[normalizedUrl];
       let updated = false;
-      
+
       if (!existing.title && metadata.title) {
         existing.title = metadata.title;
         updated = true;
@@ -183,7 +168,7 @@ async function detectVideos() {
         existing.resolution = metadata.resolution;
         updated = true;
       }
-      
+
       if (updated) {
         addDetectedVideo(existing);
       }
@@ -200,20 +185,19 @@ async function detectVideos() {
   }
 }
 
-
 /**
  * Add or update detected video and notify popup
  * Uses normalized URL as unique key to prevent duplicates
  */
 function addDetectedVideo(video: VideoMetadata) {
   // Reject unknown formats - don't show them in UI
-  if (video.format === 'unknown') {
+  if (video.format === "unknown") {
     return;
   }
-  
+
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
-  
+
   if (existing) {
     let updated = false;
 
@@ -287,24 +271,56 @@ function clearSentToPopupTracking() {
 }
 
 /**
+ * Handle URL change - clear videos from previous page
+ */
+function handleUrlChange() {
+  const currentUrl = window.location.href;
+  clearSentToPopupTracking();
+  const currentPageVideos: Record<string, VideoMetadata> = {};
+  for (const [url, video] of Object.entries(detectedVideos)) {
+    if (video.pageUrl === currentUrl) {
+      currentPageVideos[url] = video;
+    }
+  }
+  detectedVideos = currentPageVideos;
+}
+
+/**
  * Monitor page URL changes and clear videos from previous page
  */
-let lastUrl = window.location.href;
-setInterval(() => {
-  const currentUrl = window.location.href;
-  if (currentUrl !== lastUrl) {
-    lastUrl = currentUrl;
-    clearSentToPopupTracking();
-    const currentPageVideos: Record<string, VideoMetadata> = {};
-    for (const [url, video] of Object.entries(detectedVideos)) {
-      if (video.pageUrl === currentUrl) {
-        currentPageVideos[url] = video;
-      }
-    }
-    detectedVideos = currentPageVideos;
-  }
-}, 1000);
+function setupUrlChangeMonitor() {
+  // Listen for popstate (back/forward navigation)
+  window.addEventListener("popstate", handleUrlChange);
 
+  // Intercept pushState and replaceState for programmatic navigation
+  const originalPushState = history.pushState;
+  history.pushState = function (...args) {
+    originalPushState.apply(history, args);
+    handleUrlChange();
+  };
+
+  const originalReplaceState = history.replaceState;
+  history.replaceState = function (...args) {
+    originalReplaceState.apply(history, args);
+    handleUrlChange();
+  };
+}
+
+/**
+ * Initialize content script
+ * Sets up detection manager, performs initial scan, and monitors DOM changes
+ */
+function init() {
+  detectionManager = new DetectionManager({
+    onVideoDetected: (video) => {
+      addDetectedVideo(video);
+    },
+  });
+
+  detectVideos();
+  setupDOMObserver();
+  setupUrlChangeMonitor();
+}
 
 /**
  * Listen for messages from popup
@@ -342,4 +358,3 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
-

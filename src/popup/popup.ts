@@ -96,12 +96,6 @@ async function init() {
 
   // Get detected videos from current tab
   await requestDetectedVideos();
-
-  setInterval(async () => {
-    await loadDownloadStates();
-    renderDetectedVideos();
-    await requestDetectedVideos();
-  }, 2000);
 }
 
 function showNoVideoNotice() {
