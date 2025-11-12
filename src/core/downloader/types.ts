@@ -49,28 +49,12 @@ export interface ExtractedMetadata {
 }
 
 /**
- * Progress callback for direct downloader
- */
-export type DirectDownloadProgressCallback = (
-  loaded: number,
-  total: number,
-  percentage: number,
-) => void;
-
-/**
  * Progress callback for download handlers
  */
 export type DownloadProgressCallback = (state: DownloadState) => void;
 
 /**
- * Options for DirectDownloader
- */
-export interface DirectDownloadOptions {
-  onProgress?: DirectDownloadProgressCallback;
-}
-
-/**
- * Result from DirectDownloader download operation
+ * Result from direct download operation (internal use)
  */
 export interface DirectDownloadResult {
   filePath: string;
