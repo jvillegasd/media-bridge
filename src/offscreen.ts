@@ -1,0 +1,290 @@
+/**
+ * Offscreen document script for FFmpeg processing
+ * Handles HLS video processing using FFmpeg.wasm
+ */
+
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
+import { MessageType } from './shared/messages';
+import { readChunkByIndex } from './core/storage/indexeddb-chunks';
+import { logger } from './core/utils/logger';
+
+let ffmpegInstance: FFmpeg | null = null;
+
+/**
+ * Initialize FFmpeg instance
+ */
+async function getFFmpeg(): Promise<FFmpeg> {
+  if (!ffmpegInstance) {
+    logger.info('Initializing FFmpeg in offscreen document');
+    ffmpegInstance = new FFmpeg();
+
+    await ffmpegInstance.load({
+      coreURL: chrome.runtime.getURL('./ffmpeg/core/ffmpeg-core.js'),
+      wasmURL: chrome.runtime.getURL('./ffmpeg/core/ffmpeg-core.wasm'),
+    });
+
+    ffmpegInstance.on('log', ({ message }) => {
+      logger.debug('FFmpeg:', message);
+    });
+
+    logger.info('FFmpeg initialized successfully');
+  }
+
+  return ffmpegInstance;
+}
+
+/**
+ * Concatenate chunks from IndexedDB
+ */
+async function concatenateChunks(
+  downloadId: string,
+  startIndex: number,
+  length: number,
+): Promise<Blob> {
+  const chunks: Uint8Array[] = [];
+
+  for (let i = 0; i < length; i++) {
+    const chunk = await readChunkByIndex(downloadId, startIndex + i);
+    if (chunk) {
+      chunks.push(chunk);
+    }
+  }
+
+  return new Blob(chunks, { type: 'video/mp2t' });
+}
+
+/**
+ * Process video and audio streams with FFmpeg
+ */
+async function processVideoAndAudio(
+  ffmpeg: FFmpeg,
+  downloadId: string,
+  videoLength: number,
+  audioLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<void> {
+  onProgress?.(0.1, 'Concatenating video chunks');
+  const videoBlob = await concatenateChunks(downloadId, 0, videoLength);
+
+  onProgress?.(0.3, 'Concatenating audio chunks');
+  const audioBlob = await concatenateChunks(downloadId, videoLength, audioLength);
+
+  onProgress?.(0.5, 'Writing video stream');
+  await ffmpeg.writeFile('video.ts', await fetchFile(videoBlob));
+
+  onProgress?.(0.6, 'Writing audio stream');
+  await ffmpeg.writeFile('audio.ts', await fetchFile(audioBlob));
+
+  onProgress?.(0.7, 'Merging video and audio');
+  await ffmpeg.exec([
+    '-y',
+    '-i',
+    'video.ts',
+    '-i',
+    'audio.ts',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'copy',
+    '-bsf:a',
+    'aac_adtstoasc',
+    '-shortest',
+    '-movflags',
+    '+faststart',
+    outputFileName,
+  ]);
+
+  // Cleanup intermediate files
+  try {
+    await ffmpeg.deleteFile('video.ts');
+    await ffmpeg.deleteFile('audio.ts');
+  } catch (error) {
+    // Files may not exist, ignore error
+  }
+}
+
+/**
+ * Process video only stream with FFmpeg
+ */
+async function processVideoOnly(
+  ffmpeg: FFmpeg,
+  downloadId: string,
+  videoLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<void> {
+  onProgress?.(0.2, 'Concatenating video chunks');
+  const videoBlob = await concatenateChunks(downloadId, 0, videoLength);
+
+  onProgress?.(0.5, 'Writing video stream');
+  await ffmpeg.writeFile('video.ts', await fetchFile(videoBlob));
+
+  onProgress?.(0.7, 'Converting to MP4');
+  await ffmpeg.exec([
+    '-y',
+    '-i',
+    'video.ts',
+    '-c:v',
+    'copy',
+    '-movflags',
+    '+faststart',
+    outputFileName,
+  ]);
+
+  // Cleanup intermediate files
+  try {
+    await ffmpeg.deleteFile('video.ts');
+  } catch (error) {
+    // File may not exist, ignore error
+  }
+}
+
+/**
+ * Process audio only stream with FFmpeg
+ */
+async function processAudioOnly(
+  ffmpeg: FFmpeg,
+  downloadId: string,
+  audioLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<void> {
+  onProgress?.(0.2, 'Concatenating audio chunks');
+  const audioBlob = await concatenateChunks(downloadId, 0, audioLength);
+
+  onProgress?.(0.5, 'Writing audio stream');
+  await ffmpeg.writeFile('audio.ts', await fetchFile(audioBlob));
+
+  onProgress?.(0.7, 'Converting to MP4');
+  await ffmpeg.exec([
+    '-y',
+    '-i',
+    'audio.ts',
+    '-c:a',
+    'copy',
+    '-movflags',
+    '+faststart',
+    outputFileName,
+  ]);
+
+  // Cleanup intermediate files
+  try {
+    await ffmpeg.deleteFile('audio.ts');
+  } catch (error) {
+    // File may not exist, ignore error
+  }
+}
+
+/**
+ * Process HLS chunks and convert to MP4
+ */
+async function processHLSChunks(
+  downloadId: string,
+  videoLength: number,
+  audioLength: number,
+  filename: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string> {
+  const ffmpeg = await getFFmpeg();
+
+  // Extract base filename without extension
+  const baseFileName = filename.replace(/\.[^/.]+$/, '');
+  const outputFileName = `/tmp/${baseFileName}.mp4`;
+
+  // Process based on available streams
+  if (videoLength > 0 && audioLength > 0) {
+    await processVideoAndAudio(ffmpeg, downloadId, videoLength, audioLength, outputFileName, onProgress);
+  } else if (videoLength > 0) {
+    await processVideoOnly(ffmpeg, downloadId, videoLength, outputFileName, onProgress);
+  } else if (audioLength > 0) {
+    await processAudioOnly(ffmpeg, downloadId, audioLength, outputFileName, onProgress);
+  } else {
+    throw new Error('No video or audio chunks to process');
+  }
+
+  // Read the output file
+  try {
+    const data = await ffmpeg.readFile(outputFileName);
+    onProgress?.(1, 'Done');
+
+    // Create blob URL
+    const blob = new Blob([data], { type: 'video/mp4' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    // Cleanup output file
+    try {
+      await ffmpeg.deleteFile(outputFileName);
+    } catch (error) {
+      // File may not exist, ignore error
+    }
+
+    return blobUrl;
+  } catch (error) {
+    logger.error(`Failed to read output file ${outputFileName}:`, error);
+    throw new Error(`Output file ${outputFileName} was not created by FFmpeg`);
+  }
+}
+
+/**
+ * Handle messages from service worker
+ */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === MessageType.OFFSCREEN_PROCESS_HLS) {
+    const { downloadId, videoLength, audioLength, filename } = message.payload;
+
+    processHLSChunks(
+      downloadId,
+      videoLength,
+      audioLength,
+      filename,
+      (progress, message) => {
+        // Send progress updates back to service worker
+        chrome.runtime.sendMessage({
+          type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+          payload: {
+            downloadId,
+            type: 'progress',
+            progress,
+            message,
+          },
+        }).catch(() => {
+          // Ignore errors - service worker might not be listening
+        });
+      },
+    )
+      .then((blobUrl) => {
+        // Send success response
+        chrome.runtime.sendMessage({
+          type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+          payload: {
+            downloadId,
+            type: 'success',
+            blobUrl,
+          },
+        }).catch(() => {
+          // Ignore errors
+        });
+      })
+      .catch((error) => {
+        // Send error response
+        chrome.runtime.sendMessage({
+          type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+          payload: {
+            downloadId,
+            type: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          },
+        }).catch(() => {
+          // Ignore errors
+        });
+      });
+
+    // Return true to indicate async response
+    return true;
+  }
+});
+
+logger.info('Offscreen document script loaded');
+

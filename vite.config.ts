@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           'background': resolve(__dirname, 'src/service-worker.ts'),
+          'offscreen': resolve(__dirname, 'src/offscreen.ts'),
           // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),
           'options/options': resolve(__dirname, 'src/options/options.html'),
@@ -34,6 +35,9 @@ export default defineConfig(({ mode }) => {
             }
             if (chunkInfo.name.includes('background')) {
               return 'background.js';
+            }
+            if (chunkInfo.name.includes('offscreen')) {
+              return 'offscreen.js';
             }
             return '[name].js';
           },
@@ -82,6 +86,7 @@ export default defineConfig(({ mode }) => {
           const htmlMoves = [
             { from: 'dist/src/popup/popup.html', to: 'dist/popup/popup.html' },
             { from: 'dist/src/options/options.html', to: 'dist/options/options.html' },
+            { from: 'offscreen.html', to: 'dist/offscreen.html' },
           ];
           
           htmlMoves.forEach(({ from, to }) => {
@@ -94,6 +99,7 @@ export default defineConfig(({ mode }) => {
           const htmlFiles = [
             'dist/popup/popup.html',
             'dist/options/options.html',
+            'dist/offscreen.html',
           ];
           
           htmlFiles.forEach((file) => {

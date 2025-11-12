@@ -11,7 +11,8 @@
     "storage",
     "downloads",
     "tabs",
-    "activeTab"
+    "activeTab",
+    "offscreen"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": {

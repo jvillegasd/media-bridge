@@ -41,6 +41,10 @@ export enum MessageType {
   
   // Fetch resource (for CORS bypass in content scripts)
   FETCH_RESOURCE = 'FETCH_RESOURCE',
+  
+  // Offscreen messages
+  OFFSCREEN_PROCESS_HLS = 'OFFSCREEN_PROCESS_HLS',
+  OFFSCREEN_PROCESS_HLS_RESPONSE = 'OFFSCREEN_PROCESS_HLS_RESPONSE',
 }
 
 export interface BaseMessage {
