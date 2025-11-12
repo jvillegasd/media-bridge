@@ -404,7 +404,7 @@ function renderDetectedVideos() {
       statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
       
       // Show animated dots and file size (no "Downloading" text, no button)
-      const fileSize = downloadState.progress.total || video.size;
+      const fileSize = downloadState.progress.total;
       const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
       
       progressBar = `
