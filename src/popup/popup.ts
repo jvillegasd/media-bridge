@@ -15,6 +15,7 @@ let closeNoVideoNoticeBtn: HTMLButtonElement | null = null;
 let noVideoNotice: HTMLDivElement | null = null;
 let settingsBtn: HTMLButtonElement | null = null;
 let downloadsBtn: HTMLButtonElement | null = null;
+let clearCompletedBtn: HTMLButtonElement | null = null;
 
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
@@ -33,6 +34,7 @@ async function init() {
   noVideoNotice = document.getElementById('noVideoNotice') as HTMLDivElement;
   settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
   downloadsBtn = document.getElementById('downloadsBtn') as HTMLButtonElement;
+  clearCompletedBtn = document.getElementById('clearCompletedBtn') as HTMLButtonElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
@@ -57,6 +59,9 @@ async function init() {
   }
   if (downloadsBtn) {
     downloadsBtn.addEventListener('click', handleOpenDownloads);
+  }
+  if (clearCompletedBtn) {
+    clearCompletedBtn.addEventListener('click', handleClearCompleted);
   }
 
   // Listen for messages
@@ -189,6 +194,73 @@ async function handleOpenDownloads() {
   } catch (error) {
     console.error('Failed to open downloads folder:', error);
     alert('Failed to open downloads folder. Please check your browser settings.');
+  }
+}
+
+async function handleClearCompleted() {
+  if (!clearCompletedBtn) return;
+  
+  const originalText = clearCompletedBtn.querySelector('span')?.textContent;
+  
+  try {
+    // Disable button and show loading state
+    clearCompletedBtn.disabled = true;
+    if (clearCompletedBtn.querySelector('span')) {
+      clearCompletedBtn.querySelector('span')!.textContent = 'Clearing...';
+    }
+    
+    // Get all downloads
+    const allDownloads = await DownloadStateManager.getAllDownloads();
+    
+    // Filter completed downloads
+    const completedDownloads = allDownloads.filter(
+      download => download.progress.stage === 'completed'
+    );
+    
+    if (completedDownloads.length === 0) {
+      // No completed downloads to clear
+      if (clearCompletedBtn.querySelector('span')) {
+        clearCompletedBtn.querySelector('span')!.textContent = 'No completed';
+        setTimeout(() => {
+          if (clearCompletedBtn) {
+            if (clearCompletedBtn.querySelector('span') && originalText) {
+              clearCompletedBtn.querySelector('span')!.textContent = originalText;
+            }
+            clearCompletedBtn.disabled = false;
+          }
+        }, 1000);
+      }
+      return;
+    }
+    
+    // Remove all completed downloads
+    for (const download of completedDownloads) {
+      await DownloadStateManager.removeDownload(download.id);
+    }
+    
+    // Reload states and refresh UI
+    await loadDownloadStates();
+    renderDetectedVideos();
+    
+    // Show success feedback
+    if (clearCompletedBtn.querySelector('span')) {
+      clearCompletedBtn.querySelector('span')!.textContent = 'Cleared!';
+      setTimeout(() => {
+        if (clearCompletedBtn) {
+          if (clearCompletedBtn.querySelector('span') && originalText) {
+            clearCompletedBtn.querySelector('span')!.textContent = originalText;
+          }
+          clearCompletedBtn.disabled = false;
+        }
+      }, 1000);
+    }
+  } catch (error) {
+    console.error('Failed to clear completed downloads:', error);
+    alert('Failed to clear completed downloads. Please try again.');
+    if (clearCompletedBtn && clearCompletedBtn.querySelector('span') && originalText) {
+      clearCompletedBtn.querySelector('span')!.textContent = originalText;
+    }
+    clearCompletedBtn.disabled = false;
   }
 }
 
