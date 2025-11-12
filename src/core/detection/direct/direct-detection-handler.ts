@@ -3,7 +3,7 @@
  */
 
 import { VideoMetadata } from "../../types";
-import { DirectVideoDetector } from "./direct-video-detector";
+import { detectFormatFromUrl } from "../../utils/url-utils";
 
 export interface DirectDetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
@@ -11,12 +11,10 @@ export interface DirectDetectionHandlerOptions {
 
 export class DirectDetectionHandler {
   private onVideoDetected?: (video: VideoMetadata) => void;
-  private detector: DirectVideoDetector;
   private capturedUrls = new Map<HTMLVideoElement, string>();
 
   constructor(options: DirectDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
-    this.detector = new DirectVideoDetector();
   }
 
   /**
@@ -27,12 +25,12 @@ export class DirectDetectionHandler {
     videoElement?: HTMLVideoElement,
   ): Promise<VideoMetadata | null> {
     // Check if URL is a direct video URL
-    if (!this.detector.isDirectVideoUrl(url)) {
+    if (!this.isDirectVideoUrl(url)) {
       return null;
     }
 
     // Check if it's audio-only (skip it)
-    if (this.detector.isAudioOnlyUrl(url)) {
+    if (this.isAudioOnlyUrl(url)) {
       console.log("[Media Bridge] Skipping audio-only URL:", url);
       return null;
     }
@@ -43,7 +41,7 @@ export class DirectDetectionHandler {
     }
 
     // Extract metadata
-    const metadata = await this.detector.extractMetadata(url, videoElement);
+    const metadata = await this.extractMetadata(url, videoElement);
 
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
@@ -56,10 +54,7 @@ export class DirectDetectionHandler {
    * Handle network request for direct video
    */
   handleNetworkRequest(url: string): void {
-    if (
-      this.detector.isDirectVideoUrl(url) &&
-      !this.detector.isAudioOnlyUrl(url)
-    ) {
+    if (this.isDirectVideoUrl(url) && !this.isAudioOnlyUrl(url)) {
       // Try to associate with video elements
       const videoElements = document.querySelectorAll("video");
       for (const video of Array.from(videoElements)) {
@@ -210,5 +205,187 @@ export class DirectDetectionHandler {
     }
 
     return null;
+  }
+
+  /**
+   * Check if URL is a direct video URL
+   */
+  private isDirectVideoUrl(url: string): boolean {
+    return (
+      url.includes(".mp4") ||
+      url.includes(".webm") ||
+      url.includes(".mov") ||
+      url.includes(".avi") ||
+      url.includes(".mkv") ||
+      url.includes(".flv") ||
+      url.includes(".wmv") ||
+      url.includes(".ogg")
+    );
+  }
+
+  /**
+   * Check if URL is audio-only (not a video track)
+   */
+  private isAudioOnlyUrl(url: string): boolean {
+    const lowerUrl = url.toLowerCase();
+
+    const audioPatterns = [
+      "/aud/",
+      "/audio/",
+      "/mp4a/",
+      "/aac/",
+      "/audio_track",
+      "/sound/",
+    ];
+
+    if (audioPatterns.some((pattern) => lowerUrl.includes(pattern))) {
+      return true;
+    }
+
+    // For Twitter/X amplify_video URLs
+    if (lowerUrl.includes("amplify_video")) {
+      if (lowerUrl.includes("/aud/")) {
+        return true;
+      }
+      if (lowerUrl.includes("/vid/") || lowerUrl.includes("/video/")) {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Extract metadata from direct video URL
+   */
+  private async extractMetadata(
+    url: string,
+    videoElement?: HTMLVideoElement,
+  ): Promise<VideoMetadata | null> {
+    const format = detectFormatFromUrl(url);
+
+    // Reject unknown formats
+    if (format === "unknown") {
+      return null;
+    }
+
+    const metadata: VideoMetadata = {
+      url,
+      format,
+      pageUrl: window.location.href,
+      title: document.title,
+    };
+
+    // Extract metadata from video element if available
+    if (videoElement) {
+      metadata.width = videoElement.videoWidth || undefined;
+      metadata.height = videoElement.videoHeight || undefined;
+      metadata.duration = videoElement.duration || undefined;
+
+      if (metadata.width && metadata.height) {
+        const height = metadata.height;
+        if (height >= 2160) {
+          metadata.resolution = "4K";
+        } else if (height >= 1440) {
+          metadata.resolution = "1440p";
+        } else if (height >= 1080) {
+          metadata.resolution = "1080p";
+        } else if (height >= 720) {
+          metadata.resolution = "720p";
+        } else if (height >= 480) {
+          metadata.resolution = "480p";
+        } else {
+          metadata.resolution = `${height}p`;
+        }
+      }
+
+      // Extract thumbnail
+      if (videoElement.poster) {
+        metadata.thumbnail = videoElement.poster;
+      } else {
+        // Try to capture current frame as thumbnail
+        try {
+          if (videoElement.readyState >= 2) {
+            const canvas = document.createElement("canvas");
+            canvas.width = videoElement.videoWidth || 320;
+            canvas.height = videoElement.videoHeight || 180;
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+              metadata.thumbnail = canvas.toDataURL("image/jpeg", 0.8);
+            }
+          }
+        } catch (error) {
+          // CORS or other issues, ignore
+        }
+      }
+
+      // Try to find a more specific title from the page context
+      if (
+        !metadata.title ||
+        metadata.title.trim().length === 0 ||
+        metadata.title.includes(" - ") ||
+        metadata.title.includes(" / ")
+      ) {
+        let container = videoElement.parentElement;
+        let depth = 0;
+
+        while (container && depth < 3) {
+          const heading = container.querySelector("h1, h2, h3, h4, h5, h6");
+          if (heading) {
+            const headingText = heading.textContent?.trim();
+            if (
+              headingText &&
+              headingText.length > 0 &&
+              headingText.length < 200
+            ) {
+              metadata.title = headingText;
+              break;
+            }
+          }
+
+          const ogTitle = document.querySelector('meta[property="og:title"]');
+          if (ogTitle) {
+            const ogTitleContent = (ogTitle as HTMLMetaElement).content?.trim();
+            if (ogTitleContent && ogTitleContent.length > 0) {
+              metadata.title = ogTitleContent;
+              break;
+            }
+          }
+
+          container = container.parentElement;
+          depth++;
+        }
+
+        if (!metadata.title || metadata.title.trim().length === 0) {
+          metadata.title = videoElement.getAttribute("title") || document.title;
+        }
+      }
+    } else {
+      // Try to find thumbnail in page (for YouTube, Twitter, etc.)
+      const thumbnailSelectors = [
+        'meta[property="og:image"]',
+        'meta[name="twitter:image"]',
+        'link[rel="image_src"]',
+        'img[class*="thumbnail"]',
+        'img[class*="preview"]',
+      ];
+
+      for (const selector of thumbnailSelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          const thumbnailUrl =
+            element.getAttribute("content") ||
+            element.getAttribute("href") ||
+            (element as HTMLImageElement).src;
+          if (thumbnailUrl) {
+            metadata.thumbnail = thumbnailUrl;
+            break;
+          }
+        }
+      }
+    }
+
+    return metadata;
   }
 }
