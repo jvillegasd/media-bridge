@@ -1,157 +1,167 @@
 /**
- * Direct video URL downloader
+ * Direct video URL downloader using Chrome downloads API
  */
 
-import { DownloadError, NetworkError } from '../../utils/errors';
-import { logger } from '../../utils/logger';
-import { DirectDownloadProgressCallback } from '../types';
-
-export interface DirectDownloadOptions {
-  onProgress?: DirectDownloadProgressCallback;
-}
+import { DownloadError } from "../../utils/errors";
+import { logger } from "../../utils/logger";
+import {
+  DirectDownloadProgressCallback,
+  DirectDownloadOptions,
+  DirectDownloadResult,
+} from "../types";
 
 export class DirectDownloader {
   private readonly onProgress?: DirectDownloadProgressCallback;
+  private downloadProgressListeners: Map<
+    number,
+    {
+      resolve: (result: DirectDownloadResult) => void;
+      reject: (error: Error) => void;
+      filename: string;
+    }
+  > = new Map();
 
   constructor(options: DirectDownloadOptions = {}) {
     this.onProgress = options.onProgress;
+    this.setupDownloadProgressTracking();
   }
 
   /**
-   * Download video from direct URL
+   * Set up Chrome downloads progress tracking
    */
-  async download(url: string): Promise<Blob> {
-    try {
-      logger.info(`Downloading direct video from ${url}`);
+  private setupDownloadProgressTracking(): void {
+    chrome.downloads.onChanged.addListener((downloadDelta) => {
+      const chromeDownloadId = downloadDelta.id;
+      const listener = this.downloadProgressListeners.get(chromeDownloadId);
 
-      const response = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
+      if (!listener) {
+        return; // Not one of our tracked downloads
+      }
+
+      // Update progress on any change (bytesReceived, state, etc.)
+      this.updateProgressFromChromeDownload(
+        chromeDownloadId,
+        listener,
+        downloadDelta,
+      ).catch((error) => {
+        logger.error(
+          `Error updating progress for download ${chromeDownloadId}:`,
+          error,
+        );
+      });
+    });
+  }
+
+  /**
+   * Update progress from Chrome download state
+   */
+  private async updateProgressFromChromeDownload(
+    chromeDownloadId: number,
+    listener: {
+      resolve: (result: DirectDownloadResult) => void;
+      reject: (error: Error) => void;
+      filename: string;
+    },
+    delta: chrome.downloads.DownloadDelta,
+  ): Promise<void> {
+    // Get current download item
+    const downloadItem =
+      await new Promise<chrome.downloads.DownloadItem | null>((resolve) => {
+        chrome.downloads.search({ id: chromeDownloadId }, (results) => {
+          if (chrome.runtime.lastError || !results || results.length === 0) {
+            resolve(null);
+          } else {
+            resolve(results[0]);
+          }
+        });
       });
 
-      if (!response.ok) {
-        throw new NetworkError(
-          `Failed to download video: ${response.statusText}`,
-          response.status
+    if (!downloadItem) {
+      return;
+    }
+
+    // Report progress if callback is provided
+    if (this.onProgress && downloadItem.bytesReceived !== undefined) {
+      const loaded = downloadItem.bytesReceived;
+      const total = downloadItem.totalBytes || 0;
+      const percentage = total > 0 ? (loaded / total) * 100 : 0;
+      this.onProgress(loaded, total, percentage);
+    }
+
+    // Handle completion or failure
+    if (delta.state) {
+      if (delta.state.current === "complete") {
+        const result: DirectDownloadResult = {
+          filePath: downloadItem.filename,
+          totalBytes: downloadItem.totalBytes,
+        };
+        this.downloadProgressListeners.delete(chromeDownloadId);
+        listener.resolve(result);
+      } else if (delta.state.current === "interrupted") {
+        this.downloadProgressListeners.delete(chromeDownloadId);
+        listener.reject(
+          new Error(downloadItem.error || "Download interrupted"),
         );
       }
+    }
+  }
 
-      const contentLength = response.headers.get('content-length');
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
+  /**
+   * Download video from direct URL using Chrome downloads API
+   * Returns the file path where the video was saved
+   */
+  async download(url: string, filename: string): Promise<DirectDownloadResult> {
+    try {
+      logger.info(`Downloading direct video from ${url} to ${filename}`);
 
-      if (!response.body) {
-        throw new DownloadError('Response body is null');
-      }
+      // Use Chrome downloads API with direct URL (most efficient - no blob download)
+      const chromeDownloadId = await new Promise<number>((resolve, reject) => {
+        chrome.downloads.download(
+          {
+            url,
+            filename,
+            saveAs: false,
+          },
+          (id) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(id!);
+            }
+          },
+        );
+      });
 
-      const reader = response.body.getReader();
-      const chunks: BlobPart[] = [];
-      let loaded = 0;
-      const startTime = Date.now();
+      // Wait for download to complete
+      const result = await new Promise<DirectDownloadResult>(
+        (resolve, reject) => {
+          // Store promise resolvers for onChanged callback to use
+          this.downloadProgressListeners.set(chromeDownloadId, {
+            resolve,
+            reject,
+            filename,
+          });
 
-      while (true) {
-        const { done, value } = await reader.read();
+          // Set timeout as fallback in case onChanged doesn't fire
+          setTimeout(() => {
+            if (this.downloadProgressListeners.has(chromeDownloadId)) {
+              this.downloadProgressListeners.delete(chromeDownloadId);
+              reject(
+                new Error("Download timeout - completion event not received"),
+              );
+            }
+          }, 300000); // 5 minute timeout
+        },
+      );
 
-        if (done) {
-          break;
-        }
+      logger.info(`Successfully downloaded to ${result.filePath}`);
 
-        chunks.push(value);
-        loaded += value.length;
-
-        // Report progress even if total is unknown (estimate based on loaded bytes)
-        if (this.onProgress) {
-          if (total > 0) {
-            const percentage = (loaded / total) * 100;
-            this.onProgress(loaded, total, percentage);
-          } else {
-            // If total is unknown, still report progress with estimated percentage
-            // Show as indeterminate or use a placeholder
-            this.onProgress(loaded, 0, 0);
-          }
-        }
-      }
-
-      // Combine chunks into single blob
-      const blob = new Blob(chunks, { type: response.headers.get('content-type') || 'video/mp4' });
-
-      logger.info(`Successfully downloaded ${loaded} bytes`);
-      
-      return blob;
+      return result;
     } catch (error) {
-      logger.error('Direct download failed:', error);
-      throw error instanceof DownloadError || error instanceof NetworkError
+      logger.error("Direct download failed:", error);
+      throw error instanceof DownloadError
         ? error
         : new DownloadError(`Direct download failed: ${error}`);
     }
   }
-
-  /**
-   * Download with resume support (if server supports Range requests)
-   */
-  async downloadWithResume(url: string, existingBlob?: Blob): Promise<Blob> {
-    const existingSize = existingBlob?.size || 0;
-    
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: existingSize > 0 ? {
-          Range: `bytes=${existingSize}-`,
-        } : {},
-        mode: 'cors',
-      });
-
-      if (!response.ok && response.status !== 206) {
-        throw new NetworkError(
-          `Failed to resume download: ${response.statusText}`,
-          response.status
-        );
-      }
-
-      const contentLength = response.headers.get('content-length');
-      const contentRange = response.headers.get('content-range');
-      
-      let total = existingSize;
-      if (contentLength) {
-        total = existingSize + parseInt(contentLength, 10);
-      } else if (contentRange) {
-        const match = contentRange.match(/bytes \d+-\d+\/(\d+)/);
-        if (match) {
-          total = parseInt(match[1], 10);
-        }
-      }
-
-      if (!response.body) {
-        throw new DownloadError('Response body is null');
-      }
-
-      const reader = response.body.getReader();
-      const chunks: BlobPart[] = existingBlob ? [new Uint8Array(await existingBlob.arrayBuffer())] : [];
-      let loaded = existingSize;
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        chunks.push(value);
-        loaded += value.length;
-
-        if (this.onProgress && total > 0) {
-          const percentage = (loaded / total) * 100;
-          this.onProgress(loaded, total, percentage);
-        }
-      }
-
-      const blob = new Blob(chunks, { type: response.headers.get('content-type') || 'video/mp4' });
-      return blob;
-    } catch (error) {
-      logger.error('Resume download failed:', error);
-      throw error instanceof DownloadError || error instanceof NetworkError
-        ? error
-        : new DownloadError(`Resume download failed: ${error}`);
-    }
-  }
 }
-

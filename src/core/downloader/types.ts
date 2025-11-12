@@ -62,3 +62,33 @@ export type DirectDownloadProgressCallback = (
  */
 export type DownloadProgressCallback = (state: DownloadState) => void;
 
+/**
+ * Options for DirectDownloader
+ */
+export interface DirectDownloadOptions {
+  onProgress?: DirectDownloadProgressCallback;
+}
+
+/**
+ * Result from DirectDownloader download operation
+ */
+export interface DirectDownloadResult {
+  filePath: string;
+  totalBytes?: number;
+}
+
+/**
+ * Options for DirectDownloadHandler
+ */
+export interface DirectDownloadHandlerOptions {
+  onProgress?: DownloadProgressCallback;
+}
+
+/**
+ * Result from DirectDownloadHandler download operation
+ */
+export interface DirectDownloadHandlerResult {
+  filePath: string;
+  fileExtension?: string;
+}
+

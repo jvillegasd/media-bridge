@@ -1,17 +1,20 @@
 /**
- * Direct download handler - orchestrates direct video downloads
+ * Direct download handler - orchestrates direct video downloads using Chrome downloads API
  */
 
-import { DirectDownloader } from './direct-downloader';
-import { DownloadStateManager } from '../../storage/download-state';
-import { DownloadState, VideoFormat } from '../../types';
-import { logger } from '../../utils/logger';
-import { extractMetadataFromDirectBlob } from '../../metadata/metadata-extractor';
-import { DownloadProgressCallback, DownloadResult } from '../types';
-
-export interface DirectDownloadHandlerOptions {
-  onProgress?: DownloadProgressCallback;
-}
+import { DirectDownloader } from "./direct-downloader";
+import { DownloadStateManager } from "../../storage/download-state";
+import { DownloadState } from "../../types";
+import { logger } from "../../utils/logger";
+import {
+  detectExtensionFromUrl,
+  detectExtensionFromContentType,
+} from "../../metadata/metadata-extractor";
+import {
+  DownloadProgressCallback,
+  DirectDownloadHandlerOptions,
+  DirectDownloadHandlerResult,
+} from "../types";
 
 export class DirectDownloadHandler {
   private readonly onProgress?: DownloadProgressCallback;
@@ -21,12 +24,16 @@ export class DirectDownloadHandler {
   }
 
   /**
-   * Download direct video and return blob with extracted metadata
+   * Download direct video using Chrome downloads API and return file path with extracted metadata
    */
-  async download(url: string, stateId: string): Promise<DownloadResult> {
+  async download(
+    url: string,
+    filename: string,
+    stateId: string,
+  ): Promise<DirectDownloadHandlerResult> {
     const directDownloader = new DirectDownloader({
       onProgress: async (loaded, total, percentage) => {
-        logger.debug(`Direct download: ${percentage.toFixed(2)}%`);
+        logger.info(`Direct download: ${percentage.toFixed(2)}%`);
 
         // Get current download state by ID to update progress
         const currentState = await DownloadStateManager.getDownload(stateId);
@@ -34,7 +41,7 @@ export class DirectDownloadHandler {
           currentState.progress.downloaded = loaded;
           currentState.progress.total = total;
           currentState.progress.percentage = percentage;
-          currentState.progress.stage = 'downloading';
+          currentState.progress.stage = "downloading";
 
           // Calculate speed (bytes per second) - use a rolling window
           const now = Date.now();
@@ -65,28 +72,41 @@ export class DirectDownloadHandler {
       },
     });
 
-    const blob = await directDownloader.download(url);
-    
-    // Extract metadata from direct video blob
-    const contentType = blob.type;
-    const directMetadata = await extractMetadataFromDirectBlob(blob, url, contentType);
-    
-    // Update state with extracted metadata
+    // Get metadata from HTTP headers (HEAD request) before downloading
+    let fileExtension: string | undefined;
+    try {
+      const response = await fetch(url, { method: "HEAD" });
+      const contentType = response.headers.get("content-type") || "";
+      fileExtension =
+        detectExtensionFromUrl(url) ||
+        detectExtensionFromContentType(contentType);
+    } catch (error) {
+      logger.warn(`Failed to get headers for ${url}:`, error);
+      // Fallback to URL-based detection
+      fileExtension = detectExtensionFromUrl(url);
+    }
+
+    // Download using Chrome downloads API
+    const result = await directDownloader.download(url, filename);
+
+    // Update state with extracted metadata and file path
     const currentState = await DownloadStateManager.getDownload(stateId);
     if (currentState) {
-      currentState.metadata = {
-        ...currentState.metadata,
-        fileExtension: directMetadata.extension,
-      };
+      if (fileExtension) {
+        currentState.metadata = {
+          ...currentState.metadata,
+          fileExtension,
+        };
+      }
+      currentState.localPath = result.filePath;
       currentState.updatedAt = Date.now();
       await DownloadStateManager.saveDownload(currentState);
+      this.notifyProgress(currentState);
     }
-    
+
     return {
-      blob,
-      extractedMetadata: {
-        fileExtension: directMetadata.extension,
-      },
+      filePath: result.filePath,
+      fileExtension,
     };
   }
 
@@ -99,4 +119,3 @@ export class DirectDownloadHandler {
     }
   }
 }
-
