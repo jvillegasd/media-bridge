@@ -8,6 +8,7 @@ import { DownloadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
+import { HlsDownloadHandler } from "./hls/hls-download-handler";
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
@@ -20,6 +21,7 @@ export class DownloadManager {
   private readonly onProgress?: DownloadProgressCallback;
   private readonly uploadToDrive: boolean;
   private readonly directDownloadHandler: DirectDownloadHandler;
+  private readonly hlsDownloadHandler: HlsDownloadHandler;
 
   constructor(options: DownloadManagerOptions = {}) {
     this.maxConcurrent = options.maxConcurrent || 3;
@@ -29,6 +31,12 @@ export class DownloadManager {
     // Initialize direct download handler
     this.directDownloadHandler = new DirectDownloadHandler({
       onProgress: this.onProgress,
+    });
+
+    // Initialize HLS download handler
+    this.hlsDownloadHandler = new HlsDownloadHandler({
+      onProgress: this.onProgress,
+      maxConcurrent: this.maxConcurrent,
     });
   }
 
@@ -80,8 +88,12 @@ export class DownloadManager {
           state.id,
         );
       } else if (format === "hls") {
-        // TODO: Implement HLS download handler
-        throw new Error("HLS downloads are not yet implemented");
+        // Use HLS download handler
+        await this.hlsDownloadHandler.download(
+          actualVideoUrl,
+          filename,
+          state.id,
+        );
       } else {
         throw new Error(`Unsupported format: ${format}`);
       }
