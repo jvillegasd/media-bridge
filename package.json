@@ -1,6 +1,6 @@
 {
   "name": "media-bridge-extension",
-  "version": "0.0.9",
+  "version": "0.1.13",
   "type": "module",
   "description": "Download videos (HLS/DASH/direct) and upload to Google Drive",
   "scripts": {

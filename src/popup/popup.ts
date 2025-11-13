@@ -1,12 +1,11 @@
 /**
- * Popup UI logic with tabs for Detected Videos, Downloads, and Errors
+ * Popup UI for displaying detected videos and managing downloads
  */
 
 import { DownloadState, VideoMetadata, VideoFormat } from '../core/types';
 import { DownloadStateManager } from '../core/storage/download-state';
 import { MessageType } from '../shared/messages';
 import { normalizeUrl } from '../core/utils/url-utils';
-import { v4 as uuidv4 } from 'uuid';
 
 
 // DOM elements
@@ -16,15 +15,13 @@ let closeNoVideoNoticeBtn: HTMLButtonElement | null = null;
 let noVideoNotice: HTMLDivElement | null = null;
 let settingsBtn: HTMLButtonElement | null = null;
 let downloadsBtn: HTMLButtonElement | null = null;
+let clearCompletedBtn: HTMLButtonElement | null = null;
 
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
 
-// Detected videos storage
-let detectedVideos: VideoMetadata[] = [];
+let detectedVideos: Record<string, VideoMetadata> = {};
 let downloadStates: DownloadState[] = [];
-
-// Quality selection removed - only direct downloads supported
 
 /**
  * Initialize popup
@@ -37,6 +34,7 @@ async function init() {
   noVideoNotice = document.getElementById('noVideoNotice') as HTMLDivElement;
   settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
   downloadsBtn = document.getElementById('downloadsBtn') as HTMLButtonElement;
+  clearCompletedBtn = document.getElementById('clearCompletedBtn') as HTMLButtonElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
@@ -62,6 +60,9 @@ async function init() {
   if (downloadsBtn) {
     downloadsBtn.addEventListener('click', handleOpenDownloads);
   }
+  if (clearCompletedBtn) {
+    clearCompletedBtn.addEventListener('click', handleClearCompleted);
+  }
 
   // Listen for messages
   chrome.runtime.onMessage.addListener((message) => {
@@ -75,6 +76,10 @@ async function init() {
     
     try {
       if (message.type === MessageType.DOWNLOAD_PROGRESS) {
+        loadDownloadStates();
+        renderDetectedVideos();
+      }
+      if (message.type === MessageType.DOWNLOAD_COMPLETE) {
         loadDownloadStates();
         renderDetectedVideos();
       }
@@ -101,15 +106,31 @@ async function init() {
   // Get detected videos from current tab
   await requestDetectedVideos();
 
-  // Refresh data periodically
-  setInterval(async () => {
+  // Refresh state when popup regains focus (e.g., after being closed by download)
+  // This ensures the UI shows current download progress when reopened
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden) {
+      // Popup became visible - refresh download states
+      await loadDownloadStates();
+      renderDetectedVideos();
+    }
+  });
+
+  // Also refresh on window focus (for better compatibility)
+  window.addEventListener('focus', async () => {
     await loadDownloadStates();
     renderDetectedVideos();
-    await requestDetectedVideos();
+  });
+
+  // Periodic refresh while popup is open (every 2 seconds)
+  // This ensures progress updates even if messages are missed
+  setInterval(async () => {
+    if (!document.hidden) {
+      await loadDownloadStates();
+      renderDetectedVideos();
+    }
   }, 2000);
 }
-
-// Tab switching removed - only video cards shown
 
 function showNoVideoNotice() {
   if (!noVideoNotice) return;
@@ -180,6 +201,73 @@ async function handleOpenDownloads() {
   }
 }
 
+async function handleClearCompleted() {
+  if (!clearCompletedBtn) return;
+  
+  const originalText = clearCompletedBtn.querySelector('span')?.textContent;
+  
+  try {
+    // Disable button and show loading state
+    clearCompletedBtn.disabled = true;
+    if (clearCompletedBtn.querySelector('span')) {
+      clearCompletedBtn.querySelector('span')!.textContent = 'Clearing...';
+    }
+    
+    // Get all downloads
+    const allDownloads = await DownloadStateManager.getAllDownloads();
+    
+    // Filter completed downloads
+    const completedDownloads = allDownloads.filter(
+      download => download.progress.stage === 'completed'
+    );
+    
+    if (completedDownloads.length === 0) {
+      // No completed downloads to clear
+      if (clearCompletedBtn.querySelector('span')) {
+        clearCompletedBtn.querySelector('span')!.textContent = 'No completed';
+        setTimeout(() => {
+          if (clearCompletedBtn) {
+            if (clearCompletedBtn.querySelector('span') && originalText) {
+              clearCompletedBtn.querySelector('span')!.textContent = originalText;
+            }
+            clearCompletedBtn.disabled = false;
+          }
+        }, 1000);
+      }
+      return;
+    }
+    
+    // Remove all completed downloads
+    for (const download of completedDownloads) {
+      await DownloadStateManager.removeDownload(download.id);
+    }
+    
+    // Reload states and refresh UI
+    await loadDownloadStates();
+    renderDetectedVideos();
+    
+    // Show success feedback
+    if (clearCompletedBtn.querySelector('span')) {
+      clearCompletedBtn.querySelector('span')!.textContent = 'Cleared!';
+      setTimeout(() => {
+        if (clearCompletedBtn) {
+          if (clearCompletedBtn.querySelector('span') && originalText) {
+            clearCompletedBtn.querySelector('span')!.textContent = originalText;
+          }
+          clearCompletedBtn.disabled = false;
+        }
+      }, 1000);
+    }
+  } catch (error) {
+    console.error('Failed to clear completed downloads:', error);
+    alert('Failed to clear completed downloads. Please try again.');
+    if (clearCompletedBtn && clearCompletedBtn.querySelector('span') && originalText) {
+      clearCompletedBtn.querySelector('span')!.textContent = originalText;
+    }
+    clearCompletedBtn.disabled = false;
+  }
+}
+
 /**
  * Request detected videos from current tab
  */
@@ -227,23 +315,22 @@ async function requestDetectedVideos() {
       
       // Merge received videos with existing ones
       if (response && response.videos && Array.isArray(response.videos)) {
-        // Clear existing videos from this tab and merge
         const currentUrl = tab.url || '';
-        detectedVideos = detectedVideos.filter(v => !v.pageUrl || !v.pageUrl.includes(currentUrl));
+        const filteredVideos: Record<string, VideoMetadata> = {};
+        for (const [url, video] of Object.entries(detectedVideos)) {
+          if (!video.pageUrl || !video.pageUrl.includes(currentUrl)) {
+            filteredVideos[url] = video;
+          }
+        }
+        detectedVideos = filteredVideos;
         
-        // Add all videos from content script with improved deduplication
         response.videos.forEach((video: VideoMetadata) => {
-          getOrCreateVideoId(video);
-
-          // Use normalized URLs for comparison to prevent duplicates
           const normalizedVideoUrl = normalizeUrl(video.url);
-          const existingIndex = detectedVideos.findIndex(v => normalizeUrl(v.url) === normalizedVideoUrl);
+          const existing = detectedVideos[normalizedVideoUrl];
           
-          if (existingIndex < 0) {
-            detectedVideos.push(video);
+          if (!existing) {
+            detectedVideos[normalizedVideoUrl] = video;
           } else {
-            // Update existing entry with latest metadata if needed
-            const existing = detectedVideos[existingIndex];
             if (video.title && !existing.title) {
               existing.title = video.title;
             }
@@ -275,22 +362,64 @@ async function requestDetectedVideos() {
 }
 
 /**
- * Add detected video
+ * Add or update detected video in store and refresh UI
  */
 function addDetectedVideo(video: VideoMetadata) {
-  // Check if video already exists
-  if (!detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(video.url))) {
-    getOrCreateVideoId(video);
-    detectedVideos.push(video);
+  // Reject unknown formats - don't show them in UI
+  if (video.format === 'unknown') {
+    // If it already exists, remove it
+    const normalizedUrl = normalizeUrl(video.url);
+    if (detectedVideos[normalizedUrl]) {
+      delete detectedVideos[normalizedUrl];
+      renderDetectedVideos();
+    }
+    return;
+  }
+  
+  const normalizedUrl = normalizeUrl(video.url);
+  
+  if (!detectedVideos[normalizedUrl]) {
+    detectedVideos[normalizedUrl] = video;
     renderDetectedVideos();
+  } else {
+    const existing = detectedVideos[normalizedUrl];
+    let updated = false;
+    
+    if (video.title && !existing.title) {
+      existing.title = video.title;
+      updated = true;
+    }
+    if (video.thumbnail && !existing.thumbnail) {
+      existing.thumbnail = video.thumbnail;
+      updated = true;
+    }
+    if (video.resolution && !existing.resolution) {
+      existing.resolution = video.resolution;
+      updated = true;
+    }
+    if (video.width && !existing.width) {
+      existing.width = video.width;
+      updated = true;
+    }
+    if (video.height && !existing.height) {
+      existing.height = video.height;
+      updated = true;
+    }
+    if (video.duration && !existing.duration) {
+      existing.duration = video.duration;
+      updated = true;
+    }
+    
+    if (updated) {
+      renderDetectedVideos();
+    }
   }
 }
 
 /**
- * Load detected videos
+ * Load detected videos from memory and render
  */
 async function loadDetectedVideos() {
-  // Get from storage or use in-memory
   renderDetectedVideos();
 }
 
@@ -302,70 +431,38 @@ async function loadDownloadStates() {
 }
 
 /**
- * Get or generate a unique video ID
- * If video doesn't have an ID, generate one
- */
-function getOrCreateVideoId(video: VideoMetadata): string {
-  // Use existing videoId if available
-  if (video.videoId) {
-    return video.videoId;
-  }
-  
-  // Generate a new UUID v4 for this video instance
-  const videoId = uuidv4();
-  video.videoId = videoId;
-  return videoId;
-}
-
-/**
- * Get download state for a video
- * Uses unique video ID to match only the exact video that was downloaded
+ * Find download state for a video by matching normalized URLs
  */
 function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefined {
-  const videoId = video.videoId || getOrCreateVideoId(video);
-
-  if (!videoId) {
-    return undefined;
-  }
-
-  return downloadStates.find(d => d.metadata?.videoId === videoId);
+  const normalizedUrl = normalizeUrl(video.url);
+  return downloadStates.find(d => {
+    if (!d.metadata) return false;
+    return normalizeUrl(d.metadata.url) === normalizedUrl;
+  });
 }
 
-// Quality selection functions removed - only direct downloads supported
-
 /**
- * Render detected videos with download status
+ * Render detected videos with download status and progress
  */
 function renderDetectedVideos() {
-  // Deduplicate videos before rendering using normalized URLs
-  const seenUrls = new Set<string>();
-  const uniqueVideos = detectedVideos.filter(video => {
-    const normalizedUrl = normalizeUrl(video.url);
-    if (seenUrls.has(normalizedUrl)) {
-      return false;
-    }
-    seenUrls.add(normalizedUrl);
-    return true;
-  });
+  const uniqueVideos = Object.values(detectedVideos);
 
   if (uniqueVideos.length === 0) {
     detectedVideosList.innerHTML = `
       <div class="empty-state">
         No videos detected on this page.<br>
-        Use the input above to paste a video URL manually.
+        Try turning off autoplay, restart the page and starting the video manually.
       </div>
     `;
     return;
   }
 
   detectedVideosList.innerHTML = uniqueVideos.map(video => {
-    const videoId = video.videoId || getOrCreateVideoId(video);
+    const normalizedUrl = normalizeUrl(video.url);
     const downloadState = getDownloadStateForVideo(video);
     const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
     const isCompleted = downloadState && downloadState.progress.stage === 'completed';
     const isFailed = downloadState && downloadState.progress.stage === 'failed';
-    
-    // Get actual file format for display (from download state or video URL)
     const actualFormat = getActualFileFormat(video, downloadState);
 
     const displayResolution = (video.resolution || '').trim();
@@ -375,7 +472,6 @@ function renderDetectedVideos() {
     
     let statusBadge = '';
     let progressBar = '';
-    let speedInfo = '';
     let buttonText = 'Download';
     let buttonDisabled = false;
     
@@ -383,19 +479,70 @@ function renderDetectedVideos() {
       const stage = downloadState.progress.stage;
       statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
       
-      if (downloadState.progress.percentage !== undefined) {
+      // Check if this is an HLS download (format is 'hls')
+      // HLS downloads have speed tracking and show progress bar with real file size
+      // Show detailed progress during downloading and merging stages
+      const isHlsDownload = video.format === 'hls' && (stage === 'downloading' || stage === 'merging');
+      
+      if (isHlsDownload) {
+        const percentage = downloadState.progress.percentage || 0;
+        
+        if (stage === 'downloading') {
+          // HLS downloading progress: progress bar, real file size, and speed
+          const downloaded = downloadState.progress.downloaded || 0;
+          const total = downloadState.progress.total || 0;
+          const speed = downloadState.progress.speed || 0;
+          
+          const downloadedText = formatFileSize(downloaded);
+          const totalText = total > 0 ? formatFileSize(total) : '?';
+          const speedText = formatSpeed(speed);
+          
+          progressBar = `
+            <div class="hls-progress-container">
+              <div class="hls-progress-bar-wrapper">
+                <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+              </div>
+              <div class="hls-progress-info">
+                <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
+                ${speed > 0 ? `<span class="hls-progress-speed">${speedText}</span>` : ''}
+              </div>
+            </div>
+          `;
+        } else if (stage === 'merging') {
+          // HLS merging progress: progress bar restarts at 0% and goes to 100%
+          const message = downloadState.progress.message || 'Merging streams...';
+          // Progress bar starts fresh at 0% for merging phase
+          const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
+          
+          progressBar = `
+            <div class="hls-progress-container">
+              <div class="hls-progress-bar-wrapper">
+                <div class="hls-progress-bar" style="width: ${mergingPercentage}%"></div>
+              </div>
+              <div class="hls-progress-info">
+                <span class="hls-progress-size">${message}</span>
+                <span class="hls-progress-speed">${Math.round(mergingPercentage)}%</span>
+              </div>
+            </div>
+          `;
+        }
+      } else {
+        // Direct download: show animated dots and file size (existing behavior)
+        const fileSize = downloadState.progress.total;
+        const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
+        
         progressBar = `
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: ${downloadState.progress.percentage}%"></div>
+          <div class="downloading-label">
+            <span class="downloading-dots">
+              <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+            </span>
+            ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ''}
           </div>
         `;
       }
       
-      if (downloadState.progress.speed) {
-        speedInfo = `<div class="download-speed">${formatSpeed(downloadState.progress.speed)}</div>`;
-      }
-      
-      buttonText = getStatusText(stage);
+      // Hide button while downloading
+      buttonText = '';
       buttonDisabled = true;
     } else if (isCompleted) {
       statusBadge = `<span class="video-status status-completed">Completed</span>`;
@@ -405,8 +552,6 @@ function renderDetectedVideos() {
       statusBadge = `<span class="video-status status-failed">Failed</span>`;
       buttonText = 'Retry';
     }
-    
-    // Quality selection removed - only direct downloads supported
 
     return `
     <div class="video-item">
@@ -440,23 +585,18 @@ function renderDetectedVideos() {
           </div>
         ` : ''}
         ${progressBar}
-        ${speedInfo}
-        ${downloadState && downloadState.progress.message ? `
-          <div style="font-size: 11px; color: #666; margin-top: 4px;">
-            ${escapeHtml(downloadState.progress.message)}
-          </div>
-        ` : ''}
         ${isFailed && downloadState.progress.error ? `
           <div style="font-size: 11px; color: #d32f2f; margin-top: 4px;">
             ${escapeHtml(downloadState.progress.error)}
           </div>
         ` : ''}
-        <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
-                data-url="${escapeHtml(video.url)}" 
-                data-video-id="${escapeHtml(videoId)}"
-                ${buttonDisabled ? 'disabled' : ''}>
-          ${buttonText}
-        </button>
+        ${!isDownloading ? `
+          <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
+                  data-url="${escapeHtml(video.url)}" 
+                  ${buttonDisabled ? 'disabled' : ''}>
+            ${buttonText}
+          </button>
+        ` : ''}
       </div>
     </div>
   `;
@@ -468,28 +608,14 @@ function renderDetectedVideos() {
       const button = e.target as HTMLButtonElement;
       if (button.disabled) return;
       const url = button.getAttribute('data-url')!;
-      const videoId = button.getAttribute('data-video-id');
-
-      let videoMetadata: VideoMetadata | undefined;
-      if (videoId) {
-        videoMetadata = detectedVideos.find(v => v.videoId === videoId);
-      }
-
-      if (!videoMetadata) {
-        videoMetadata = detectedVideos.find(v => normalizeUrl(v.url) === normalizeUrl(url));
-      }
-
-      // Quality selection removed - only direct downloads supported
+      const normalizedUrl = normalizeUrl(url);
+      const videoMetadata = detectedVideos[normalizedUrl];
       startDownload(url, videoMetadata, { triggerButton: button });
     });
   });
 }
-
-
-// Error handling functions removed - errors tab removed
-
 /**
- * Start download
+ * Start download for a video URL
  */
 async function startDownload(
   url: string,
@@ -516,15 +642,37 @@ async function startDownload(
       }
     }
     
+    // Get current tab information for filename
+    let tabTitle: string | undefined;
+    let website: string | undefined;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) {
+        tabTitle = tab.title || undefined;
+        if (tab.url) {
+          try {
+            const urlObj = new URL(tab.url);
+            website = urlObj.hostname.replace(/^www\./, ''); // Remove www. prefix
+          } catch {
+            // Ignore URL parsing errors
+          }
+        }
+      }
+    } catch (error) {
+      // Ignore errors getting tab info, will use fallback
+      console.debug('Could not get tab information:', error);
+    }
+    
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage({
         type: MessageType.DOWNLOAD_REQUEST,
         payload: {
           url,
-          metadata: videoMetadata, // Include video metadata so download state can track which video was downloaded
+          metadata: videoMetadata,
+          tabTitle,
+          website,
         },
       }, (response) => {
-        // Check for extension context invalidation
         if (chrome.runtime.lastError) {
           const errorMessage = chrome.runtime.lastError.message || '';
           if (errorMessage.includes('Extension context invalidated')) {
@@ -537,7 +685,6 @@ async function startDownload(
         resolve(response);
       });
     }).catch((error: any) => {
-      // Handle extension context invalidated
       if (error?.message?.includes('Extension context invalidated')) {
         throw new Error('Extension context invalidated. Please reload the extension and try again.');
       }
@@ -547,16 +694,11 @@ async function startDownload(
     if (response && response.success) {
       await loadDownloadStates();
       renderDetectedVideos();
-      // Don't show error popup if download started successfully
-      // Progress will be updated via DOWNLOAD_PROGRESS messages
     } else if (response && response.error) {
-      // Only show error if there's actually an error (like duplicate download)
-      // Don't show errors for warnings that don't prevent the download
       const errorMessage = response.error;
       if (!errorMessage.includes('already') && !errorMessage.includes('in progress')) {
         alert(response.error);
       }
-      // Still refresh the UI in case download state changed
       await loadDownloadStates();
       renderDetectedVideos();
       shouldResetButton = true;
@@ -706,7 +848,22 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Format speed in bytes per second to readable format
+ * Format file size in bytes to readable format
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes.toFixed(0)} B`;
+  } else if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  } else if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  } else {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+}
+
+/**
+ * Format download speed in bytes per second to readable format
  */
 function formatSpeed(bytesPerSecond: number): string {
   if (bytesPerSecond < 1024) {

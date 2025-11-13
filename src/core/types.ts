@@ -2,7 +2,7 @@
  * Type definitions for Media Bridge Extension
  */
 
-export type VideoFormat = 'direct' | 'unknown';
+export type VideoFormat = 'direct' | 'hls' | 'unknown';
 
 export interface VideoMetadata {
   url: string;
@@ -45,7 +45,7 @@ export interface DownloadProgress {
 export interface DownloadState {
   id: string;
   url: string;
-  metadata?: VideoMetadata;
+  metadata: VideoMetadata;
   progress: DownloadProgress;
   localPath?: string;
   cloudId?: string;
@@ -73,4 +73,28 @@ export interface MessageResponse {
   error?: string;
 }
 
+export type FetchFn<Data> = () => Promise<Data>;
+
+// HLS Playlist Types
+export type LevelType = 'stream' | 'audio';
+
+export interface Fragment {
+  index: number;
+  key: {
+    iv: string | null;
+    uri: string | null;
+  };
+  uri: string;
+}
+
+export interface Level {
+  type: LevelType;
+  id: string;
+  playlistID: string;
+  uri: string;
+  bitrate?: number;
+  fps?: number;
+  height?: number;
+  width?: number;
+}
 

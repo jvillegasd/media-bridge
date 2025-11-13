@@ -2,6 +2,8 @@
  * Message types for communication between extension components
  */
 
+import { VideoMetadata } from '../core/types';
+
 export enum MessageType {
   // Download messages
   DOWNLOAD_REQUEST = 'DOWNLOAD_REQUEST',
@@ -20,6 +22,7 @@ export enum MessageType {
   CLEAR_DETECTED_VIDEOS = 'CLEAR_DETECTED_VIDEOS',
   START_DOWNLOAD = 'START_DOWNLOAD',
   EXTRACT_VIDEO_URL = 'EXTRACT_VIDEO_URL',
+  NETWORK_URL_DETECTED = 'NETWORK_URL_DETECTED',
   
   // Cloud upload
   UPLOAD_REQUEST = 'UPLOAD_REQUEST',
@@ -35,6 +38,17 @@ export enum MessageType {
   AUTH_REQUEST = 'AUTH_REQUEST',
   AUTH_COMPLETE = 'AUTH_COMPLETE',
   AUTH_FAILED = 'AUTH_FAILED',
+  
+  // Fetch resource (for CORS bypass in content scripts)
+  FETCH_RESOURCE = 'FETCH_RESOURCE',
+  
+  // Offscreen messages
+  OFFSCREEN_PROCESS_HLS = 'OFFSCREEN_PROCESS_HLS',
+  OFFSCREEN_PROCESS_HLS_RESPONSE = 'OFFSCREEN_PROCESS_HLS_RESPONSE',
+  
+  // Icon management
+  SET_ICON_BLUE = 'SET_ICON_BLUE',
+  SET_ICON_GRAY = 'SET_ICON_GRAY',
 }
 
 export interface BaseMessage {
@@ -47,8 +61,10 @@ export interface DownloadRequestMessage extends BaseMessage {
   payload: {
     url: string;
     filename?: string;
-    format?: string;
     uploadToDrive?: boolean;
+    metadata: VideoMetadata;
+    tabTitle?: string;
+    website?: string;
   };
 }
 
