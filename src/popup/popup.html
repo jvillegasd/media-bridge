@@ -323,6 +323,45 @@
       margin-left: 4px;
     }
 
+    /* HLS-specific progress styles */
+    .hls-progress-container {
+      margin-top: 8px;
+    }
+
+    .hls-progress-bar-wrapper {
+      width: 100%;
+      height: 6px;
+      background: #e0e0e0;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+
+    .hls-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #4285f4 0%, #34a853 100%);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    .hls-progress-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #666;
+    }
+
+    .hls-progress-size {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .hls-progress-speed {
+      color: #4285f4;
+      font-weight: 500;
+    }
+
     .downloading-dots .dot {
       animation: dotPulse 1.4s infinite;
       animation-fill-mode: both;

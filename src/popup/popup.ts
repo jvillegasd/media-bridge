@@ -479,18 +479,47 @@ function renderDetectedVideos() {
       const stage = downloadState.progress.stage;
       statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
       
-      // Show animated dots and file size (no "Downloading" text, no button)
-      const fileSize = downloadState.progress.total;
-      const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
+      // Check if this is an HLS download (format is 'hls')
+      // HLS downloads have speed tracking and show progress bar with real file size
+      // Only show detailed progress during downloading stage
+      const isHlsDownload = video.format === 'hls' && stage === 'downloading';
       
-      progressBar = `
-        <div class="downloading-label">
-          <span class="downloading-dots">
-            <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-          </span>
-          ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ''}
-        </div>
-      `;
+      if (isHlsDownload) {
+        // HLS-specific progress: progress bar, real file size, and speed
+        const downloaded = downloadState.progress.downloaded || 0;
+        const total = downloadState.progress.total || 0;
+        const percentage = downloadState.progress.percentage || 0;
+        const speed = downloadState.progress.speed || 0;
+        
+        const downloadedText = formatFileSize(downloaded);
+        const totalText = total > 0 ? formatFileSize(total) : '?';
+        const speedText = formatSpeed(speed);
+        
+        progressBar = `
+          <div class="hls-progress-container">
+            <div class="hls-progress-bar-wrapper">
+              <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+            </div>
+            <div class="hls-progress-info">
+              <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
+              ${speed > 0 ? `<span class="hls-progress-speed">${speedText}</span>` : ''}
+            </div>
+          </div>
+        `;
+      } else {
+        // Direct download: show animated dots and file size (existing behavior)
+        const fileSize = downloadState.progress.total;
+        const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
+        
+        progressBar = `
+          <div class="downloading-label">
+            <span class="downloading-dots">
+              <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+            </span>
+            ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ''}
+          </div>
+        `;
+      }
       
       // Hide button while downloading
       buttonText = '';
@@ -787,6 +816,21 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   } else {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+}
+
+/**
+ * Format download speed in bytes per second to readable format
+ */
+function formatSpeed(bytesPerSecond: number): string {
+  if (bytesPerSecond < 1024) {
+    return `${bytesPerSecond.toFixed(0)} B/s`;
+  } else if (bytesPerSecond < 1024 * 1024) {
+    return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  } else if (bytesPerSecond < 1024 * 1024 * 1024) {
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+  } else {
+    return `${(bytesPerSecond / (1024 * 1024 * 1024)).toFixed(2)} GB/s`;
   }
 }
 

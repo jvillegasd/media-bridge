@@ -74,6 +74,10 @@ export class HlsDownloadHandler {
   private videoLength: number = 0;
   private audioLength: number = 0;
   private downloadId: string = "";
+  private bytesDownloaded: number = 0;
+  private totalBytes: number = 0;
+  private lastUpdateTime: number = 0;
+  private lastDownloadedBytes: number = 0;
 
   constructor(options: HlsDownloadHandlerOptions = {}) {
     this.onProgress = options.onProgress;
@@ -81,12 +85,12 @@ export class HlsDownloadHandler {
   }
 
   /**
-   * Update download progress
+   * Update download progress with bytes and speed calculation
    */
   private async updateProgress(
     stateId: string,
-    downloaded: number,
-    total: number,
+    downloadedBytes: number,
+    totalBytes: number,
     message?: string,
   ): Promise<void> {
     const state = await DownloadStateManager.getDownload(stateId);
@@ -94,25 +98,63 @@ export class HlsDownloadHandler {
       return;
     }
 
-    const percentage = total > 0 ? (downloaded / total) * 100 : 0;
-    state.progress.downloaded = downloaded;
-    state.progress.total = total;
+    const now = Date.now();
+    let speed = 0;
+
+    // Calculate speed if we have previous data
+    if (this.lastUpdateTime > 0 && this.lastDownloadedBytes > 0) {
+      const timeDelta = (now - this.lastUpdateTime) / 1000; // Convert to seconds
+      const bytesDelta = downloadedBytes - this.lastDownloadedBytes;
+      
+      if (timeDelta > 0) {
+        speed = bytesDelta / timeDelta; // bytes per second
+      }
+    }
+
+    // Update tracking variables
+    this.lastUpdateTime = now;
+    this.lastDownloadedBytes = downloadedBytes;
+    this.bytesDownloaded = downloadedBytes;
+    this.totalBytes = totalBytes;
+
+    const percentage = totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
+    state.progress.downloaded = downloadedBytes;
+    state.progress.total = totalBytes;
     state.progress.percentage = percentage;
     state.progress.stage = "downloading";
-    state.progress.message = message || `Downloaded ${downloaded}/${total} fragments`;
+    state.progress.message = message || `Downloaded ${this.formatFileSize(downloadedBytes)}/${this.formatFileSize(totalBytes)}`;
+    state.progress.speed = speed;
+    state.progress.lastUpdateTime = now;
+    state.progress.lastDownloaded = downloadedBytes;
 
     await DownloadStateManager.saveDownload(state);
     this.notifyProgress(state);
   }
 
   /**
+   * Format file size helper
+   */
+  private formatFileSize(bytes: number): string {
+    if (bytes < 1024) {
+      return `${bytes.toFixed(0)} B`;
+    } else if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    } else if (bytes < 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    } else {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+  }
+
+  /**
    * Download a single fragment
+   * Returns the size of the downloaded fragment in bytes
    */
   private async downloadFragment(
     fragment: Fragment,
     downloadId: string,
     fetchAttempts: number = 3,
-  ): Promise<void> {
+  ): Promise<number> {
     try {
       // Fetch the fragment data
       const data = await fetchArrayBuffer(fragment.uri, fetchAttempts);
@@ -126,6 +168,9 @@ export class HlsDownloadHandler {
 
       // Store in IndexedDB
       await storeChunk(downloadId, fragment.index, decryptedData);
+
+      // Return the size of the downloaded fragment
+      return decryptedData.byteLength;
     } catch (error) {
       logger.error(`Failed to download fragment ${fragment.index}:`, error);
       throw error;
@@ -134,29 +179,87 @@ export class HlsDownloadHandler {
 
   /**
    * Download all fragments with concurrency control
+   * Tracks actual bytes downloaded instead of fragment count
+   * Accumulates bytes across multiple calls (for video + audio)
    */
   private async downloadAllFragments(
     fragments: Fragment[],
     downloadId: string,
     stateId: string,
   ): Promise<void> {
-    const total = fragments.length;
-    let downloaded = 0;
+    const totalFragments = fragments.length;
+    let downloadedFragments = 0;
+    let sessionBytesDownloaded = 0; // Bytes downloaded in this session
     const errors: Error[] = [];
 
-    // Download fragments with concurrency limit
+    // Initialize progress tracking only if this is the first call
+    if (this.lastUpdateTime === 0) {
+      this.lastUpdateTime = Date.now();
+      this.lastDownloadedBytes = 0;
+    }
+
+    // Estimate total size by downloading first fragment to get average size
+    // This is a rough estimate, but better than showing fragment count
+    let estimatedTotalBytes = 0;
+    if (fragments.length > 0) {
+      try {
+        const firstFragmentSize = await this.downloadFragment(fragments[0], downloadId);
+        sessionBytesDownloaded += firstFragmentSize;
+        downloadedFragments++;
+        this.bytesDownloaded += firstFragmentSize;
+        
+        // Estimate total based on first fragment size
+        estimatedTotalBytes = firstFragmentSize * totalFragments;
+        // Add to existing total if we already have bytes from previous calls
+        if (this.totalBytes > 0) {
+          estimatedTotalBytes += this.totalBytes - this.bytesDownloaded + firstFragmentSize;
+        }
+        this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
+        
+        await this.updateProgress(
+          stateId,
+          this.bytesDownloaded,
+          this.totalBytes,
+          `Downloading fragments...`,
+        );
+      } catch (error) {
+        logger.error(`Failed to download first fragment for size estimation:`, error);
+        // Fallback: use a default estimate or fragment count
+        estimatedTotalBytes = 0;
+      }
+    }
+
+    // Download remaining fragments with concurrency limit
     const downloadQueue: Promise<void>[] = [];
-    let currentIndex = 0;
+    let currentIndex = 1; // Start from index 1 since we already downloaded the first
 
     const downloadNext = async (): Promise<void> => {
-      while (currentIndex < total) {
+      while (currentIndex < totalFragments) {
         const fragmentIndex = currentIndex++;
         const fragment = fragments[fragmentIndex];
 
         try {
-          await this.downloadFragment(fragment, downloadId);
-          downloaded++;
-          await this.updateProgress(stateId, downloaded, total);
+          const fragmentSize = await this.downloadFragment(fragment, downloadId);
+          sessionBytesDownloaded += fragmentSize;
+          downloadedFragments++;
+          this.bytesDownloaded += fragmentSize;
+          
+          // Update estimated total if we have better data
+          if (estimatedTotalBytes === 0 || downloadedFragments > 0) {
+            const averageFragmentSize = sessionBytesDownloaded / downloadedFragments;
+            const sessionEstimatedTotal = averageFragmentSize * totalFragments;
+            // Update total estimate, preserving bytes from previous sessions
+            const previousBytes = this.bytesDownloaded - sessionBytesDownloaded;
+            estimatedTotalBytes = previousBytes + sessionEstimatedTotal;
+            this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
+          }
+          
+          await this.updateProgress(
+            stateId,
+            this.bytesDownloaded,
+            this.totalBytes,
+            `Downloading fragments...`,
+          );
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           errors.push(err);
@@ -167,20 +270,29 @@ export class HlsDownloadHandler {
     };
 
     // Start concurrent downloads
-    for (let i = 0; i < Math.min(this.maxConcurrent, total); i++) {
+    for (let i = 0; i < Math.min(this.maxConcurrent, totalFragments - downloadedFragments); i++) {
       downloadQueue.push(downloadNext());
     }
 
     // Wait for all downloads to complete
     await Promise.all(downloadQueue);
 
+    // Update final progress with actual total (use current bytes as total if we've downloaded everything)
+    this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
+    await this.updateProgress(
+      stateId,
+      this.bytesDownloaded,
+      this.totalBytes,
+      `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
+    );
+
     // If there were errors, throw an error (but we still have some fragments)
-    if (errors.length > 0 && downloaded === 0) {
+    if (errors.length > 0 && downloadedFragments === 0) {
       throw new Error(`Failed to download any fragments: ${errors[0].message}`);
     }
 
-    if (downloaded < total) {
-      logger.warn(`Downloaded ${downloaded}/${total} fragments. Some fragments failed.`);
+    if (downloadedFragments < totalFragments) {
+      logger.warn(`Downloaded ${downloadedFragments}/${totalFragments} fragments. Some fragments failed.`);
     }
   }
 
@@ -380,8 +492,11 @@ export class HlsDownloadHandler {
 
       logger.info(`Selected video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
 
-      let totalFragments = 0;
-      let downloadedFragments = 0;
+      // Initialize byte tracking
+      this.bytesDownloaded = 0;
+      this.totalBytes = 0;
+      this.lastUpdateTime = 0;
+      this.lastDownloadedBytes = 0;
 
       // Download video fragments
       if (videoPlaylistUrl) {
@@ -401,19 +516,9 @@ export class HlsDownloadHandler {
         }));
 
         this.videoLength = indexedVideoFragments.length;
-        totalFragments += indexedVideoFragments.length;
 
-        // Update progress: downloading video fragments
-        await this.updateProgress(
-          stateId,
-          downloadedFragments,
-          totalFragments,
-          `Downloading ${indexedVideoFragments.length} video fragments...`,
-        );
-
-        // Download video fragments
+        // Download video fragments (downloadAllFragments handles progress internally)
         await this.downloadAllFragments(indexedVideoFragments, this.downloadId, stateId);
-        downloadedFragments += indexedVideoFragments.length;
       }
 
       // Download audio fragments
@@ -434,23 +539,20 @@ export class HlsDownloadHandler {
         }));
 
         this.audioLength = indexedAudioFragments.length;
-        totalFragments += indexedAudioFragments.length;
 
-        // Update progress: downloading audio fragments
-        await this.updateProgress(
-          stateId,
-          downloadedFragments,
-          totalFragments,
-          `Downloading ${indexedAudioFragments.length} audio fragments...`,
-        );
-
-        // Download audio fragments
+        // Continue downloading audio fragments (bytes accumulate from video)
+        // Note: downloadAllFragments will continue from where video left off
         await this.downloadAllFragments(indexedAudioFragments, this.downloadId, stateId);
-        downloadedFragments += indexedAudioFragments.length;
       }
 
       // Update progress: merging with FFmpeg
-      await this.updateProgress(stateId, downloadedFragments, downloadedFragments, "Merging streams...");
+      const mergingState = await DownloadStateManager.getDownload(stateId);
+      if (mergingState) {
+        mergingState.progress.stage = "merging";
+        mergingState.progress.message = "Merging streams...";
+        await DownloadStateManager.saveDownload(mergingState);
+        this.notifyProgress(mergingState);
+      }
 
       // Extract base filename without extension
       const baseFileName = filename.replace(/\.[^/.]+$/, "");
@@ -498,7 +600,8 @@ export class HlsDownloadHandler {
         finalState.progress.stage = "completed";
         finalState.progress.message = "Download completed";
         finalState.progress.percentage = 100;
-        finalState.progress.downloaded = finalState.progress.total || downloadedFragments;
+        // Ensure downloaded equals total for completed state
+        finalState.progress.downloaded = finalState.progress.total || this.bytesDownloaded || 0;
         finalState.updatedAt = Date.now();
         await DownloadStateManager.saveDownload(finalState);
         this.notifyProgress(finalState);
