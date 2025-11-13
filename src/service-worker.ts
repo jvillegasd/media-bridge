@@ -445,14 +445,15 @@ async function handleCancelDownload(id: string) {
 
 /**
  * Set up network interceptor to detect video URLs
- * Intercepts network requests and sends valid video URLs to content scripts
+ * Intercepts completed network requests and sends valid video URLs to content scripts
+ * Using onCompleted ensures the request has finished (better for autoplay scenarios)
  */
 function setupNetworkInterceptor(): void {
-  // Intercept all HTTP/HTTPS requests
-  chrome.webRequest.onBeforeRequest.addListener(
+  // Intercept completed HTTP/HTTPS requests
+  chrome.webRequest.onCompleted.addListener(
     (details) => {
       const url = details.url;
-
+      logger.info(`Network request completed: ${url}`);
       // Detect if this is a video URL
       const format = detectFormatFromUrl(url);
       if (format === "unknown") {
@@ -477,9 +478,15 @@ function setupNetworkInterceptor(): void {
       }
     },
     {
-      urls: ["http://*/*", "https://*/*"],
-      types: ["main_frame", "sub_frame", "xmlhttprequest", "media", "other"],
+      urls: [
+        "http://*/*.m3u8",
+        "https://*/*.m3u8",
+        "http://*/*.m3u8?*",
+        "https://*/*.m3u8?*",
+      ],
+      types: ["xmlhttprequest"],
     },
+    ["responseHeaders"],
   );
 }
 
