@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           'background': resolve(__dirname, 'src/service-worker.ts'),
-          'offscreen': resolve(__dirname, 'src/offscreen.ts'),
+          'offscreen/offscreen': resolve(__dirname, 'src/offscreen/offscreen.html'),
           // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),
           'options/options': resolve(__dirname, 'src/options/options.html'),
@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
               return 'background.js';
             }
             if (chunkInfo.name.includes('offscreen')) {
-              return 'offscreen.js';
+              return 'offscreen/offscreen.js';
             }
             return '[name].js';
           },
@@ -50,6 +50,9 @@ export default defineConfig(({ mode }) => {
               }
               if (assetInfo.name.includes('options')) {
                 return 'options/options.html';
+              }
+              if (assetInfo.name.includes('offscreen')) {
+                return 'offscreen/offscreen.html';
               }
             }
             return '[name].[ext]';
@@ -86,7 +89,7 @@ export default defineConfig(({ mode }) => {
           const htmlMoves = [
             { from: 'dist/src/popup/popup.html', to: 'dist/popup/popup.html' },
             { from: 'dist/src/options/options.html', to: 'dist/options/options.html' },
-            { from: 'offscreen.html', to: 'dist/offscreen.html' },
+            { from: 'dist/src/offscreen/offscreen.html', to: 'dist/offscreen/offscreen.html' },
           ];
           
           htmlMoves.forEach(({ from, to }) => {
@@ -99,14 +102,14 @@ export default defineConfig(({ mode }) => {
           const htmlFiles = [
             'dist/popup/popup.html',
             'dist/options/options.html',
-            'dist/offscreen.html',
+            'dist/offscreen/offscreen.html',
           ];
           
           htmlFiles.forEach((file) => {
             if (existsSync(file)) {
               let content = readFileSync(file, 'utf-8');
               // Replace absolute paths with relative paths
-              content = content.replace(/src="\/(popup|options)\/([^"]+)"/g, 'src="./$2"');
+              content = content.replace(/src="\/(popup|options|offscreen)\/([^"]+)"/g, 'src="./$2"');
               writeFileSync(file, content, 'utf-8');
             }
           });

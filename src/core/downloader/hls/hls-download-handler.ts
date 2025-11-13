@@ -229,9 +229,14 @@ export class HlsDownloadHandler {
           audioLength: this.audioLength,
           filename: fileName,
         },
-      }).catch((error) => {
-        chrome.runtime.onMessage.removeListener(messageListener);
-        reject(new Error(`Failed to send processing request: ${error.message}`));
+      }, (response) => {
+        // Check for errors to prevent "unchecked runtime.lastError" warning
+        if (chrome.runtime.lastError) {
+          chrome.runtime.onMessage.removeListener(messageListener);
+          reject(new Error(`Failed to send processing request: ${chrome.runtime.lastError.message}`));
+          return;
+        }
+        // Response is handled by messageListener
       });
 
       // Set timeout to prevent hanging
@@ -279,10 +284,14 @@ export class HlsDownloadHandler {
 
                   if (item.state === "complete") {
                     // Clean up blob URL after successful download
-                    URL.revokeObjectURL(blobUrl);
+                    if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+                      URL.revokeObjectURL(blobUrl);
+                    }
                     resolve(item.filename);
                   } else if (item.state === "interrupted") {
-                    URL.revokeObjectURL(blobUrl);
+                    if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+                      URL.revokeObjectURL(blobUrl);
+                    }
                     reject(new Error(item.error || "Download interrupted"));
                   } else {
                     // Check again in a bit
@@ -298,7 +307,9 @@ export class HlsDownloadHandler {
       });
     } catch (error) {
       // Clean up blob URL on error
-      URL.revokeObjectURL(blobUrl);
+      if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+        URL.revokeObjectURL(blobUrl);
+      }
       throw error;
     }
   }
@@ -464,8 +475,15 @@ export class HlsDownloadHandler {
         },
       );
 
-      // Update progress: saving
-      await this.updateProgress(stateId, downloadedFragments, downloadedFragments, "Saving file...");
+      // Update progress: saving (set stage to "saving" instead of "downloading")
+      const savingState = await DownloadStateManager.getDownload(stateId);
+      if (savingState) {
+        savingState.progress.stage = "saving";
+        savingState.progress.message = "Saving file...";
+        savingState.progress.percentage = 95; // Close to completion
+        await DownloadStateManager.saveDownload(savingState);
+        this.notifyProgress(savingState);
+      }
 
       // Save to file using blob URL
       const filePath = await this.saveBlobUrlToFile(blobUrl, `${baseFileName}.mp4`, stateId);
@@ -480,9 +498,23 @@ export class HlsDownloadHandler {
         finalState.progress.stage = "completed";
         finalState.progress.message = "Download completed";
         finalState.progress.percentage = 100;
+        finalState.progress.downloaded = finalState.progress.total || downloadedFragments;
         finalState.updatedAt = Date.now();
         await DownloadStateManager.saveDownload(finalState);
         this.notifyProgress(finalState);
+        
+        // Ensure state is persisted by reading it back and verifying
+        const verifyState = await DownloadStateManager.getDownload(stateId);
+        if (verifyState && verifyState.progress.stage !== "completed") {
+          logger.warn(`State verification failed for ${stateId}, retrying...`);
+          verifyState.progress.stage = "completed";
+          verifyState.progress.message = "Download completed";
+          verifyState.progress.percentage = 100;
+          await DownloadStateManager.saveDownload(verifyState);
+          this.notifyProgress(verifyState);
+        }
+      } else {
+        logger.error(`Could not find download state ${stateId} to mark as completed`);
       }
 
       logger.info(`HLS download completed: ${filePath}`);

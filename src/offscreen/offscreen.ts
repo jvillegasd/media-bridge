@@ -5,9 +5,9 @@
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
-import { MessageType } from './shared/messages';
-import { readChunkByIndex } from './core/storage/indexeddb-chunks';
-import { logger } from './core/utils/logger';
+import { MessageType } from '../shared/messages';
+import { readChunkByIndex } from '../core/storage/indexeddb-chunks';
+import { logger } from '../core/utils/logger';
 
 let ffmpegInstance: FFmpeg | null = null;
 
@@ -231,9 +231,14 @@ async function processHLSChunks(
  * Handle messages from service worker
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Only handle OFFSCREEN_PROCESS_HLS messages, ignore others (like responses)
   if (message.type === MessageType.OFFSCREEN_PROCESS_HLS) {
     const { downloadId, videoLength, audioLength, filename } = message.payload;
 
+    // Acknowledge receipt immediately
+    sendResponse({ acknowledged: true });
+
+    // Process asynchronously and send responses via separate messages
     processHLSChunks(
       downloadId,
       videoLength,
@@ -249,8 +254,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             progress,
             message,
           },
-        }).catch(() => {
-          // Ignore errors - service worker might not be listening
+        }, () => {
+          // Check for errors to prevent "unchecked runtime.lastError" warning
+          if (chrome.runtime.lastError) {
+            // Ignore - service worker might not be listening
+          }
         });
       },
     )
@@ -263,8 +271,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             type: 'success',
             blobUrl,
           },
-        }).catch(() => {
-          // Ignore errors
+        }, () => {
+          // Check for errors to prevent "unchecked runtime.lastError" warning
+          if (chrome.runtime.lastError) {
+            // Ignore - service worker might not be listening
+          }
         });
       })
       .catch((error) => {
@@ -276,14 +287,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             type: 'error',
             error: error instanceof Error ? error.message : String(error),
           },
-        }).catch(() => {
-          // Ignore errors
+        }, () => {
+          // Check for errors to prevent "unchecked runtime.lastError" warning
+          if (chrome.runtime.lastError) {
+            // Ignore - service worker might not be listening
+          }
         });
       });
 
-    // Return true to indicate async response
+    // Return true to indicate async response (we called sendResponse above)
     return true;
   }
+  
+  // Return false for messages we don't handle (don't log warnings)
+  return false;
 });
 
 logger.info('Offscreen document script loaded');

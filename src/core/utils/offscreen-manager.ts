@@ -5,7 +5,7 @@
 
 import { logger } from './logger';
 
-const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html';
+const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
 
 /**
  * Check if offscreen document already exists
@@ -49,6 +49,9 @@ export async function createOffscreenDocument(): Promise<void> {
       justification: 'FFmpeg processing for HLS video downloads',
     });
     logger.info('Offscreen document created');
+    
+    // Wait a bit for the offscreen document to fully load
+    await new Promise(resolve => setTimeout(resolve, 100));
   } catch (error) {
     logger.error('Failed to create offscreen document:', error);
     throw error;

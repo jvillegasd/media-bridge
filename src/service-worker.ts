@@ -32,8 +32,6 @@ async function init() {
 function handleInstallation(details: chrome.runtime.InstalledDetails) {
   if (details.reason === "install") {
     logger.info("Extension installed");
-    // Open options page on first install
-    chrome.runtime.openOptionsPage();
   }
 }
 
@@ -229,6 +227,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
 
       default:
+        // Only log warnings for truly unknown message types
+        // Some messages might be handled by other listeners (like content scripts)
         logger.warn(`Unknown message type: ${message.type}`);
         sendResponse({ success: false, error: "Unknown message type" });
         return false;
@@ -462,7 +462,12 @@ function setupNetworkInterceptor(): void {
             type: MessageType.NETWORK_URL_DETECTED,
             payload: { url },
           },
-          (response) => {},
+          (response) => {
+            // Check for errors to prevent "unchecked runtime.lastError" warning
+            if (chrome.runtime.lastError) {
+              // Ignore - content script might not be available or tab closed
+            }
+          },
         );
       }
     },
