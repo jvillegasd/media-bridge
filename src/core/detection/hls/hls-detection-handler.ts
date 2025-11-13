@@ -34,8 +34,11 @@ export class HlsDetectionHandler {
 
       // If it's not a master playlist, don't add it to the UI
       if (!isMaster) {
+        console.log("[Media Bridge] Not a master playlist, skipping");
         return null;
       }
+
+      console.log("[Media Bridge] Is a master playlist, proceeding");
     } catch (error) {
       // If we can't fetch or parse the playlist, don't add it to the UI
       console.debug(
