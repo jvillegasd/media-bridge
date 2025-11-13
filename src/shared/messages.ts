@@ -63,6 +63,8 @@ export interface DownloadRequestMessage extends BaseMessage {
     filename?: string;
     uploadToDrive?: boolean;
     metadata: VideoMetadata;
+    tabTitle?: string;
+    website?: string;
   };
 }
 

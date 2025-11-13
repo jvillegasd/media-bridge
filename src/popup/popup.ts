@@ -642,12 +642,35 @@ async function startDownload(
       }
     }
     
+    // Get current tab information for filename
+    let tabTitle: string | undefined;
+    let website: string | undefined;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) {
+        tabTitle = tab.title || undefined;
+        if (tab.url) {
+          try {
+            const urlObj = new URL(tab.url);
+            website = urlObj.hostname.replace(/^www\./, ''); // Remove www. prefix
+          } catch {
+            // Ignore URL parsing errors
+          }
+        }
+      }
+    } catch (error) {
+      // Ignore errors getting tab info, will use fallback
+      console.debug('Could not get tab information:', error);
+    }
+    
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage({
         type: MessageType.DOWNLOAD_REQUEST,
         payload: {
           url,
           metadata: videoMetadata,
+          tabTitle,
+          website,
         },
       }, (response) => {
         if (chrome.runtime.lastError) {
