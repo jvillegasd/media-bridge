@@ -23,7 +23,6 @@ const activeDownloads = new Map<string, Promise<void>>();
 async function init() {
   logger.info("Service worker initialized");
   chrome.runtime.onInstalled.addListener(handleInstallation);
-  setupNetworkInterceptor();
 }
 
 /**
@@ -194,6 +193,50 @@ async function handleFetchResourceMessage(payload: {
     return [null, error instanceof Error ? error : new Error(String(error))];
   }
 }
+
+/**
+ * Set up network interceptor to detect video URLs
+ * Intercepts completed network requests and sends valid video URLs to content scripts
+ * Using onCompleted ensures the request has finished (better for autoplay scenarios)
+ */
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    const url = details.url;
+    logger.info(`Network request completed: ${url}`);
+    // Detect if this is a video URL
+    const format = detectFormatFromUrl(url);
+    if (format === "unknown") {
+      return;
+    }
+
+    // Send URL to content script in the tab that made the request
+    if (details.tabId && details.tabId > 0) {
+      chrome.tabs.sendMessage(
+        details.tabId,
+        {
+          type: MessageType.NETWORK_URL_DETECTED,
+          payload: { url },
+        },
+        (response) => {
+          // Check for errors to prevent "unchecked runtime.lastError" warning
+          if (chrome.runtime.lastError) {
+            // Ignore - content script might not be available or tab closed
+          }
+        },
+      );
+    }
+  },
+  {
+    urls: [
+      "http://*/*.m3u8",
+      "https://*/*.m3u8",
+      "http://*/*.m3u8?*",
+      "https://*/*.m3u8?*",
+    ],
+    types: ["xmlhttprequest"],
+  },
+  ["responseHeaders"],
+);
 
 /**
  * Handle messages from popup and content scripts
@@ -505,53 +548,6 @@ async function handleSetIconGray(tabId?: number): Promise<void> {
   } catch (error) {
     logger.error("Failed to set gray icon:", error);
   }
-}
-
-/**
- * Set up network interceptor to detect video URLs
- * Intercepts completed network requests and sends valid video URLs to content scripts
- * Using onCompleted ensures the request has finished (better for autoplay scenarios)
- */
-function setupNetworkInterceptor(): void {
-  // Intercept completed HTTP/HTTPS requests
-  chrome.webRequest.onCompleted.addListener(
-    (details) => {
-      const url = details.url;
-      logger.info(`Network request completed: ${url}`);
-      // Detect if this is a video URL
-      const format = detectFormatFromUrl(url);
-      if (format === "unknown") {
-        return;
-      }
-
-      // Send URL to content script in the tab that made the request
-      if (details.tabId && details.tabId > 0) {
-        chrome.tabs.sendMessage(
-          details.tabId,
-          {
-            type: MessageType.NETWORK_URL_DETECTED,
-            payload: { url },
-          },
-          (response) => {
-            // Check for errors to prevent "unchecked runtime.lastError" warning
-            if (chrome.runtime.lastError) {
-              // Ignore - content script might not be available or tab closed
-            }
-          },
-        );
-      }
-    },
-    {
-      urls: [
-        "http://*/*.m3u8",
-        "https://*/*.m3u8",
-        "http://*/*.m3u8?*",
-        "https://*/*.m3u8?*",
-      ],
-      types: ["xmlhttprequest"],
-    },
-    ["responseHeaders"],
-  );
 }
 
 // Initialize service worker
