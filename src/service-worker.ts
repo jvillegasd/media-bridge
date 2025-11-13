@@ -226,6 +226,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleFetchResourceMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.VIDEO_DETECTED:
+        // This message is sent from content script to popup
+        // Service worker doesn't need to handle it, just ignore silently
+        return false;
+
       default:
         // Only log warnings for truly unknown message types
         // Some messages might be handled by other listeners (like content scripts)
