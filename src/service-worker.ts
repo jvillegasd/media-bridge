@@ -231,6 +231,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Service worker doesn't need to handle it, just ignore silently
         return false;
 
+      case MessageType.SET_ICON_BLUE:
+        handleSetIconBlue(sender.tab?.id);
+        return false;
+
+      case MessageType.SET_ICON_GRAY:
+        handleSetIconGray(sender.tab?.id);
+        return false;
+
       default:
         // Only log warnings for truly unknown message types
         // Some messages might be handled by other listeners (like content scripts)
@@ -441,6 +449,62 @@ async function handleCancelDownload(id: string) {
   await DownloadStateManager.saveDownload(download);
 
   logger.info(`Download cancelled: ${id}`);
+}
+
+/**
+ * Set extension icon to blue
+ */
+async function handleSetIconBlue(tabId?: number): Promise<void> {
+  try {
+    const iconPaths = {
+      16: "icons/icon-16.png",
+      48: "icons/icon-48.png",
+      128: "icons/icon-128.png",
+    };
+
+    if (tabId) {
+      // Set icon for specific tab
+      await chrome.action.setIcon({
+        tabId,
+        path: iconPaths,
+      });
+    } else {
+      // Set icon globally
+      await chrome.action.setIcon({
+        path: iconPaths,
+      });
+    }
+  } catch (error) {
+    logger.error("Failed to set blue icon:", error);
+  }
+}
+
+/**
+ * Set extension icon to gray
+ */
+async function handleSetIconGray(tabId?: number): Promise<void> {
+  try {
+    const iconPaths = {
+      16: "icons/icon-gray-16.png",
+      48: "icons/icon-gray-48.png",
+      128: "icons/icon-gray-128.png",
+    };
+
+    if (tabId) {
+      // Set icon for specific tab
+      await chrome.action.setIcon({
+        tabId,
+        path: iconPaths,
+      });
+    } else {
+      // Set icon globally
+      await chrome.action.setIcon({
+        path: iconPaths,
+      });
+    }
+  } catch (error) {
+    logger.error("Failed to set gray icon:", error);
+  }
 }
 
 /**

@@ -45,6 +45,10 @@ export enum MessageType {
   // Offscreen messages
   OFFSCREEN_PROCESS_HLS = 'OFFSCREEN_PROCESS_HLS',
   OFFSCREEN_PROCESS_HLS_RESPONSE = 'OFFSCREEN_PROCESS_HLS_RESPONSE',
+  
+  // Icon management
+  SET_ICON_BLUE = 'SET_ICON_BLUE',
+  SET_ICON_GRAY = 'SET_ICON_GRAY',
 }
 
 export interface BaseMessage {

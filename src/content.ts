@@ -50,6 +50,11 @@ function addDetectedVideo(video: VideoMetadata) {
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
 
+  // Change icon to blue when video is detected
+  safeSendMessage({
+    type: MessageType.SET_ICON_BLUE,
+  });
+
   if (existing) {
     let updated = false;
 
@@ -135,6 +140,11 @@ function handleUrlChange() {
     }
   }
   detectedVideos = currentPageVideos;
+  
+  // Reset icon to gray on URL change
+  safeSendMessage({
+    type: MessageType.SET_ICON_GRAY,
+  });
 }
 
 /**
@@ -163,6 +173,11 @@ function setupUrlChangeMonitor() {
  * Sets up detection manager, performs initial scan, and monitors DOM changes
  */
 function init() {
+  // Reset icon to gray on page load
+  safeSendMessage({
+    type: MessageType.SET_ICON_GRAY,
+  });
+
   detectionManager = new DetectionManager({
     onVideoDetected: (video) => {
       addDetectedVideo(video);
