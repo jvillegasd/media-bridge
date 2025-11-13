@@ -451,7 +451,7 @@ function renderDetectedVideos() {
     detectedVideosList.innerHTML = `
       <div class="empty-state">
         No videos detected on this page.<br>
-        Use the input above to paste a video URL manually.
+        Try turning off autoplay, restart the page and starting the video manually.
       </div>
     `;
     return;
