@@ -481,31 +481,49 @@ function renderDetectedVideos() {
       
       // Check if this is an HLS download (format is 'hls')
       // HLS downloads have speed tracking and show progress bar with real file size
-      // Only show detailed progress during downloading stage
-      const isHlsDownload = video.format === 'hls' && stage === 'downloading';
+      // Show detailed progress during downloading and merging stages
+      const isHlsDownload = video.format === 'hls' && (stage === 'downloading' || stage === 'merging');
       
       if (isHlsDownload) {
-        // HLS-specific progress: progress bar, real file size, and speed
-        const downloaded = downloadState.progress.downloaded || 0;
-        const total = downloadState.progress.total || 0;
         const percentage = downloadState.progress.percentage || 0;
-        const speed = downloadState.progress.speed || 0;
         
-        const downloadedText = formatFileSize(downloaded);
-        const totalText = total > 0 ? formatFileSize(total) : '?';
-        const speedText = formatSpeed(speed);
-        
-        progressBar = `
-          <div class="hls-progress-container">
-            <div class="hls-progress-bar-wrapper">
-              <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+        if (stage === 'downloading') {
+          // HLS downloading progress: progress bar, real file size, and speed
+          const downloaded = downloadState.progress.downloaded || 0;
+          const total = downloadState.progress.total || 0;
+          const speed = downloadState.progress.speed || 0;
+          
+          const downloadedText = formatFileSize(downloaded);
+          const totalText = total > 0 ? formatFileSize(total) : '?';
+          const speedText = formatSpeed(speed);
+          
+          progressBar = `
+            <div class="hls-progress-container">
+              <div class="hls-progress-bar-wrapper">
+                <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+              </div>
+              <div class="hls-progress-info">
+                <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
+                ${speed > 0 ? `<span class="hls-progress-speed">${speedText}</span>` : ''}
+              </div>
             </div>
-            <div class="hls-progress-info">
-              <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
-              ${speed > 0 ? `<span class="hls-progress-speed">${speedText}</span>` : ''}
+          `;
+        } else if (stage === 'merging') {
+          // HLS merging progress: progress bar with percentage
+          const message = downloadState.progress.message || 'Merging streams...';
+          
+          progressBar = `
+            <div class="hls-progress-container">
+              <div class="hls-progress-bar-wrapper">
+                <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+              </div>
+              <div class="hls-progress-info">
+                <span class="hls-progress-size">${message}</span>
+                <span class="hls-progress-speed">${Math.round(percentage)}%</span>
+              </div>
             </div>
-          </div>
-        `;
+          `;
+        }
       } else {
         // Direct download: show animated dots and file size (existing behavior)
         const fileSize = downloadState.progress.total;
