@@ -509,17 +509,19 @@ function renderDetectedVideos() {
             </div>
           `;
         } else if (stage === 'merging') {
-          // HLS merging progress: progress bar with percentage
+          // HLS merging progress: progress bar restarts at 0% and goes to 100%
           const message = downloadState.progress.message || 'Merging streams...';
+          // Progress bar starts fresh at 0% for merging phase
+          const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
           
           progressBar = `
             <div class="hls-progress-container">
               <div class="hls-progress-bar-wrapper">
-                <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+                <div class="hls-progress-bar" style="width: ${mergingPercentage}%"></div>
               </div>
               <div class="hls-progress-info">
                 <span class="hls-progress-size">${message}</span>
-                <span class="hls-progress-speed">${Math.round(percentage)}%</span>
+                <span class="hls-progress-speed">${Math.round(mergingPercentage)}%</span>
               </div>
             </div>
           `;
