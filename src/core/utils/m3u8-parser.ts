@@ -142,9 +142,27 @@ export function isMasterPlaylist(playlistText: string): boolean {
   );
 }
 
+/**
+ * Check if a playlist is a media playlist (contains direct segments)
+ */
+export function isMediaPlaylist(playlistText: string): boolean {
+  const parser = new Parser();
+  parser.push(playlistText);
+  parser.end();
+
+  // Media playlists have segments array with actual segment URIs
+  // They don't have playlists or mediaGroups (those are master playlists)
+  const hasSegments = parser.manifest.segments && parser.manifest.segments.length > 0;
+  const hasNoPlaylists = !parser.manifest.playlists || parser.manifest.playlists.length === 0;
+  const hasNoMediaGroups = !parser.manifest.mediaGroups || Object.keys(parser.manifest.mediaGroups).length === 0;
+
+  return hasSegments && hasNoPlaylists && hasNoMediaGroups;
+}
+
 export const M3u8Parser = {
   parseLevelsPlaylist,
   parseMasterPlaylist,
   isMasterPlaylist,
+  isMediaPlaylist,
 };
 

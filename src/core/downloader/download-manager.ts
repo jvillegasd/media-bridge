@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
 import { HlsDownloadHandler } from "./hls/hls-download-handler";
+import { M3u8DownloadHandler } from "./m3u8/m3u8-download-handler";
 
 export interface DownloadManagerOptions {
   maxConcurrent?: number;
@@ -22,6 +23,7 @@ export class DownloadManager {
   private readonly uploadToDrive: boolean;
   private readonly directDownloadHandler: DirectDownloadHandler;
   private readonly hlsDownloadHandler: HlsDownloadHandler;
+  private readonly m3u8DownloadHandler: M3u8DownloadHandler;
 
   constructor(options: DownloadManagerOptions = {}) {
     this.maxConcurrent = options.maxConcurrent || 3;
@@ -35,6 +37,12 @@ export class DownloadManager {
 
     // Initialize HLS download handler
     this.hlsDownloadHandler = new HlsDownloadHandler({
+      onProgress: this.onProgress,
+      maxConcurrent: this.maxConcurrent,
+    });
+
+    // Initialize M3U8 download handler
+    this.m3u8DownloadHandler = new M3u8DownloadHandler({
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
     });
@@ -90,6 +98,13 @@ export class DownloadManager {
       } else if (format === "hls") {
         // Use HLS download handler
         await this.hlsDownloadHandler.download(
+          actualVideoUrl,
+          filename,
+          state.id,
+        );
+      } else if (format === "m3u8") {
+        // Use M3U8 download handler
+        await this.m3u8DownloadHandler.download(
           actualVideoUrl,
           filename,
           state.id,

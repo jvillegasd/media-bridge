@@ -6,6 +6,7 @@ import { VideoFormat, VideoMetadata } from "../types";
 import { detectFormatFromUrl } from "../utils/url-utils";
 import { DirectDetectionHandler } from "./direct/direct-detection-handler";
 import { HlsDetectionHandler } from "./hls/hls-detection-handler";
+import { M3u8DetectionHandler } from "./m3u8/m3u8-detection-handler";
 
 export interface DetectionManagerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
@@ -15,6 +16,7 @@ export class DetectionManager {
   private onVideoDetected?: (video: VideoMetadata) => void;
   public readonly directHandler: DirectDetectionHandler;
   private hlsHandler: HlsDetectionHandler;
+  private m3u8Handler: M3u8DetectionHandler;
 
   constructor(options: DetectionManagerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
@@ -22,6 +24,9 @@ export class DetectionManager {
       onVideoDetected: (video) => this.handleVideoDetected(video),
     });
     this.hlsHandler = new HlsDetectionHandler({
+      onVideoDetected: (video) => this.handleVideoDetected(video),
+    });
+    this.m3u8Handler = new M3u8DetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
     });
   }
@@ -42,7 +47,17 @@ export class DetectionManager {
         return await this.directHandler.detect(url, videoElement);
 
       case "hls":
-        return await this.hlsHandler.detect(url);
+        // For .m3u8 URLs, try both master playlist (HLS) and media playlist (M3U8) detection
+        // Try HLS (master playlist) first
+        const hlsResult = await this.hlsHandler.detect(url);
+        if (hlsResult) {
+          return hlsResult;
+        }
+        // If not a master playlist, try M3U8 (media playlist)
+        return await this.m3u8Handler.detect(url);
+
+      case "m3u8":
+        return await this.m3u8Handler.detect(url);
 
       case "unknown":
         return null;
@@ -61,7 +76,13 @@ export class DetectionManager {
         break;
 
       case "hls":
+        // For .m3u8 URLs, try both handlers
         this.hlsHandler.handleNetworkRequest(url);
+        this.m3u8Handler.handleNetworkRequest(url);
+        break;
+
+      case "m3u8":
+        this.m3u8Handler.handleNetworkRequest(url);
         break;
 
       case "unknown":
