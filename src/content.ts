@@ -12,6 +12,7 @@ import { logger } from "./core/utils/logger";
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 const sentToPopup = new Set<string>();
+let lastKnownUrl = window.location.href;
 
 function isInIframe(): boolean {
   return window.location !== window.parent.location;
@@ -54,44 +55,6 @@ function addDetectedVideo(video: VideoMetadata) {
 
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
-  const pageUrl = video.pageUrl || window.location.href;
-
-  // If this is a new HLS master playlist, remove any m3u8 entries from the same page
-  if (video.format === "hls" && !existing) {
-    const m3u8Variants = Object.entries(detectedVideos).filter(
-      ([url, v]) => v.format === "m3u8" && v.pageUrl === pageUrl
-    );
-
-    // Remove m3u8 variants from the same page
-    for (const [url, variant] of m3u8Variants) {
-      logger.info("Removing m3u8 variant (HLS master playlist detected)", {
-        m3u8Url: variant.url,
-        hlsMasterUrl: video.url,
-      });
-      delete detectedVideos[url];
-      sentToPopup.delete(url);
-      // Notify popup to remove this entry
-      safeSendMessage({
-        type: MessageType.VIDEO_DETECTED,
-        payload: { ...variant, format: "unknown" as const }, // Send as unknown to trigger removal
-      });
-    }
-  }
-
-  // If this is an m3u8 playlist and there's already an HLS master on the same page, ignore it
-  if (video.format === "m3u8") {
-    const hlsMaster = Object.values(detectedVideos).find(
-      (v) => v.format === "hls" && v.pageUrl === pageUrl
-    );
-
-    if (hlsMaster) {
-      logger.info("Filtering out m3u8 variant (HLS master playlist exists)", {
-        m3u8Url: video.url,
-        hlsMasterUrl: hlsMaster.url,
-      });
-      return;
-    }
-  }
 
   // Change icon to blue when video is detected
   safeSendMessage({
@@ -145,6 +108,11 @@ function addDetectedVideo(video: VideoMetadata) {
       updated = true;
     }
 
+    if (video.pageUrl && video.pageUrl !== existing.pageUrl) {
+      existing.pageUrl = video.pageUrl;
+      updated = true;
+    }
+
     // Only notify popup if metadata was actually updated
     // This prevents unnecessary updates that could cause flickering
     if (updated) {
@@ -180,18 +148,21 @@ function clearSentToPopupTracking() {
  */
 function handleUrlChange() {
   const currentUrl = window.location.href;
+  
+  lastKnownUrl = currentUrl;
   clearSentToPopupTracking();
-  const currentPageVideos: Record<string, VideoMetadata> = {};
-  for (const [url, video] of Object.entries(detectedVideos)) {
-    if (video.pageUrl === currentUrl) {
-      currentPageVideos[url] = video;
-    }
-  }
-  detectedVideos = currentPageVideos;
+  
+  // Clear all detected videos (they're from the previous page)
+  detectedVideos = {};
 
-  // Reset icon to gray on URL change
+  // Reset icon to gray on URL change (popup will refresh and see empty state)
   safeSendMessage({
     type: MessageType.SET_ICON_GRAY,
+  });
+
+  logger.info("Cleared detected videos on URL change", { 
+    newUrl: currentUrl,
+    detectedVideos 
   });
 }
 
@@ -201,6 +172,9 @@ function handleUrlChange() {
 function setupUrlChangeMonitor() {
   // Listen for popstate (back/forward navigation)
   window.addEventListener("popstate", handleUrlChange);
+
+  // Listen for hashchange (hash-based navigation)
+  window.addEventListener("hashchange", handleUrlChange);
 
   // Intercept pushState and replaceState for programmatic navigation
   const originalPushState = history.pushState;
@@ -214,6 +188,19 @@ function setupUrlChangeMonitor() {
     originalReplaceState.apply(history, args);
     handleUrlChange();
   };
+
+  // MutationObserver to detect URL changes via DOM mutations
+  // This catches cases where URL changes but events don't fire
+  new MutationObserver(() => {
+    const url = location.href;
+    if (url !== lastKnownUrl) {
+      lastKnownUrl = url;
+      handleUrlChange();
+    }
+  }).observe(document, { subtree: true, childList: true });
+
+  // Initialize lastKnownUrl on first load
+  lastKnownUrl = window.location.href;
 }
 
 /**
@@ -221,6 +208,10 @@ function setupUrlChangeMonitor() {
  * Sets up detection manager, performs initial scan, and monitors DOM changes
  */
 function init() {
+  // Initialize lastKnownUrl on first load
+  // Note: For full page navigations, content script is reloaded, so this will be the new URL
+  lastKnownUrl = window.location.href;
+
   // Reset icon to gray on page load
   safeSendMessage({
     type: MessageType.SET_ICON_GRAY,

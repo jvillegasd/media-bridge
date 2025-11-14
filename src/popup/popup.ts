@@ -86,6 +86,11 @@ async function init() {
       if (message.type === MessageType.VIDEO_DETECTED) {
         addDetectedVideo(message.payload);
       }
+      if (message.type === MessageType.SET_ICON_GRAY) {
+        // Clear all detected videos when page changes
+        detectedVideos = {};
+        renderDetectedVideos();
+      }
       if (message.type === MessageType.DOWNLOAD_FAILED) {
         loadDownloadStates();
         renderDetectedVideos();
