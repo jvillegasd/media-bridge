@@ -471,8 +471,10 @@ export class M3u8DownloadHandler {
         stateId,
         async (progress, message) => {
           // Update progress during FFmpeg processing
+          // Progress is 0-1, show it as 0-100% for merging phase (restart progress bar)
           const state = await DownloadStateManager.getDownload(stateId);
           if (state) {
+            // Show merging progress as 0-100% (restart progress bar for merging phase)
             state.progress.percentage = progress * 100;
             state.progress.message = message;
             state.progress.stage = "merging";
