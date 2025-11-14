@@ -300,7 +300,7 @@ export class M3u8DownloadHandler {
       // Set up message listener for offscreen responses
       const messageListener = (message: any) => {
         if (
-          message.type === MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE &&
+          message.type === MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE &&
           message.payload?.downloadId === this.downloadId
         ) {
           const { type, blobUrl, error, progress, message: progressMessage } = message.payload;
@@ -320,15 +320,12 @@ export class M3u8DownloadHandler {
 
       chrome.runtime.onMessage.addListener(messageListener);
 
-      // Send processing request
-      // For media playlists, all chunks are stored starting from index 0
-      // They contain combined video+audio, so we treat them as video chunks
+      // Send processing request for M3U8 media playlist
       chrome.runtime.sendMessage({
-        type: MessageType.OFFSCREEN_PROCESS_HLS,
+        type: MessageType.OFFSCREEN_PROCESS_M3U8,
         payload: {
           downloadId: this.downloadId,
-          videoLength: this.fragmentCount, // All fragments are treated as video (combined stream)
-          audioLength: 0, // No separate audio stream in media playlists
+          fragmentCount: this.fragmentCount,
           filename: fileName,
         },
       }, (response) => {
