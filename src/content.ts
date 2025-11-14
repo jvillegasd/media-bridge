@@ -13,6 +13,10 @@ let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 const sentToPopup = new Set<string>();
 
+function isInIframe(): boolean {
+  return window.location !== window.parent.location;
+}
+
 /**
  * Send message to popup with error handling for extension context invalidation
  */
@@ -146,7 +150,7 @@ function handleUrlChange() {
     }
   }
   detectedVideos = currentPageVideos;
-  
+
   // Reset icon to gray on URL change
   safeSendMessage({
     type: MessageType.SET_ICON_GRAY,
@@ -200,6 +204,11 @@ function init() {
  * Listen for messages from popup and service worker
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (isInIframe()) {
+    console.debug("In iframe context");
+    return true;
+  }
+
   // Check if extension context is still valid
   if (chrome.runtime.lastError) {
     const errorMessage = chrome.runtime.lastError.message || "";
@@ -235,8 +244,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", init);
-} else {
-  init();
+if (!isInIframe()) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 }
