@@ -12,7 +12,6 @@ import { logger } from "./core/utils/logger";
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 const sentToPopup = new Set<string>();
-let lastKnownUrl = window.location.href;
 
 function isInIframe(): boolean {
   return window.location !== window.parent.location;
@@ -137,81 +136,10 @@ function addDetectedVideo(video: VideoMetadata) {
 }
 
 /**
- * Clear sent-to-popup tracking to allow re-detection on navigation
- */
-function clearSentToPopupTracking() {
-  sentToPopup.clear();
-}
-
-/**
- * Handle URL change - clear videos from previous page
- */
-function handleUrlChange() {
-  const currentUrl = window.location.href;
-  
-  lastKnownUrl = currentUrl;
-  clearSentToPopupTracking();
-  
-  // Clear all detected videos (they're from the previous page)
-  detectedVideos = {};
-
-  // Reset icon to gray on URL change (popup will refresh and see empty state)
-  safeSendMessage({
-    type: MessageType.SET_ICON_GRAY,
-  });
-
-  logger.info("Cleared detected videos on URL change", { 
-    newUrl: currentUrl,
-    detectedVideos 
-  });
-}
-
-/**
- * Monitor page URL changes and clear videos from previous page
- */
-function setupUrlChangeMonitor() {
-  // Listen for popstate (back/forward navigation)
-  window.addEventListener("popstate", handleUrlChange);
-
-  // Listen for hashchange (hash-based navigation)
-  window.addEventListener("hashchange", handleUrlChange);
-
-  // Intercept pushState and replaceState for programmatic navigation
-  const originalPushState = history.pushState;
-  history.pushState = function (...args) {
-    originalPushState.apply(history, args);
-    handleUrlChange();
-  };
-
-  const originalReplaceState = history.replaceState;
-  history.replaceState = function (...args) {
-    originalReplaceState.apply(history, args);
-    handleUrlChange();
-  };
-
-  // MutationObserver to detect URL changes via DOM mutations
-  // This catches cases where URL changes but events don't fire
-  new MutationObserver(() => {
-    const url = location.href;
-    if (url !== lastKnownUrl) {
-      lastKnownUrl = url;
-      handleUrlChange();
-    }
-  }).observe(document, { subtree: true, childList: true });
-
-  // Initialize lastKnownUrl on first load
-  lastKnownUrl = window.location.href;
-}
-
-/**
  * Initialize content script
  * Sets up detection manager, performs initial scan, and monitors DOM changes
  */
 function init() {
-  // Initialize lastKnownUrl on first load
-  // Note: For full page navigations, content script is reloaded, so this will be the new URL
-  lastKnownUrl = window.location.href;
-
   // Reset icon to gray on page load
   safeSendMessage({
     type: MessageType.SET_ICON_GRAY,
@@ -225,8 +153,6 @@ function init() {
 
   // Initialize all detection mechanisms
   detectionManager.init();
-
-  setupUrlChangeMonitor();
 }
 
 /**

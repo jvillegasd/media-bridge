@@ -87,8 +87,7 @@ async function init() {
         addDetectedVideo(message.payload);
       }
       if (message.type === MessageType.SET_ICON_GRAY) {
-        // Clear all detected videos when page changes
-        detectedVideos = {};
+        // Icon reset - just refresh the display (keep videos until page refresh)
         renderDetectedVideos();
       }
       if (message.type === MessageType.DOWNLOAD_FAILED) {
