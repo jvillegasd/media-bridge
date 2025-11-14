@@ -479,10 +479,10 @@ function renderDetectedVideos() {
       const stage = downloadState.progress.stage;
       statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
       
-      // Check if this is an HLS download (format is 'hls')
-      // HLS downloads have speed tracking and show progress bar with real file size
+      // Check if this is an HLS or M3U8 download (format is 'hls' or 'm3u8')
+      // HLS/M3U8 downloads have speed tracking and show progress bar with real file size
       // Show detailed progress during downloading and merging stages
-      const isHlsDownload = video.format === 'hls' && (stage === 'downloading' || stage === 'merging');
+      const isHlsDownload = (video.format === 'hls' || video.format === 'm3u8') && (stage === 'downloading' || stage === 'merging');
       
       if (isHlsDownload) {
         const percentage = downloadState.progress.percentage || 0;
