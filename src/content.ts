@@ -7,6 +7,7 @@ import { MessageType } from "./shared/messages";
 import { VideoMetadata } from "./core/types";
 import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
+import { logger } from "./core/utils/logger";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
@@ -54,9 +55,13 @@ function addDetectedVideo(video: VideoMetadata) {
   safeSendMessage({
     type: MessageType.SET_ICON_BLUE,
   });
+  logger.info("normalizedUrl", { normalizedUrl });
+  logger.info("Adding detected video", { video });
+  logger.info("already detected videos", { detectedVideos });
 
   if (existing) {
     let updated = false;
+    logger.info("Updating video metadata", { existing, video });
 
     if (
       video.title === document.title ||
@@ -98,8 +103,9 @@ function addDetectedVideo(video: VideoMetadata) {
       updated = true;
     }
 
-    if (updated && !sentToPopup.has(normalizedUrl)) {
-      sentToPopup.add(normalizedUrl);
+    // Only notify popup if metadata was actually updated
+    // This prevents unnecessary updates that could cause flickering
+    if (updated) {
       safeSendMessage({
         type: MessageType.VIDEO_DETECTED,
         payload: existing,

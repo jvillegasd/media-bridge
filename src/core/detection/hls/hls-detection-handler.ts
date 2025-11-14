@@ -29,16 +29,16 @@ export class HlsDetectionHandler {
     // Validate that this is a master playlist before proceeding
     try {
       const playlistText = await fetchText(url, 1);
-      console.log("[Media Bridge] HLS playlist text:", playlistText);
+      console.debug("[Media Bridge] HLS playlist text:", playlistText);
       const isMaster = isMasterPlaylist(playlistText);
 
       // If it's not a master playlist, don't add it to the UI
       if (!isMaster) {
-        console.log("[Media Bridge] Not a master playlist, skipping");
+        console.log("[Media Bridge] Not a HLS master playlist, skipping");
         return null;
       }
 
-      console.log("[Media Bridge] Is a master playlist, proceeding");
+      console.log("[Media Bridge] Is a HLS master playlist, proceeding");
     } catch (error) {
       // If we can't fetch or parse the playlist, don't add it to the UI
       console.debug(
@@ -119,15 +119,6 @@ export class HlsDetectionHandler {
           metadata.thumbnail = thumbnailUrl;
           break;
         }
-      }
-    }
-
-    // Try to find a more specific title from the page
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle) {
-      const ogTitleContent = (ogTitle as HTMLMetaElement).content?.trim();
-      if (ogTitleContent && ogTitleContent.length > 0) {
-        metadata.title = ogTitleContent;
       }
     }
 

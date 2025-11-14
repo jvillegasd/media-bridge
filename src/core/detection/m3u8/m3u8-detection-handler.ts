@@ -5,6 +5,7 @@
 import { VideoMetadata } from "../../types";
 import { isMediaPlaylist } from "../../utils/m3u8-parser";
 import { fetchText } from "../../utils/fetch-utils";
+import { logger } from "../../utils/logger";
 
 export interface M3u8DetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
@@ -29,16 +30,16 @@ export class M3u8DetectionHandler {
     // Validate that this is a media playlist (not a master playlist) before proceeding
     try {
       const playlistText = await fetchText(url, 1);
-      console.log("[Media Bridge] M3U8 playlist text:", playlistText);
+      console.debug("[Media Bridge] M3U8 playlist text:", playlistText);
       const isMedia = isMediaPlaylist(playlistText);
 
       // If it's not a media playlist, don't add it to the UI
       if (!isMedia) {
-        console.log("[Media Bridge] Not a media playlist, skipping");
+        console.log("[Media Bridge] Not a M3U8 media playlist, skipping");
         return null;
       }
 
-      console.log("[Media Bridge] Is a media playlist, proceeding");
+      console.log("[Media Bridge] Is a M3U8 media playlist, proceeding");
     } catch (error) {
       // If we can't fetch or parse the playlist, don't add it to the UI
       console.debug(
@@ -99,6 +100,8 @@ export class M3u8DetectionHandler {
       fileExtension: "m3u8",
     };
 
+    logger.info("Extracting metadata", { metadata });
+
     // Try to find thumbnail in page
     const thumbnailSelectors = [
       'meta[property="og:image"]',
@@ -119,15 +122,6 @@ export class M3u8DetectionHandler {
           metadata.thumbnail = thumbnailUrl;
           break;
         }
-      }
-    }
-
-    // Try to find a more specific title from the page
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle) {
-      const ogTitleContent = (ogTitle as HTMLMetaElement).content?.trim();
-      if (ogTitleContent && ogTitleContent.length > 0) {
-        metadata.title = ogTitleContent;
       }
     }
 
