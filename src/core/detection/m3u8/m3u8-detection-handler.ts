@@ -100,8 +100,6 @@ export class M3u8DetectionHandler {
       fileExtension: "m3u8",
     };
 
-    logger.info("Extracting metadata", { metadata });
-
     // Try to find thumbnail in page
     const thumbnailSelectors = [
       'meta[property="og:image"]',
