@@ -54,6 +54,44 @@ function addDetectedVideo(video: VideoMetadata) {
 
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
+  const pageUrl = video.pageUrl || window.location.href;
+
+  // If this is a new HLS master playlist, remove any m3u8 entries from the same page
+  if (video.format === "hls" && !existing) {
+    const m3u8Variants = Object.entries(detectedVideos).filter(
+      ([url, v]) => v.format === "m3u8" && v.pageUrl === pageUrl
+    );
+
+    // Remove m3u8 variants from the same page
+    for (const [url, variant] of m3u8Variants) {
+      logger.info("Removing m3u8 variant (HLS master playlist detected)", {
+        m3u8Url: variant.url,
+        hlsMasterUrl: video.url,
+      });
+      delete detectedVideos[url];
+      sentToPopup.delete(url);
+      // Notify popup to remove this entry
+      safeSendMessage({
+        type: MessageType.VIDEO_DETECTED,
+        payload: { ...variant, format: "unknown" as const }, // Send as unknown to trigger removal
+      });
+    }
+  }
+
+  // If this is an m3u8 playlist and there's already an HLS master on the same page, ignore it
+  if (video.format === "m3u8") {
+    const hlsMaster = Object.values(detectedVideos).find(
+      (v) => v.format === "hls" && v.pageUrl === pageUrl
+    );
+
+    if (hlsMaster) {
+      logger.info("Filtering out m3u8 variant (HLS master playlist exists)", {
+        m3u8Url: video.url,
+        hlsMasterUrl: hlsMaster.url,
+      });
+      return;
+    }
+  }
 
   // Change icon to blue when video is detected
   safeSendMessage({
