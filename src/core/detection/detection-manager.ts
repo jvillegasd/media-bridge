@@ -3,6 +3,9 @@
  */
 
 import { VideoFormat, VideoMetadata } from "../types";
+import { fetchText } from "../utils/fetch-utils";
+import { logger } from "../utils/logger";
+import { isMasterPlaylist } from "../utils/m3u8-parser";
 import { detectFormatFromUrl } from "../utils/url-utils";
 import { DirectDetectionHandler } from "./direct/direct-detection-handler";
 import { HlsDetectionHandler } from "./hls/hls-detection-handler";
@@ -32,32 +35,6 @@ export class DetectionManager {
   }
 
   /**
-   * Detect video from URL
-   */
-  async detectFromUrl(
-    url: string,
-    videoElement?: HTMLVideoElement,
-  ): Promise<VideoMetadata | null> {
-    // Detect format
-    const format: VideoFormat = detectFormatFromUrl(url);
-
-    // Route to appropriate handler based on format
-    switch (format) {
-      case "direct":
-        return await this.directHandler.detect(url, videoElement);
-
-      case "hls":
-        return await this.hlsHandler.detect(url);
-
-      case "m3u8":
-        return await this.m3u8Handler.detect(url);
-
-      case "unknown":
-        return null;
-    }
-  }
-
-  /**
    * Detect videos from network request
    */
   handleNetworkRequest(url: string): void {
@@ -65,19 +42,17 @@ export class DetectionManager {
 
     switch (format) {
       case "direct":
+        logger.info("[Media Bridge] Direct video detected", { url });
         this.directHandler.handleNetworkRequest(url);
         break;
 
       case "hls":
-        this.hlsHandler.handleNetworkRequest(url);
+        this.handleHlsNetworkRequest(url);
         break;
 
-      case "m3u8":
-        this.m3u8Handler.handleNetworkRequest(url);
-        break;
-
-      case "unknown":
+      default:
         // Reject unknown formats - don't process them
+        logger.info("[Media Bridge] Unknown format detected", { url });
         break;
     }
   }
@@ -101,6 +76,26 @@ export class DetectionManager {
   private handleVideoDetected(video: VideoMetadata): void {
     if (this.onVideoDetected) {
       this.onVideoDetected(video);
+    }
+  }
+
+  private async handleHlsNetworkRequest(url: string): Promise<void> {
+    try {
+      const playlistText = await fetchText(url, 1);
+      logger.info("[Media Bridge] HLS playlist text", { playlistText });
+
+      if (isMasterPlaylist(playlistText)) {
+        logger.debug("[Media Bridge] HLS Master Playlist detected", url);
+        this.hlsHandler.handleNetworkRequest(url);
+      } else {
+        logger.debug("[Media Bridge] M3U8 Media Playlist detected", url);
+        this.m3u8Handler.handleNetworkRequest(url);
+      }
+    } catch (error) {
+      logger.error("[Media Bridge] Error handling HLS network request", {
+        url,
+        error,
+      });
     }
   }
 }

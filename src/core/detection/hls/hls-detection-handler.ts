@@ -29,16 +29,16 @@ export class HlsDetectionHandler {
     // Validate that this is a master playlist before proceeding
     try {
       const playlistText = await fetchText(url, 1);
-      console.debug("[Media Bridge] HLS playlist text:", playlistText);
+      console.debug("[Media Bridge] HLS Master Playlist text:", playlistText);
       const isMaster = isMasterPlaylist(playlistText);
 
       // If it's not a master playlist, don't add it to the UI
       if (!isMaster) {
-        console.log("[Media Bridge] Not a HLS master playlist, skipping");
+        console.warn("[Media Bridge] Not a HLS Master Playlist, skipping");
         return null;
       }
 
-      console.log("[Media Bridge] Is a HLS master playlist, proceeding");
+      console.log("[Media Bridge] Is a HLS Master Playlist, proceeding");
     } catch (error) {
       // If we can't fetch or parse the playlist, don't add it to the UI
       console.debug(

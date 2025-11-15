@@ -55,13 +55,12 @@ function addDetectedVideo(video: VideoMetadata) {
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
 
+  logger.debug("[Media Bridge] normalized URL", normalizedUrl);
+
   // Change icon to blue when video is detected
   safeSendMessage({
     type: MessageType.SET_ICON_BLUE,
   });
-  logger.info("normalizedUrl", { normalizedUrl });
-  logger.info("Adding detected video", { video });
-  logger.info("already detected videos", { detectedVideos });
 
   if (existing) {
     let updated = false;
