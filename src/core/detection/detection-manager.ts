@@ -47,14 +47,7 @@ export class DetectionManager {
         return await this.directHandler.detect(url, videoElement);
 
       case "hls":
-        // For .m3u8 URLs, try both master playlist (HLS) and media playlist (M3U8) detection
-        // Try HLS (master playlist) first
-        const hlsResult = await this.hlsHandler.detect(url);
-        if (hlsResult) {
-          return hlsResult;
-        }
-        // If not a master playlist, try M3U8 (media playlist)
-        return await this.m3u8Handler.detect(url);
+        return await this.hlsHandler.detect(url);
 
       case "m3u8":
         return await this.m3u8Handler.detect(url);
@@ -76,9 +69,7 @@ export class DetectionManager {
         break;
 
       case "hls":
-        // For .m3u8 URLs, try both handlers
         this.hlsHandler.handleNetworkRequest(url);
-        this.m3u8Handler.handleNetworkRequest(url);
         break;
 
       case "m3u8":

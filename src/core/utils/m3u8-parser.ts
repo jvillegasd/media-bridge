@@ -6,6 +6,8 @@ import { Parser } from 'm3u8-parser';
 import { buildAbsoluteURL } from 'url-toolkit';
 import { v4 as uuidv4 } from 'uuid';
 import { Fragment, Level, LevelType } from '../types';
+import { normalizeUrl } from './url-utils';
+import { logger } from './logger';
 
 /**
  * Parse a level playlist into fragments
@@ -159,10 +161,47 @@ export function isMediaPlaylist(playlistText: string): boolean {
   return hasSegments && hasNoPlaylists && hasNoMediaGroups;
 }
 
+/**
+ * Check if a media playlist belongs to a specific master playlist
+ * 
+ * This function determines membership by comparing URLs:
+ * 1. Parses the master playlist to extract all variant URIs
+ * 2. Resolves variant URIs into full URLs (relative to master playlist base URL)
+ * 3. Compares the media playlist URL against all variant URLs
+ * 4. Returns true if there's a match
+ * 
+ * @param masterPlaylistText - The master playlist content as text
+ * @param masterPlaylistBaseUrl - The base URL of the master playlist (used to resolve relative URIs)
+ * @param mediaPlaylistUrl - The URL of the media playlist to check
+ * @returns true if the media playlist belongs to the master playlist, false otherwise
+ */
+export function belongsToMasterPlaylist(
+  masterPlaylistText: string,
+  masterPlaylistBaseUrl: string,
+  mediaPlaylistUrl: string
+): boolean {
+  // Parse the master playlist to get all variant levels
+  const levels = parseMasterPlaylist(masterPlaylistText, masterPlaylistBaseUrl);
+  
+  // Normalize the media playlist URL for comparison
+  const normalizedMediaUrl = normalizeUrl(mediaPlaylistUrl);
+  
+  logger.info("normalizedMediaUrl", { normalizedMediaUrl });
+  logger.info("levels", { levels });
+
+
+  // Check if the media playlist URL matches any variant URL from the master playlist
+  return levels.some((level) => {
+    const normalizedVariantUrl = normalizeUrl(level.uri);
+    return normalizedVariantUrl === normalizedMediaUrl;
+  });
+}
+
 export const M3u8Parser = {
   parseLevelsPlaylist,
   parseMasterPlaylist,
   isMasterPlaylist,
   isMediaPlaylist,
+  belongsToMasterPlaylist,
 };
 
