@@ -1362,7 +1362,7 @@ async function handleLoadHlsPlaylist() {
           audioLevels.forEach((level, index) => {
             const option = document.createElement('option');
             option.value = level.uri;
-            option.textContent = `Audio ${index + 1}${level.bitrate ? ` • ${(level.bitrate / 1000).toFixed(0)} kbps` : ''}`;
+            option.textContent = level.id;
             option.setAttribute('data-level-index', index.toString());
             audioQualitySelect!.appendChild(option);
           });
