@@ -39,88 +39,138 @@ export class HlsDetectionHandler {
    * Detect HLS playlist from URL
    */
   async detect(url: string): Promise<VideoMetadata | null> {
-    // Check if URL is an HLS playlist URL
     if (!this.isHlsUrl(url)) {
       return null;
     }
 
     try {
-      const playlistText = await fetchText(url, 1);
+      const playlistText = await this.fetchPlaylistText(url);
       const normalizedUrl = normalizeUrl(url);
       const isMaster = isMasterPlaylist(playlistText);
       const isMedia = isMediaPlaylist(playlistText);
 
-      // Check if this media playlist belongs to any tracked master playlist
       if (isMedia) {
-        const belongsToMaster =
-          this.checkIfBelongsToMasterPlaylist(normalizedUrl);
-        if (belongsToMaster) {
-          logger.debug(
-            "[Media Bridge] M3U8 media playlist belongs to a master playlist, removing it",
-            { url },
-          );
-          // Remove this media playlist from detected videos
-          if (this.onVideoRemoved) {
-            this.onVideoRemoved(normalizedUrl);
-          }
-          return null;
-        }
-
-        // It's a standalone media playlist, add it as M3U8 format
-        logger.info("[Media Bridge] Detected standalone M3U8 media playlist", {
-          url,
-        });
-        const metadata = await this.extractMetadata(url, "m3u8");
-
-        if (metadata && this.onVideoDetected) {
-          this.onVideoDetected(metadata);
-        }
-
-        return metadata;
+        return await this.handleMediaPlaylist(url, normalizedUrl);
       }
 
-      // Handle master playlist
       if (isMaster) {
-        logger.info("[Media Bridge] Detected HLS Master Playlist", { url });
-
-        // Track this master playlist and its variants
-        const levels = parseMasterPlaylist(playlistText, url);
-        const variantUrls = new Set<string>();
-        levels.forEach((level) => {
-          const normalizedVariantUrl = normalizeUrl(level.uri);
-          variantUrls.add(normalizedVariantUrl);
-        });
-
-        this.masterPlaylists.set(normalizedUrl, {
-          url,
-          variantUrls,
-          playlistText,
-        });
-
-        // Check if any existing detected videos are variants of this master playlist
-        this.removeVariantVideos(variantUrls);
-
-        // Extract metadata for master playlist
-        const metadata = await this.extractMetadata(url, "hls");
-
-        if (metadata && this.onVideoDetected) {
-          this.onVideoDetected(metadata);
-        }
-
-        return metadata;
+        return await this.handleMasterPlaylist(url, normalizedUrl, playlistText);
       }
 
-      // Not a master or media playlist, skip
       logger.warn(
         "[Media Bridge] HLS URL is neither master nor media playlist, skipping",
         { url },
       );
       return null;
     } catch (error) {
-      // If we can't fetch or parse the playlist, don't add it to the UI
-      logger.debug("[Media Bridge] Failed to validate HLS playlist:", error);
+      logger.error("[Media Bridge] Failed to validate HLS playlist:", error);
       return null;
     }
+  }
+
+  /**
+   * Fetch playlist text from URL
+   */
+  private async fetchPlaylistText(url: string): Promise<string> {
+    return await fetchText(url, 1);
+  }
+
+  /**
+   * Handle media playlist detection
+   */
+  private async handleMediaPlaylist(
+    url: string,
+    normalizedUrl: string,
+  ): Promise<VideoMetadata | null> {
+    const belongsToMaster =
+      this.checkIfBelongsToMasterPlaylist(normalizedUrl);
+
+    if (belongsToMaster) {
+      logger.debug(
+        "[Media Bridge] M3U8 media playlist belongs to a master playlist, removing it",
+        { url },
+      );
+      this.removeDetectedVideo(normalizedUrl);
+      return null;
+    }
+
+    // It's a standalone media playlist, add it as M3U8 format
+    logger.info("[Media Bridge] Detected standalone M3U8 media playlist", {
+      url,
+    });
+    return await this.addDetectedVideo(url, "m3u8");
+  }
+
+  /**
+   * Handle master playlist detection
+   */
+  private async handleMasterPlaylist(
+    url: string,
+    normalizedUrl: string,
+    playlistText: string,
+  ): Promise<VideoMetadata | null> {
+    logger.info("[Media Bridge] Detected HLS Master Playlist", { url });
+
+    const variantUrls = this.trackMasterPlaylist(
+      url,
+      normalizedUrl,
+      playlistText,
+    );
+
+    // Remove any existing detected videos that are variants of this master playlist
+    this.removeVariantVideos(variantUrls);
+
+    return await this.addDetectedVideo(url, "hls");
+  }
+
+  /**
+   * Track master playlist and extract variant URLs
+   */
+  private trackMasterPlaylist(
+    url: string,
+    normalizedUrl: string,
+    playlistText: string,
+  ): Set<string> {
+    const levels = parseMasterPlaylist(playlistText, url);
+    const variantUrls = new Set<string>();
+
+    levels.forEach((level) => {
+      const normalizedVariantUrl = normalizeUrl(level.uri);
+      variantUrls.add(normalizedVariantUrl);
+    });
+
+    this.masterPlaylists.set(normalizedUrl, {
+      url,
+      variantUrls,
+      playlistText,
+    });
+
+    return variantUrls;
+  }
+
+  /**
+   * Remove detected video if callback is available
+   */
+  private removeDetectedVideo(normalizedUrl: string): void {
+    if (this.onVideoRemoved) {
+      this.onVideoRemoved(normalizedUrl);
+    }
+  }
+
+  /**
+   * Extract metadata and notify about detected video
+   */
+  private async addDetectedVideo(
+    url: string,
+    format: "hls" | "m3u8",
+  ): Promise<VideoMetadata | null> {
+    const metadata = await this.extractMetadata(url, format);
+
+    if (metadata && this.onVideoDetected) {
+      this.onVideoDetected(metadata);
+    }
+
+    return metadata;
   }
 
   /**
@@ -172,7 +222,7 @@ export class HlsDetectionHandler {
           return true;
         }
       } catch (error) {
-        logger.debug(
+        logger.error(
           "[Media Bridge] Error checking master playlist membership",
           { error },
         );
