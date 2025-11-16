@@ -131,11 +131,13 @@ async function init() {
         await loadDownloadStates();
         renderDetectedVideos();
         renderManualHlsProgress();
+        updateManualHlsFormState();
       }
       if (message.type === MessageType.DOWNLOAD_COMPLETE) {
         await loadDownloadStates();
         renderDetectedVideos();
         renderManualHlsProgress();
+        updateManualHlsFormState();
       }
       if (message.type === MessageType.VIDEO_DETECTED) {
         addDetectedVideo(message.payload);
@@ -151,6 +153,7 @@ async function init() {
         await loadDownloadStates();
         renderDetectedVideos();
         renderManualHlsProgress();
+        updateManualHlsFormState();
         // Log error for debugging
         if (message.payload && message.payload.error) {
           console.warn('Download failed:', message.payload.error);
@@ -191,6 +194,7 @@ async function init() {
       await loadDownloadStates();
       renderDetectedVideos();
       renderManualHlsProgress();
+      updateManualHlsFormState();
     }
   }, 2000);
 }
@@ -1113,6 +1117,7 @@ function switchTab(tabName: 'auto' | 'manual') {
     
     // Render progress if there's an active download
     renderManualHlsProgress();
+    updateManualHlsFormState();
   }
 }
 
@@ -1150,6 +1155,65 @@ function resetManualHlsForm() {
     manualHlsProgress.style.display = 'none';
     manualHlsProgress.innerHTML = '';
   }
+  // Update form state after reset
+  updateManualHlsFormState();
+}
+
+/**
+ * Update manual HLS form state based on download status and selections
+ */
+function updateManualHlsFormState() {
+  let isDownloading = false;
+  
+  // Check if there's an active download
+  if (currentManualHlsUrl) {
+    const normalizedUrl = normalizeUrl(currentManualHlsUrl);
+    const downloadState = downloadStates.find(d => {
+      if (!d.metadata) return false;
+      return normalizeUrl(d.metadata.url) === normalizedUrl;
+    });
+    
+    if (downloadState) {
+      isDownloading = downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
+    }
+  }
+  
+  // Update form elements based on download status
+  if (hlsUrlInput) hlsUrlInput.disabled = isDownloading;
+  if (loadHlsPlaylistBtn) loadHlsPlaylistBtn.disabled = isDownloading;
+  if (videoQualitySelect) {
+    videoQualitySelect.disabled = isDownloading || videoQualitySelect.options.length <= 1;
+  }
+  if (audioQualitySelect) {
+    audioQualitySelect.disabled = isDownloading || audioQualitySelect.options.length <= 1;
+  }
+  
+  // Update download button state
+  if (!startHlsDownloadBtn) return;
+  
+  // Disable button while downloading
+  if (isDownloading) {
+    startHlsDownloadBtn.disabled = true;
+    return;
+  }
+  
+  // If it's a media playlist, button is enabled after loading
+  if (isMediaPlaylistMode) {
+    startHlsDownloadBtn.disabled = false;
+    return;
+  }
+  
+  // For master playlists, check if at least one quality is selected
+  if (!videoQualitySelect || !audioQualitySelect) {
+    startHlsDownloadBtn.disabled = true;
+    return;
+  }
+  
+  const videoSelected = videoQualitySelect.value !== '';
+  const audioSelected = audioQualitySelect.value !== '';
+  
+  // Enable button if at least one quality is selected
+  startHlsDownloadBtn.disabled = !(videoSelected || audioSelected);
 }
 
 /**
@@ -1157,6 +1221,7 @@ function resetManualHlsForm() {
  */
 function renderManualHlsProgress() {
   if (!manualHlsProgress || !currentManualHlsUrl) {
+    updateManualHlsFormState();
     return;
   }
 
@@ -1170,6 +1235,7 @@ function renderManualHlsProgress() {
     if (manualHlsProgress) {
       manualHlsProgress.style.display = 'none';
     }
+    updateManualHlsFormState();
     return;
   }
 
@@ -1181,11 +1247,15 @@ function renderManualHlsProgress() {
     if (manualHlsProgress) {
       manualHlsProgress.style.display = 'none';
     }
+    updateManualHlsFormState();
     return;
   }
 
   if (!manualHlsProgress) return;
   manualHlsProgress.style.display = 'block';
+  
+  // Update form state based on download status
+  updateManualHlsFormState();
 
   const stage = downloadState.progress.stage;
   const statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
@@ -1305,9 +1375,6 @@ async function handleLoadHlsPlaylist() {
   if (hlsQualitySelection) {
     hlsQualitySelection.style.display = 'none';
   }
-  if (startHlsDownloadBtn) {
-    startHlsDownloadBtn.disabled = true;
-  }
   
   try {
     // Fetch playlist using normalized URL
@@ -1322,10 +1389,6 @@ async function handleLoadHlsPlaylist() {
       }
       if (hlsQualitySelection) {
         hlsQualitySelection.style.display = 'none';
-      }
-      // Enable download button for media playlist
-      if (startHlsDownloadBtn) {
-        startHlsDownloadBtn.disabled = false;
       }
     } else if (isMasterPlaylist(playlistText)) {
       // It's a master playlist - show quality selection
@@ -1382,6 +1445,9 @@ async function handleLoadHlsPlaylist() {
     } else {
       throw new Error('Invalid playlist format');
     }
+    
+    // Update form state after loading playlist
+    updateManualHlsFormState();
   } catch (error) {
     console.error('Failed to load HLS playlist:', error);
     alert('Failed to load HLS playlist. Please check the URL and try again.');
@@ -1391,6 +1457,8 @@ async function handleLoadHlsPlaylist() {
     if (hlsQualitySelection) {
       hlsQualitySelection.style.display = 'none';
     }
+    // Update form state on error
+    updateManualHlsFormState();
   } finally {
     if (loadHlsPlaylistBtn) {
       loadHlsPlaylistBtn.disabled = false;
@@ -1401,24 +1469,10 @@ async function handleLoadHlsPlaylist() {
 
 /**
  * Update download button state based on selections
+ * This is now a wrapper that calls updateManualHlsFormState for consistency
  */
 function updateDownloadButtonState() {
-  if (!startHlsDownloadBtn) return;
-  
-  // If it's a media playlist, button is enabled after loading
-  if (isMediaPlaylistMode) {
-    startHlsDownloadBtn.disabled = false;
-    return;
-  }
-  
-  // For master playlists, check if at least one quality is selected
-  if (!videoQualitySelect || !audioQualitySelect) return;
-  
-  const videoSelected = videoQualitySelect.value !== '';
-  const audioSelected = audioQualitySelect.value !== '';
-  
-  // Enable button if at least one quality is selected
-  startHlsDownloadBtn.disabled = !(videoSelected || audioSelected);
+  updateManualHlsFormState();
 }
 
 /**
@@ -1461,9 +1515,16 @@ async function handleStartHlsDownload() {
   // For media playlists, we don't set videoPlaylistUrl or audioPlaylistUrl
   // The URL will be passed directly and handled by the m3u8 download handler
   
-  // Disable button
-  startHlsDownloadBtn.disabled = true;
+  // Update button text and disable form elements
   startHlsDownloadBtn.textContent = 'Starting...';
+  
+  // Disable form inputs during download (will be managed by updateManualHlsFormState after setting currentManualHlsUrl)
+  // But we need to disable immediately before the download starts
+  if (hlsUrlInput) hlsUrlInput.disabled = true;
+  if (loadHlsPlaylistBtn) loadHlsPlaylistBtn.disabled = true;
+  if (videoQualitySelect) videoQualitySelect.disabled = true;
+  if (audioQualitySelect) audioQualitySelect.disabled = true;
+  startHlsDownloadBtn.disabled = true;
   
   try {
     // Get current tab information for filename
@@ -1529,14 +1590,16 @@ async function handleStartHlsDownload() {
       renderManualHlsProgress();
     } else if (response && response.error) {
       alert(response.error);
-      startHlsDownloadBtn.disabled = false;
       startHlsDownloadBtn.textContent = 'Download';
+      // Re-enable form elements on error
+      updateManualHlsFormState();
     }
   } catch (error: any) {
     console.error('Download request failed:', error);
     alert('Failed to start download: ' + (error?.message || 'Unknown error'));
-    startHlsDownloadBtn.disabled = false;
     startHlsDownloadBtn.textContent = 'Download';
+    // Re-enable form elements on error
+    updateManualHlsFormState();
   }
 }
 
