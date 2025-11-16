@@ -1,24 +1,58 @@
 /**
  * Direct video detection handler - orchestrates direct video detection
+ * 
+ * This handler is responsible for detecting direct video file URLs (e.g., .mp4, .webm, .mov files)
+ * from network requests and DOM video elements. It monitors the DOM for video elements and
+ * associates network requests with those elements to extract comprehensive metadata.
+ * 
+ * Key features:
+ * - Detects direct video URLs from network requests
+ * - Monitors DOM for video elements using MutationObserver
+ * - Associates network requests with video elements
+ * - Extracts metadata from video elements (dimensions, duration, thumbnails)
+ * - Filters out audio-only URLs
+ * - Performs initial DOM scan and continuous monitoring
+ * 
+ * Detection process:
+ * 1. Network requests are intercepted and checked for direct video URLs
+ * 2. URLs are associated with video elements in the DOM
+ * 3. DOM observer monitors for dynamically added video elements
+ * 4. Metadata is extracted from video elements (dimensions, duration, thumbnails)
+ * 5. Detected videos trigger callbacks with complete metadata
+ * 
+ * @module DirectDetectionHandler
  */
 
 import { VideoMetadata } from "../../types";
 import { detectFormatFromUrl } from "../../utils/url-utils";
 
+/** Configuration options for DirectDetectionHandler */
 export interface DirectDetectionHandlerOptions {
+  /** Optional callback for detected videos */
   onVideoDetected?: (video: VideoMetadata) => void;
 }
 
+/**
+ * Direct video detection handler
+ * Detects direct video URLs from network requests and DOM elements
+ */
 export class DirectDetectionHandler {
   private onVideoDetected?: (video: VideoMetadata) => void;
   private capturedUrls = new Map<HTMLVideoElement, string>();
 
+  /**
+   * Create a new DirectDetectionHandler instance
+   * @param options - Configuration options
+   */
   constructor(options: DirectDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
   }
 
   /**
    * Detect direct video from URL
+   * @param url - Video URL to detect
+   * @param videoElement - Optional video element for metadata extraction
+   * @returns Promise resolving to VideoMetadata or null if not detected
    */
   async detect(
     url: string,
@@ -52,6 +86,7 @@ export class DirectDetectionHandler {
 
   /**
    * Handle network request for direct video
+   * Associates URL with video elements and triggers detection
    */
   handleNetworkRequest(url: string): void {
     if (this.isDirectVideoUrl(url) && !this.isAudioOnlyUrl(url)) {
@@ -76,6 +111,7 @@ export class DirectDetectionHandler {
 
   /**
    * Detect video from video element
+   * @private
    */
   private async detectFromVideoElement(
     video: HTMLVideoElement,
@@ -106,7 +142,7 @@ export class DirectDetectionHandler {
   }
 
   /**
-   * Scan DOM for video elements and trigger onVideoDetected callback
+   * Scan DOM for video elements and trigger detection
    */
   async scanDOMForVideos(): Promise<void> {
     const videoElements = document.querySelectorAll("video");
@@ -171,6 +207,7 @@ export class DirectDetectionHandler {
 
   /**
    * Get video URL from video element
+   * @private
    */
   private getVideoUrl(video: HTMLVideoElement): string | null {
     // Check currentSrc (what's actually playing)
@@ -209,6 +246,7 @@ export class DirectDetectionHandler {
 
   /**
    * Check if URL is a direct video URL
+   * @private
    */
   private isDirectVideoUrl(url: string): boolean {
     return (
@@ -225,6 +263,7 @@ export class DirectDetectionHandler {
 
   /**
    * Check if URL is audio-only (not a video track)
+   * @private
    */
   private isAudioOnlyUrl(url: string): boolean {
     const lowerUrl = url.toLowerCase();
@@ -257,6 +296,7 @@ export class DirectDetectionHandler {
 
   /**
    * Extract metadata from direct video URL
+   * @private
    */
   private async extractMetadata(
     url: string,

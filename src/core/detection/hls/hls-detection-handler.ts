@@ -1,5 +1,28 @@
 /**
  * HLS detection handler - orchestrates HLS playlist detection
+ * 
+ * This handler is responsible for detecting HLS (HTTP Live Streaming) playlists from network requests.
+ * It distinguishes between master playlists (containing multiple quality variants) and media playlists
+ * (containing actual video fragments), and manages the relationship between them.
+ * 
+ * Key features:
+ * - Detects HLS master playlists and media playlists from network requests
+ * - Distinguishes between master and media playlists
+ * - Tracks master playlists and their variant URLs
+ * - Removes media playlists that belong to master playlists (to avoid duplicates)
+ * - Extracts metadata from playlist URLs
+ * - Handles both HLS format (master playlists) and M3U8 format (standalone media playlists)
+ * 
+ * Detection process:
+ * 1. Network requests are intercepted and checked for .m3u8 URLs
+ * 2. Playlist content is fetched and analyzed to determine type (master vs media)
+ * 3. Master playlists are tracked with their variant URLs
+ * 4. Media playlists are checked if they belong to tracked master playlists
+ * 5. Standalone media playlists are detected as M3U8 format
+ * 6. Master playlists are detected as HLS format
+ * 7. Variant videos are removed when master playlist is detected
+ * 
+ * @module HlsDetectionHandler
  */
 
 import { VideoMetadata } from "../../types";
@@ -13,23 +36,35 @@ import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
 
+/** Configuration options for HlsDetectionHandler */
 export interface HlsDetectionHandlerOptions {
+  /** Optional callback for detected videos */
   onVideoDetected?: (video: VideoMetadata) => void;
+  /** Optional callback for removed videos */
   onVideoRemoved?: (url: string) => void;
 }
 
+/** Internal structure for tracking master playlist information */
 interface MasterPlaylistInfo {
   url: string;
   variantUrls: Set<string>;
   playlistText: string;
 }
 
+/**
+ * HLS detection handler
+ * Detects HLS master playlists and standalone media playlists
+ */
 export class HlsDetectionHandler {
   private onVideoDetected?: (video: VideoMetadata) => void;
   private onVideoRemoved?: (url: string) => void;
   // Track master playlists and their variants
   private masterPlaylists: Map<string, MasterPlaylistInfo> = new Map();
 
+  /**
+   * Create a new HlsDetectionHandler instance
+   * @param options - Configuration options
+   */
   constructor(options: HlsDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
     this.onVideoRemoved = options.onVideoRemoved;
@@ -37,6 +72,8 @@ export class HlsDetectionHandler {
 
   /**
    * Detect HLS playlist from URL
+   * @param url - Playlist URL to detect
+   * @returns Promise resolving to VideoMetadata or null if not detected
    */
   async detect(url: string): Promise<VideoMetadata | null> {
     if (!this.isHlsUrl(url)) {
@@ -74,6 +111,7 @@ export class HlsDetectionHandler {
 
   /**
    * Fetch playlist text from URL
+   * @private
    */
   private async fetchPlaylistText(url: string): Promise<string> {
     return await fetchText(url, 1);
@@ -81,6 +119,7 @@ export class HlsDetectionHandler {
 
   /**
    * Handle media playlist detection
+   * @private
    */
   private async handleMediaPlaylist(
     url: string,
@@ -104,6 +143,7 @@ export class HlsDetectionHandler {
 
   /**
    * Handle master playlist detection
+   * @private
    */
   private async handleMasterPlaylist(
     url: string,
@@ -126,6 +166,7 @@ export class HlsDetectionHandler {
 
   /**
    * Track master playlist and extract variant URLs
+   * @private
    */
   private trackMasterPlaylist(
     url: string,
@@ -151,6 +192,7 @@ export class HlsDetectionHandler {
 
   /**
    * Remove detected video if callback is available
+   * @private
    */
   private removeDetectedVideo(normalizedUrl: string): void {
     if (this.onVideoRemoved) {
@@ -160,6 +202,7 @@ export class HlsDetectionHandler {
 
   /**
    * Extract metadata and notify about detected video
+   * @private
    */
   private async addDetectedVideo(
     url: string,
@@ -176,6 +219,7 @@ export class HlsDetectionHandler {
 
   /**
    * Handle network request for HLS playlist
+   * Triggers detection for HLS URLs
    */
   handleNetworkRequest(url: string): void {
     if (this.isHlsUrl(url)) {
@@ -186,6 +230,7 @@ export class HlsDetectionHandler {
 
   /**
    * Check if URL is an HLS playlist URL
+   * @private
    */
   private isHlsUrl(url: string): boolean {
     const urlLower = url.toLowerCase();
@@ -194,6 +239,8 @@ export class HlsDetectionHandler {
 
   /**
    * Check if content type indicates HLS playlist
+   * @param contentType - Content-Type header value
+   * @returns True if content type indicates HLS playlist
    */
   isHlsContentType(contentType: string): boolean {
     const contentTypeLower = contentType.toLowerCase();
@@ -205,6 +252,7 @@ export class HlsDetectionHandler {
 
   /**
    * Check if a media playlist URL belongs to any tracked master playlist
+   * @private
    */
   private checkIfBelongsToMasterPlaylist(mediaPlaylistUrl: string): boolean {
     for (const [masterUrl, masterInfo] of this.masterPlaylists.entries()) {
@@ -234,6 +282,7 @@ export class HlsDetectionHandler {
 
   /**
    * Remove variant videos that belong to master playlists
+   * @private
    */
   private removeVariantVideos(variantUrls: Set<string>): void {
     if (!this.onVideoRemoved) {
@@ -252,6 +301,7 @@ export class HlsDetectionHandler {
 
   /**
    * Extract metadata from HLS playlist URL
+   * @private
    */
   private async extractMetadata(
     url: string,
