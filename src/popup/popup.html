@@ -5,6 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Media Bridge</title>
   <style>
+    :root {
+      /* Dark mode (default) */
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #2d2d2d;
+      --bg-tertiary: #252525;
+      --bg-hover: #353535;
+      --bg-active: #404040;
+      --text-primary: #e0e0e0;
+      --text-secondary: #999;
+      --text-tertiary: #b0b0b0;
+      --border-color: #404040;
+      --border-color-light: #555;
+      --border-color-hover: #666;
+    }
+
+    :root.light-mode {
+      /* Light mode */
+      --bg-primary: #f5f5f5;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #f5f5f5;
+      --bg-hover: #f5f5f5;
+      --bg-active: #e8e8e8;
+      --text-primary: #333;
+      --text-secondary: #666;
+      --text-tertiary: #999;
+      --border-color: #ddd;
+      --border-color-light: #ccc;
+      --border-color-hover: #4285f4;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -17,11 +47,88 @@
       max-height: 480px;
       height: 480px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       display: flex;
       flex-direction: column;
       margin: 0;
       padding: 0;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* Theme Toggle */
+    .theme-toggle {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      z-index: 100;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .theme-toggle svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 12px 16px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+
+    .tab:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .tab.active {
+      color: #4285f4;
+      border-bottom-color: #4285f4;
+      background: var(--bg-secondary);
+    }
+
+    /* Tab Content */
+    .tab-content {
+      display: none;
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .tab-content.active {
+      display: flex;
+      flex-direction: column;
     }
 
     #detectedVideosList {
@@ -31,11 +138,18 @@
       min-height: 0;
     }
 
+    #manualHlsContent {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      min-height: 0;
+    }
+
     .secondary-btn {
       padding: 8px 12px;
-      border: 1px solid #ccc;
-      background: white;
-      color: #555;
+      border: 1px solid var(--border-color-light);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
       border-radius: 4px;
       font-size: 13px;
       cursor: pointer;
@@ -43,7 +157,8 @@
     }
 
     .secondary-btn:hover {
-      background: #f5f5f5;
+      background: var(--bg-hover);
+      border-color: var(--border-color-hover);
     }
 
     .primary-btn {
@@ -71,14 +186,14 @@
       margin-bottom: 0;
       border-radius: 0;
       padding: 12px;
-      background: #1f1f1f;
-      color: #f5f5f5;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
       display: none;
-      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
       position: sticky;
       bottom: 50px;
       z-index: 15;
-      border-top: 1px solid #333;
+      border-top: 1px solid var(--border-color);
     }
 
     .no-video-notice.show {
@@ -100,7 +215,7 @@
 
     .no-video-notice p {
       font-size: 12px;
-      color: #d1d1d1;
+      color: var(--text-tertiary);
       line-height: 1.4;
     }
 
@@ -113,7 +228,7 @@
     .notice-close {
       background: transparent;
       border: none;
-      color: #8c8c8c;
+      color: var(--text-secondary);
       font-size: 20px;
       font-weight: bold;
       cursor: pointer;
@@ -130,13 +245,13 @@
     }
 
     .notice-close:hover {
-      color: #f5f5f5;
+      color: var(--text-primary);
       background: rgba(255, 255, 255, 0.1);
     }
 
     .video-item, .download-item {
-      background: white;
-      border: 1px solid #ddd;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
       border-radius: 4px;
       padding: 10px;
       margin-bottom: 6px;
@@ -150,7 +265,7 @@
       height: 68px;
       border-radius: 4px;
       overflow: hidden;
-      background: #f0f0f0;
+      background: var(--bg-primary);
       position: relative;
     }
 
@@ -186,7 +301,7 @@
     .video-item-title, .download-item-title {
       font-size: 13px;
       font-weight: 500;
-      color: #333;
+      color: var(--text-primary);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -195,14 +310,15 @@
 
     .video-meta {
       font-size: 11px;
-      color: #666;
+      color: var(--text-secondary);
       margin-top: 3px;
     }
 
+    /* Badge colors - dark mode */
     .video-resolution {
       display: inline-block;
-      background: #e3f2fd;
-      color: #1976d2;
+      background: #1e3a5f;
+      color: #64b5f6;
       padding: 2px 8px;
       border-radius: 12px;
       margin-right: 8px;
@@ -212,8 +328,8 @@
 
     .video-format {
       display: inline-block;
-      background: #f3e5f5;
-      color: #7b1fa2;
+      background: #4a2c4a;
+      color: #ba68c8;
       padding: 2px 8px;
       border-radius: 12px;
       margin-right: 8px;
@@ -223,13 +339,29 @@
 
     .video-link-type {
       display: inline-block;
-      background: #fff3e0;
-      color: #f57c00;
+      background: #5a3a1a;
+      color: #ffb74d;
       padding: 2px 8px;
       border-radius: 12px;
       margin-right: 8px;
       font-size: 11px;
       font-weight: 500;
+    }
+
+    /* Badge colors - light mode */
+    :root.light-mode .video-resolution {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    :root.light-mode .video-format {
+      background: #f3e5f5;
+      color: #7b1fa2;
+    }
+
+    :root.light-mode .video-link-type {
+      background: #fff3e0;
+      color: #f57c00;
     }
 
     .video-btn {
@@ -256,11 +388,11 @@
     .video-quality-select {
       width: 100%;
       padding: 6px 8px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--border-color-light);
       border-radius: 4px;
       font-size: 12px;
-      background: white;
-      color: #333;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
       cursor: pointer;
       margin-top: 8px;
       font-family: inherit;
@@ -271,13 +403,15 @@
     }
 
     .video-quality-select:disabled {
-      background: #f5f5f5;
+      background: var(--bg-tertiary);
       cursor: not-allowed;
       opacity: 0.7;
     }
 
     .video-quality-select option {
       padding: 4px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
     }
 
     .video-status {
@@ -295,20 +429,30 @@
       margin-left: 8px;
     }
 
-    .status-detecting { background: #e3f2fd; color: #1976d2; }
-    .status-downloading { background: #fff3e0; color: #f57c00; }
-    .status-merging { background: #f3e5f5; color: #7b1fa2; }
-    .status-saving { background: #e8f5e9; color: #388e3c; }
-    .status-uploading { background: #e8f5e9; color: #388e3c; }
-    .status-completed { background: #e8f5e9; color: #388e3c; }
-    .status-failed { background: #ffebee; color: #d32f2f; }
+    /* Status badges - dark mode */
+    .status-detecting { background: #1e3a5f; color: #64b5f6; }
+    .status-downloading { background: #5a3a1a; color: #ffb74d; }
+    .status-merging { background: #4a2c4a; color: #ba68c8; }
+    .status-saving { background: #1e3a2e; color: #66bb6a; }
+    .status-uploading { background: #1e3a2e; color: #66bb6a; }
+    .status-completed { background: #1e3a2e; color: #66bb6a; }
+    .status-failed { background: #4a1e1e; color: #ef5350; }
+
+    /* Status badges - light mode */
+    :root.light-mode .status-detecting { background: #e3f2fd; color: #1976d2; }
+    :root.light-mode .status-downloading { background: #fff3e0; color: #f57c00; }
+    :root.light-mode .status-merging { background: #f3e5f5; color: #7b1fa2; }
+    :root.light-mode .status-saving { background: #e8f5e9; color: #388e3c; }
+    :root.light-mode .status-uploading { background: #e8f5e9; color: #388e3c; }
+    :root.light-mode .status-completed { background: #e8f5e9; color: #388e3c; }
+    :root.light-mode .status-failed { background: #ffebee; color: #d32f2f; }
 
     .downloading-label {
       display: flex;
       align-items: center;
       margin-top: 8px;
       font-size: 12px;
-      color: #666;
+      color: var(--text-secondary);
     }
 
     .downloading-dots {
@@ -318,7 +462,7 @@
     }
 
     .file-size {
-      color: #999;
+      color: var(--text-tertiary);
       font-size: 11px;
       margin-left: 4px;
     }
@@ -331,7 +475,7 @@
     .hls-progress-bar-wrapper {
       width: 100%;
       height: 6px;
-      background: #e0e0e0;
+      background: var(--border-color);
       border-radius: 3px;
       overflow: hidden;
       margin-bottom: 6px;
@@ -349,12 +493,12 @@
       justify-content: space-between;
       align-items: center;
       font-size: 11px;
-      color: #666;
+      color: var(--text-secondary);
     }
 
     .hls-progress-size {
       font-weight: 500;
-      color: #333;
+      color: var(--text-primary);
     }
 
     .hls-progress-speed {
@@ -390,7 +534,7 @@
 
     .empty-state {
       text-align: center;
-      color: #999;
+      color: var(--text-secondary);
       padding: 40px 20px;
       font-size: 14px;
     }
@@ -399,8 +543,8 @@
       display: flex;
       align-items: center;
       justify-content: space-around;
-      background: white;
-      border-top: 1px solid #ddd;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-color);
       padding: 0;
       flex-shrink: 0;
       position: sticky;
@@ -417,7 +561,7 @@
       padding: 10px;
       background: transparent;
       border: none;
-      color: #666;
+      color: var(--text-secondary);
       cursor: pointer;
       border-radius: 0;
       transition: all 0.2s;
@@ -426,12 +570,12 @@
     }
 
     .bottom-bar-btn:hover {
-      background: #f5f5f5;
+      background: var(--bg-hover);
       color: #4285f4;
     }
 
     .bottom-bar-btn:active {
-      background: #e8e8e8;
+      background: var(--bg-active);
     }
 
     .bottom-bar-btn svg {
@@ -446,14 +590,128 @@
       line-height: 1.2;
     }
 
+    /* HLS Quality Selection Form */
+    .hls-quality-form-group {
+      margin-bottom: 20px;
+    }
+
+    .hls-quality-form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .hls-quality-select,
+    .hls-quality-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border-color-light);
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      transition: border-color 0.2s;
+    }
+
+    .hls-quality-select:hover:not(:disabled),
+    .hls-quality-input:hover:not(:disabled) {
+      border-color: #4285f4;
+    }
+
+    .hls-quality-select:focus,
+    .hls-quality-input:focus {
+      outline: none;
+      border-color: #4285f4;
+      box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.1);
+    }
+
+    .hls-quality-select:disabled {
+      background: var(--bg-tertiary);
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+
+    .hls-quality-option-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .hls-quality-option-info {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-left: 8px;
+    }
+
+    /* Warning - dark mode */
+    .hls-quality-warning {
+      background: #5a3a1a;
+      border: 1px solid #ffb74d;
+      border-radius: 4px;
+      padding: 12px;
+      margin-top: 12px;
+      margin-bottom: 12px;
+    }
+
+    .hls-quality-warning strong {
+      display: block;
+      color: #ffb74d;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    .hls-quality-warning p {
+      margin: 0;
+      color: #ffb74d;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    /* Warning - light mode */
+    :root.light-mode .hls-quality-warning {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+    }
+
+    :root.light-mode .hls-quality-warning strong {
+      color: #856404;
+    }
+
+    :root.light-mode .hls-quality-warning p {
+      color: #856404;
+    }
 
   </style>
 </head>
 <body>
-  <!-- Video Cards -->
-  <div id="detectedVideosList"></div>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button id="autoDetectTab" class="tab active" data-tab="auto">Auto Detect</button>
+    <button id="manualHlsTab" class="tab" data-tab="manual">HLS</button>
+    <button id="themeToggle" class="theme-toggle" title="Toggle theme">
+      <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
+  </div>
 
-  <!-- No Video Notice -->
+  <!-- Auto Detect Tab Content -->
+  <div id="autoDetectContent" class="tab-content active">
+    <!-- Video Cards -->
+    <div id="detectedVideosList"></div>
+
+    <!-- No Video Notice -->
   <div id="noVideoNotice" class="no-video-notice">
     <div class="no-video-notice-header">
       <div class="no-video-notice-title">Can't see the media you're looking for?</div>
@@ -498,6 +756,44 @@
       </svg>
       <span>Clear</span>
     </button>
+  </div>
+  </div>
+
+  <!-- Manual HLS Tab Content -->
+  <div id="manualHlsContent" class="tab-content">
+    <div style="display: flex; flex-direction: column; height: 100%;">
+      <div style="flex: 1; overflow-y: auto; padding: 20px;">
+        <div class="hls-quality-form-group">
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="hlsUrlInput" class="hls-quality-input" placeholder="Enter HLS playlist URL (.m3u8)" style="flex: 1;">
+            <button id="loadHlsPlaylistBtn" class="primary-btn">Load</button>
+          </div>
+        </div>
+        <div id="hlsMediaPlaylistWarning" class="hls-quality-warning" style="display: none;">
+          <strong>⚠️ Media Playlist Detected</strong>
+          <p>This URL belongs to a media playlist. Quality selection is not available. The download will proceed with the available stream.</p>
+        </div>
+        <div id="hlsQualitySelection" style="display: none;">
+          <div class="hls-quality-form-group">
+            <label for="videoQualitySelect">Video Quality:</label>
+            <select id="videoQualitySelect" class="hls-quality-select">
+              <option value="">Select video quality...</option>
+            </select>
+          </div>
+          <div class="hls-quality-form-group">
+            <label for="audioQualitySelect">Audio Quality:</label>
+            <select id="audioQualitySelect" class="hls-quality-select">
+              <option value="">Select audio quality...</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Download Progress Display -->
+      <div id="manualHlsProgress" style="display: none; padding: 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);"></div>
+      <div style="padding: 16px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); flex-shrink: 0;">
+        <button id="startHlsDownloadBtn" class="primary-btn" style="width: 100%;" disabled>Download</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./popup.ts"></script>

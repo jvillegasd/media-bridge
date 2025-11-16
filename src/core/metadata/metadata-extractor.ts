@@ -67,6 +67,8 @@ export function detectExtensionFromFormat(format: string): string {
     'mpg': 'mpg',
     'mpeg': 'mpg',
     'direct': 'mp4', // Default for direct videos
+    'hls': 'm3u8', // HLS master playlist
+    'm3u8': 'm3u8', // M3U8 media playlist
   };
   
   return extensionMap[formatLower] || 'mp4';

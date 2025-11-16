@@ -7,10 +7,15 @@ import { MessageType } from "./shared/messages";
 import { VideoMetadata } from "./core/types";
 import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
+import { logger } from "./core/utils/logger";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 const sentToPopup = new Set<string>();
+
+function isInIframe(): boolean {
+  return window.location !== window.parent.location;
+}
 
 /**
  * Send message to popup with error handling for extension context invalidation
@@ -38,6 +43,26 @@ function safeSendMessage(message: any): Promise<void> {
 }
 
 /**
+ * Remove detected video and notify popup
+ */
+function removeDetectedVideo(url: string): void {
+  const normalizedUrl = normalizeUrl(url);
+  
+  if (detectedVideos[normalizedUrl]) {
+    delete detectedVideos[normalizedUrl];
+    sentToPopup.delete(normalizedUrl);
+    
+    logger.info("[Media Bridge] Removed detected video", { url: normalizedUrl });
+    
+    // Notify popup about removal
+    safeSendMessage({
+      type: MessageType.VIDEO_REMOVED,
+      payload: { url: normalizedUrl },
+    });
+  }
+}
+
+/**
  * Add or update detected video and notify popup
  * Uses normalized URL as unique key to prevent duplicates
  */
@@ -50,6 +75,8 @@ function addDetectedVideo(video: VideoMetadata) {
   const normalizedUrl = normalizeUrl(video.url);
   const existing = detectedVideos[normalizedUrl];
 
+  logger.debug("[Media Bridge] normalized URL", normalizedUrl);
+
   // Change icon to blue when video is detected
   safeSendMessage({
     type: MessageType.SET_ICON_BLUE,
@@ -57,6 +84,7 @@ function addDetectedVideo(video: VideoMetadata) {
 
   if (existing) {
     let updated = false;
+    logger.info("Updating video metadata", { existing, video });
 
     if (
       video.title === document.title ||
@@ -98,8 +126,14 @@ function addDetectedVideo(video: VideoMetadata) {
       updated = true;
     }
 
-    if (updated && !sentToPopup.has(normalizedUrl)) {
-      sentToPopup.add(normalizedUrl);
+    if (video.pageUrl && video.pageUrl !== existing.pageUrl) {
+      existing.pageUrl = video.pageUrl;
+      updated = true;
+    }
+
+    // Only notify popup if metadata was actually updated
+    // This prevents unnecessary updates that could cause flickering
+    if (updated) {
       safeSendMessage({
         type: MessageType.VIDEO_DETECTED,
         payload: existing,
@@ -121,54 +155,6 @@ function addDetectedVideo(video: VideoMetadata) {
 }
 
 /**
- * Clear sent-to-popup tracking to allow re-detection on navigation
- */
-function clearSentToPopupTracking() {
-  sentToPopup.clear();
-}
-
-/**
- * Handle URL change - clear videos from previous page
- */
-function handleUrlChange() {
-  const currentUrl = window.location.href;
-  clearSentToPopupTracking();
-  const currentPageVideos: Record<string, VideoMetadata> = {};
-  for (const [url, video] of Object.entries(detectedVideos)) {
-    if (video.pageUrl === currentUrl) {
-      currentPageVideos[url] = video;
-    }
-  }
-  detectedVideos = currentPageVideos;
-  
-  // Reset icon to gray on URL change
-  safeSendMessage({
-    type: MessageType.SET_ICON_GRAY,
-  });
-}
-
-/**
- * Monitor page URL changes and clear videos from previous page
- */
-function setupUrlChangeMonitor() {
-  // Listen for popstate (back/forward navigation)
-  window.addEventListener("popstate", handleUrlChange);
-
-  // Intercept pushState and replaceState for programmatic navigation
-  const originalPushState = history.pushState;
-  history.pushState = function (...args) {
-    originalPushState.apply(history, args);
-    handleUrlChange();
-  };
-
-  const originalReplaceState = history.replaceState;
-  history.replaceState = function (...args) {
-    originalReplaceState.apply(history, args);
-    handleUrlChange();
-  };
-}
-
-/**
  * Initialize content script
  * Sets up detection manager, performs initial scan, and monitors DOM changes
  */
@@ -182,18 +168,24 @@ function init() {
     onVideoDetected: (video) => {
       addDetectedVideo(video);
     },
+    onVideoRemoved: (url) => {
+      removeDetectedVideo(url);
+    },
   });
 
   // Initialize all detection mechanisms
   detectionManager.init();
-
-  setupUrlChangeMonitor();
 }
 
 /**
  * Listen for messages from popup and service worker
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (isInIframe()) {
+    console.debug("In iframe context");
+    return true;
+  }
+
   // Check if extension context is still valid
   if (chrome.runtime.lastError) {
     const errorMessage = chrome.runtime.lastError.message || "";
@@ -229,8 +221,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", init);
-} else {
-  init();
+if (!isInIframe()) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 }

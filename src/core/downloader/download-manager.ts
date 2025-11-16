@@ -1,5 +1,6 @@
 /**
- * Main download manager that orchestrates downloads
+ * Main download manager that orchestrates video downloads
+ * Routes downloads to format-specific handlers (direct, HLS, M3U8)
  */
 
 import { VideoFormat, VideoMetadata, DownloadState } from "../types";
@@ -9,20 +10,38 @@ import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
 import { HlsDownloadHandler } from "./hls/hls-download-handler";
+import { M3u8DownloadHandler } from "./m3u8/m3u8-download-handler";
 
+/**
+ * Configuration options for the DownloadManager
+ */
 export interface DownloadManagerOptions {
+  /** Maximum number of concurrent downloads/chunks @default 3 */
   maxConcurrent?: number;
+  
+  /** Optional callback for download progress updates */
   onProgress?: DownloadProgressCallback;
+  
+  /** Whether to upload completed downloads to Google Drive @default false */
   uploadToDrive?: boolean;
 }
 
+/**
+ * Main download manager that orchestrates video downloads
+ * Routes downloads to format-specific handlers and manages state
+ */
 export class DownloadManager {
   private readonly maxConcurrent: number;
   private readonly onProgress?: DownloadProgressCallback;
   private readonly uploadToDrive: boolean;
   private readonly directDownloadHandler: DirectDownloadHandler;
   private readonly hlsDownloadHandler: HlsDownloadHandler;
+  private readonly m3u8DownloadHandler: M3u8DownloadHandler;
 
+  /**
+   * Creates a new DownloadManager instance
+   * @param options - Configuration options
+   */
   constructor(options: DownloadManagerOptions = {}) {
     this.maxConcurrent = options.maxConcurrent || 3;
     this.onProgress = options.onProgress;
@@ -38,15 +57,32 @@ export class DownloadManager {
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
     });
+
+    // Initialize M3U8 download handler
+    this.m3u8DownloadHandler = new M3u8DownloadHandler({
+      onProgress: this.onProgress,
+      maxConcurrent: this.maxConcurrent,
+    });
   }
 
   /**
-   * Download video from URL
+   * Downloads a video from the given URL
+   * Routes to format-specific handler based on metadata.format
+   * @param url - Original URL where video was detected
+   * @param filename - Desired filename for downloaded video
+   * @param metadata - Video metadata with format and URL
+   * @param hlsQuality - Optional HLS quality selection (for HLS format)
+   * @returns Promise resolving to final DownloadState
+   * @throws {Error} If format is unknown/unsupported or download fails
    */
   async download(
     url: string,
     filename: string,
     metadata: VideoMetadata,
+    hlsQuality?: {
+      videoPlaylistUrl?: string | null;
+      audioPlaylistUrl?: string | null;
+    },
   ): Promise<DownloadState> {
     const downloadId = this.generateDownloadId(url);
 
@@ -93,6 +129,14 @@ export class DownloadManager {
           actualVideoUrl,
           filename,
           state.id,
+          hlsQuality,
+        );
+      } else if (format === "m3u8") {
+        // Use M3U8 download handler
+        await this.m3u8DownloadHandler.download(
+          actualVideoUrl,
+          filename,
+          state.id,
         );
       } else {
         throw new Error(`Unsupported format: ${format}`);
@@ -115,7 +159,8 @@ export class DownloadManager {
   }
 
   /**
-   * Create initial download state
+   * Creates and persists initial download state
+   * @private
    */
   private async createInitialDownloadState(
     downloadId: string,
@@ -142,7 +187,8 @@ export class DownloadManager {
   }
 
   /**
-   * Create and save a failed download state
+   * Creates and persists failed download state
+   * @private
    */
   private async createFailedState(
     downloadId: string,
@@ -173,7 +219,8 @@ export class DownloadManager {
   }
 
   /**
-   * Generate download ID
+   * Generates unique download ID from URL (format: dl_{timestamp}_{sanitizedUrl})
+   * @private
    */
   private generateDownloadId(url: string): string {
     return `dl_${Date.now()}_${url
@@ -182,7 +229,8 @@ export class DownloadManager {
   }
 
   /**
-   * Notify progress
+   * Notifies progress callback if configured
+   * @private
    */
   private notifyProgress(state: DownloadState): void {
     if (this.onProgress) {

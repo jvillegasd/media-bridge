@@ -1,37 +1,37 @@
 /**
- * HLS download handler - orchestrates HLS video downloads
+ * M3U8 media playlist download handler - orchestrates M3U8 media playlist video downloads
  * 
- * This handler is responsible for downloading HLS (HTTP Live Streaming) videos from master playlists.
- * HLS videos typically consist of multiple quality variants (video streams) and separate audio tracks
- * that need to be downloaded separately and then merged together.
+ * This handler is responsible for downloading videos from standalone M3U8 media playlists.
+ * Unlike HLS master playlists, media playlists contain a single stream (video+audio combined)
+ * and don't require quality selection or stream merging.
  * 
  * Key features:
- * - Parses master playlists to extract video and audio stream URLs
- * - Downloads video and audio fragments separately with concurrency control
+ * - Downloads fragments from a single media playlist
  * - Handles AES-128 encrypted fragments (decryption)
  * - Stores fragments in IndexedDB for processing
- * - Merges video and audio streams using FFmpeg via offscreen document
+ * - Processes fragments using FFmpeg via offscreen document
  * - Tracks download progress with byte-level accuracy and speed calculation
- * - Supports manual quality selection or auto-selection (highest quality)
+ * - Simpler than HLS handler (no master playlist parsing or stream merging)
  * 
  * Download process:
- * 1. Parse master playlist to extract levels (video/audio variants)
- * 2. Select best quality (or use provided quality preferences)
- * 3. Download video fragments (indices 0 to videoLength-1)
- * 4. Download audio fragments (indices videoLength to videoLength+audioLength-1)
- * 5. Merge video and audio streams using FFmpeg
- * 6. Save final MP4 file using Chrome downloads API
+ * 1. Parse media playlist to extract fragments
+ * 2. Download all fragments with concurrency control
+ * 3. Process fragments using FFmpeg (concatenate into MP4)
+ * 4. Save final MP4 file using Chrome downloads API
  * 
- * @module HlsDownloadHandler
+ * Note: This handler is used for standalone media playlists. For master playlists with
+ * multiple quality variants, use HlsDownloadHandler instead.
+ * 
+ * @module M3u8DownloadHandler
  */
 
 import { DownloadError } from "../../utils/errors";
 import { DownloadStateManager } from "../../storage/download-state";
-import { DownloadState, Fragment, Level } from "../../types";
+import { DownloadState, Fragment } from "../../types";
 import { logger } from "../../utils/logger";
 import { decrypt } from "../../utils/crypto-utils";
 import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
-import { parseMasterPlaylist, parseLevelsPlaylist } from "../../utils/m3u8-parser";
+import { parseLevelsPlaylist } from "../../utils/m3u8-parser";
 import { storeChunk, deleteChunks } from "../../storage/indexeddb-chunks";
 import { createOffscreenDocument } from "../../utils/offscreen-manager";
 import { MessageType } from "../../../shared/messages";
@@ -40,8 +40,8 @@ import {
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
 
-/** Configuration options for HLS download handler */
-export interface HlsDownloadHandlerOptions {
+/** Configuration options for M3U8 download handler */
+export interface M3u8DownloadHandlerOptions {
   /** Optional callback for progress updates */
   onProgress?: DownloadProgressCallback;
   /** Maximum concurrent fragment downloads @default 3 */
@@ -95,16 +95,12 @@ async function decryptSingleFragment(
 }
 
 /**
- * HLS download handler for master playlists
- * Supports auto quality selection or manual quality selection
+ * M3U8 download handler for media playlists
+ * Simpler than HLS handler - single stream, no quality selection or merging
  */
-export class HlsDownloadHandler {
+export class M3u8DownloadHandler {
   private readonly onProgress?: ProgressCallback;
   private readonly maxConcurrent: number;
-  /** Number of video fragments downloaded */
-  private videoLength: number = 0;
-  /** Number of audio fragments downloaded */
-  private audioLength: number = 0;
   /** Download ID (same as stateId) */
   private downloadId: string = "";
   /** Total bytes downloaded across all fragments */
@@ -115,12 +111,14 @@ export class HlsDownloadHandler {
   private lastUpdateTime: number = 0;
   /** Bytes downloaded at last update (for speed calculation) */
   private lastDownloadedBytes: number = 0;
+  /** Total number of fragments downloaded */
+  private fragmentCount: number = 0;
 
   /**
-   * Create a new HLS download handler
+   * Create a new M3U8 download handler
    * @param options - Configuration options
    */
-  constructor(options: HlsDownloadHandlerOptions = {}) {
+  constructor(options: M3u8DownloadHandlerOptions = {}) {
     this.onProgress = options.onProgress;
     this.maxConcurrent = options.maxConcurrent || 3;
   }
@@ -231,17 +229,16 @@ export class HlsDownloadHandler {
   ): Promise<void> {
     const totalFragments = fragments.length;
     let downloadedFragments = 0;
-    let sessionBytesDownloaded = 0; // Bytes downloaded in this session
+    let sessionBytesDownloaded = 0;
     const errors: Error[] = [];
 
-    // Initialize progress tracking only if this is the first call
+    // Initialize progress tracking
     if (this.lastUpdateTime === 0) {
       this.lastUpdateTime = Date.now();
       this.lastDownloadedBytes = 0;
     }
 
-    // Estimate total size by downloading first fragment to get average size
-    // This is a rough estimate, but better than showing fragment count
+    // Estimate total size by downloading first fragment
     let estimatedTotalBytes = 0;
     if (fragments.length > 0) {
       try {
@@ -252,10 +249,6 @@ export class HlsDownloadHandler {
         
         // Estimate total based on first fragment size
         estimatedTotalBytes = firstFragmentSize * totalFragments;
-        // Add to existing total if we already have bytes from previous calls
-        if (this.totalBytes > 0) {
-          estimatedTotalBytes += this.totalBytes - this.bytesDownloaded + firstFragmentSize;
-        }
         this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
         
         await this.updateProgress(
@@ -266,7 +259,6 @@ export class HlsDownloadHandler {
         );
       } catch (error) {
         logger.error(`Failed to download first fragment for size estimation:`, error);
-        // Fallback: use a default estimate or fragment count
         estimatedTotalBytes = 0;
       }
     }
@@ -290,9 +282,7 @@ export class HlsDownloadHandler {
           if (estimatedTotalBytes === 0 || downloadedFragments > 0) {
             const averageFragmentSize = sessionBytesDownloaded / downloadedFragments;
             const sessionEstimatedTotal = averageFragmentSize * totalFragments;
-            // Update total estimate, preserving bytes from previous sessions
-            const previousBytes = this.bytesDownloaded - sessionBytesDownloaded;
-            estimatedTotalBytes = previousBytes + sessionEstimatedTotal;
+            estimatedTotalBytes = sessionEstimatedTotal;
             this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
           }
           
@@ -319,7 +309,7 @@ export class HlsDownloadHandler {
     // Wait for all downloads to complete
     await Promise.all(downloadQueue);
 
-    // Update final progress with actual total (use current bytes as total if we've downloaded everything)
+    // Update final progress with actual total
     this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
     await this.updateProgress(
       stateId,
@@ -355,7 +345,7 @@ export class HlsDownloadHandler {
       // Set up message listener for offscreen responses
       const messageListener = (message: any) => {
         if (
-          message.type === MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE &&
+          message.type === MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE &&
           message.payload?.downloadId === this.downloadId
         ) {
           const { type, blobUrl, error, progress, message: progressMessage } = message.payload;
@@ -375,13 +365,12 @@ export class HlsDownloadHandler {
 
       chrome.runtime.onMessage.addListener(messageListener);
 
-      // Send processing request
+      // Send processing request for M3U8 media playlist
       chrome.runtime.sendMessage({
-        type: MessageType.OFFSCREEN_PROCESS_HLS,
+        type: MessageType.OFFSCREEN_PROCESS_M3U8,
         payload: {
           downloadId: this.downloadId,
-          videoLength: this.videoLength,
-          audioLength: this.audioLength,
+          fragmentCount: this.fragmentCount,
           filename: fileName,
         },
       }, (response) => {
@@ -471,145 +460,49 @@ export class HlsDownloadHandler {
   }
 
   /**
-   * Select best video and audio levels from master playlist
-   * @private
-   */
-  private selectLevels(levels: Level[]): { video: string | null; audio: string | null } {
-    // Separate video and audio levels
-    const videoLevels = levels.filter((level) => level.type === "stream");
-    const audioLevels = levels.filter((level) => level.type === "audio");
-
-    // Select best video level
-    let videoUri: string | null = null;
-    if (videoLevels.length > 0) {
-      // Sort by bitrate (highest first) or resolution
-      videoLevels.sort((a, b) => {
-        if (a.bitrate && b.bitrate) {
-          return b.bitrate - a.bitrate;
-        }
-        if (a.height && b.height) {
-          return b.height - a.height;
-        }
-        return 0;
-      });
-      videoUri = videoLevels[0]?.uri || null;
-    }
-
-    // Select first audio level (or best if we want to add selection logic)
-    const audioUri = audioLevels.length > 0 ? audioLevels[0]?.uri || null : null;
-
-    return { video: videoUri, audio: audioUri };
-  }
-
-  /**
-   * Download HLS video from master playlist
-   * @param masterPlaylistUrl - URL of HLS master playlist
+   * Download M3U8 media playlist video
+   * @param mediaPlaylistUrl - URL of M3U8 media playlist
    * @param filename - Target filename
    * @param stateId - Download state ID for progress tracking
-   * @param hlsQuality - Optional quality preferences (bypasses auto-selection)
    * @returns Promise resolving to file path and extension
    * @throws {DownloadError} If download fails
    */
   async download(
-    masterPlaylistUrl: string,
+    mediaPlaylistUrl: string,
     filename: string,
     stateId: string,
-    hlsQuality?: {
-      videoPlaylistUrl?: string | null;
-      audioPlaylistUrl?: string | null;
-    },
   ): Promise<{ filePath: string; fileExtension?: string }> {
     try {
-      logger.info(`Starting HLS download from ${masterPlaylistUrl}`);
+      logger.info(`Starting M3U8 media playlist download from ${mediaPlaylistUrl}`);
 
       // Initialize downloadId
       this.downloadId = stateId;
-      this.videoLength = 0;
-      this.audioLength = 0;
 
       // Update progress: parsing playlist
       await this.updateProgress(stateId, 0, 0, "Parsing playlist...");
 
-      let videoPlaylistUrl: string | null = null;
-      let audioPlaylistUrl: string | null = null;
+      // Fetch and parse media playlist
+      const mediaPlaylistText = await fetchText(mediaPlaylistUrl, 3);
+      const fragments = parseLevelsPlaylist(mediaPlaylistText, mediaPlaylistUrl);
 
-      // If quality preferences are provided, use them directly
-      if (hlsQuality) {
-        videoPlaylistUrl = hlsQuality.videoPlaylistUrl || null;
-        audioPlaylistUrl = hlsQuality.audioPlaylistUrl || null;
-        logger.info(`Using provided quality preferences - video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
-      } else {
-        // Otherwise, fetch and parse master playlist to auto-select
-        const masterPlaylistText = await fetchText(masterPlaylistUrl, 3);
-        const levels = parseMasterPlaylist(masterPlaylistText, masterPlaylistUrl);
-
-        if (levels.length === 0) {
-          throw new Error("No levels found in master playlist");
-        }
-
-        // Select video and audio levels
-        const selected = this.selectLevels(levels);
-        videoPlaylistUrl = selected.video;
-        audioPlaylistUrl = selected.audio;
-        logger.info(`Auto-selected video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
+      if (fragments.length === 0) {
+        throw new Error("No fragments found in media playlist");
       }
 
-      if (!videoPlaylistUrl && !audioPlaylistUrl) {
-        throw new Error("No video or audio levels found in master playlist");
-      }
+      logger.info(`Found ${fragments.length} fragments`);
 
       // Initialize byte tracking
       this.bytesDownloaded = 0;
       this.totalBytes = 0;
       this.lastUpdateTime = 0;
       this.lastDownloadedBytes = 0;
+      this.fragmentCount = 0; // Reset fragment count
 
-      // Download video fragments
-      if (videoPlaylistUrl) {
-        const videoPlaylistText = await fetchText(videoPlaylistUrl, 3);
-        const videoFragments = parseLevelsPlaylist(videoPlaylistText, videoPlaylistUrl);
-
-        if (videoFragments.length === 0) {
-          throw new Error("No video fragments found in level playlist");
-        }
-
-        logger.info(`Found ${videoFragments.length} video fragments`);
-
-        // Assign indices starting from 0
-        const indexedVideoFragments = videoFragments.map((frag, idx) => ({
-          ...frag,
-          index: idx,
-        }));
-
-        this.videoLength = indexedVideoFragments.length;
-
-        // Download video fragments (downloadAllFragments handles progress internally)
-        await this.downloadAllFragments(indexedVideoFragments, this.downloadId, stateId);
-      }
-
-      // Download audio fragments
-      if (audioPlaylistUrl) {
-        const audioPlaylistText = await fetchText(audioPlaylistUrl, 3);
-        const audioFragments = parseLevelsPlaylist(audioPlaylistText, audioPlaylistUrl);
-
-        if (audioFragments.length === 0) {
-          throw new Error("No audio fragments found in level playlist");
-        }
-
-        logger.info(`Found ${audioFragments.length} audio fragments`);
-
-        // Assign indices starting from videoLength
-        const indexedAudioFragments = audioFragments.map((frag, idx) => ({
-          ...frag,
-          index: this.videoLength + idx,
-        }));
-
-        this.audioLength = indexedAudioFragments.length;
-
-        // Continue downloading audio fragments (bytes accumulate from video)
-        // Note: downloadAllFragments will continue from where video left off
-        await this.downloadAllFragments(indexedAudioFragments, this.downloadId, stateId);
-      }
+      // Download all fragments
+      await this.downloadAllFragments(fragments, this.downloadId, stateId);
+      
+      // Set fragment count after download completes
+      this.fragmentCount = fragments.length;
 
       // Update progress: merging with FFmpeg
       const mergingState = await DownloadStateManager.getDownload(stateId);
@@ -642,12 +535,12 @@ export class HlsDownloadHandler {
         },
       );
 
-      // Update progress: saving (set stage to "saving" instead of "downloading")
+      // Update progress: saving
       const savingState = await DownloadStateManager.getDownload(stateId);
       if (savingState) {
         savingState.progress.stage = "saving";
         savingState.progress.message = "Saving file...";
-        savingState.progress.percentage = 95; // Close to completion
+        savingState.progress.percentage = 95;
         await DownloadStateManager.saveDownload(savingState);
         this.notifyProgress(savingState);
       }
@@ -665,13 +558,12 @@ export class HlsDownloadHandler {
         finalState.progress.stage = "completed";
         finalState.progress.message = "Download completed";
         finalState.progress.percentage = 100;
-        // Ensure downloaded equals total for completed state
         finalState.progress.downloaded = finalState.progress.total || this.bytesDownloaded || 0;
         finalState.updatedAt = Date.now();
         await DownloadStateManager.saveDownload(finalState);
         this.notifyProgress(finalState);
         
-        // Ensure state is persisted by reading it back and verifying
+        // Verify state is persisted
         const verifyState = await DownloadStateManager.getDownload(stateId);
         if (verifyState && verifyState.progress.stage !== "completed") {
           logger.warn(`State verification failed for ${stateId}, retrying...`);
@@ -685,14 +577,14 @@ export class HlsDownloadHandler {
         logger.error(`Could not find download state ${stateId} to mark as completed`);
       }
 
-      logger.info(`HLS download completed: ${filePath}`);
+      logger.info(`M3U8 media playlist download completed: ${filePath}`);
 
       return {
         filePath,
         fileExtension: "mp4",
       };
     } catch (error) {
-      logger.error("HLS download failed:", error);
+      logger.error("M3U8 media playlist download failed:", error);
 
       // Try to clean up IndexedDB on error
       try {
@@ -703,7 +595,7 @@ export class HlsDownloadHandler {
 
       throw error instanceof DownloadError
         ? error
-        : new DownloadError(`HLS download failed: ${error instanceof Error ? error.message : String(error)}`);
+        : new DownloadError(`M3U8 download failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

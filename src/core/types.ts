@@ -2,7 +2,7 @@
  * Type definitions for Media Bridge Extension
  */
 
-export type VideoFormat = 'direct' | 'hls' | 'unknown';
+export type VideoFormat = 'direct' | 'hls' | 'm3u8' | 'unknown';
 
 export interface VideoMetadata {
   url: string;

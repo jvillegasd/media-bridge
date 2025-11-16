@@ -5,6 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Media Bridge Settings</title>
   <style>
+    :root {
+      /* Dark mode (default) */
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #2d2d2d;
+      --bg-tertiary: #252525;
+      --bg-hover: #353535;
+      --bg-active: #404040;
+      --text-primary: #e0e0e0;
+      --text-secondary: #999;
+      --text-tertiary: #b0b0b0;
+      --border-color: #404040;
+      --border-color-light: #555;
+      --border-color-hover: #666;
+    }
+
+    :root.light-mode {
+      /* Light mode */
+      --bg-primary: #f5f5f5;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #f5f5f5;
+      --bg-hover: #f5f5f5;
+      --bg-active: #e8e8e8;
+      --text-primary: #333;
+      --text-secondary: #666;
+      --text-tertiary: #999;
+      --border-color: #ddd;
+      --border-color-light: #ccc;
+      --border-color-hover: #4285f4;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -13,10 +43,42 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       padding: 20px;
       max-width: 800px;
       margin: 0 auto;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* Theme Toggle */
+    .theme-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      z-index: 100;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--border-color-hover);
+    }
+
+    .theme-toggle svg {
+      width: 20px;
+      height: 20px;
     }
 
     .header {
@@ -25,27 +87,28 @@
 
     .header h1 {
       font-size: 24px;
-      color: #333;
+      color: var(--text-primary);
       margin-bottom: 8px;
     }
 
     .header p {
-      color: #666;
+      color: var(--text-secondary);
       font-size: 14px;
     }
 
     .section {
-      background: white;
+      background: var(--bg-secondary);
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      border: 1px solid var(--border-color);
     }
 
     .section-title {
       font-size: 18px;
       font-weight: 500;
-      color: #333;
+      color: var(--text-primary);
       margin-bottom: 16px;
     }
 
@@ -57,21 +120,28 @@
       display: block;
       font-size: 14px;
       font-weight: 500;
-      color: #333;
+      color: var(--text-primary);
       margin-bottom: 8px;
     }
 
     .form-input {
       width: 100%;
       padding: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--border-color-light);
       border-radius: 4px;
       font-size: 14px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
     }
 
     .form-input:focus {
       outline: none;
       border-color: #4285f4;
+    }
+
+    .form-input option {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
     }
 
     .form-checkbox {
@@ -80,7 +150,7 @@
 
     .form-help {
       font-size: 12px;
-      color: #666;
+      color: var(--text-secondary);
       margin-top: 4px;
     }
 
@@ -104,13 +174,15 @@
     }
 
     .btn-secondary {
-      background: #f5f5f5;
-      color: #333;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color-light);
       margin-left: 8px;
     }
 
     .btn-secondary:hover {
-      background: #e0e0e0;
+      background: var(--bg-hover);
+      border-color: var(--border-color-hover);
     }
 
     .status {
@@ -120,17 +192,34 @@
       font-size: 14px;
     }
 
+    /* Status - dark mode */
     .status-success {
+      background: #1e3a2e;
+      color: #66bb6a;
+    }
+
+    .status-error {
+      background: #4a1e1e;
+      color: #ef5350;
+    }
+
+    .status-info {
+      background: #1e3a5f;
+      color: #64b5f6;
+    }
+
+    /* Status - light mode */
+    :root.light-mode .status-success {
       background: #e8f5e9;
       color: #388e3c;
     }
 
-    .status-error {
+    :root.light-mode .status-error {
       background: #ffebee;
       color: #d32f2f;
     }
 
-    .status-info {
+    :root.light-mode .status-info {
       background: #e3f2fd;
       color: #1976d2;
     }
@@ -148,18 +237,43 @@
       margin-left: 8px;
     }
 
+    /* Auth status - dark mode */
     .auth-status.authenticated {
+      background: #1e3a2e;
+      color: #66bb6a;
+    }
+
+    .auth-status.not-authenticated {
+      background: #4a1e1e;
+      color: #ef5350;
+    }
+
+    /* Auth status - light mode */
+    :root.light-mode .auth-status.authenticated {
       background: #e8f5e9;
       color: #388e3c;
     }
 
-    .auth-status.not-authenticated {
+    :root.light-mode .auth-status.not-authenticated {
       background: #ffebee;
       color: #d32f2f;
     }
   </style>
 </head>
 <body>
+  <button id="themeToggle" class="theme-toggle" title="Toggle theme">
+    <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </button>
   <div class="header">
     <h1>Media Bridge Settings</h1>
     <p>Configure Google Drive integration and download preferences</p>

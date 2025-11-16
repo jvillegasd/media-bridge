@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Media Bridge",
-  "version": "0.1.13",
+  "version": "0.4.0",
   "description": "Download videos from the web (direct downloads only) and upload to Google Drive",
   "permissions": [
     "identity",
@@ -33,7 +33,7 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle",
-      "all_frames": true
+      "all_frames": false
     }
   ],
   "options_page": "options/options.html",

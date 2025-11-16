@@ -17,6 +17,8 @@ const signOutBtn = document.getElementById('signOutBtn') as HTMLButtonElement;
 const maxConcurrent = document.getElementById('maxConcurrent') as HTMLInputElement;
 const saveBtn = document.getElementById('saveBtn') as HTMLButtonElement;
 const statusMessage = document.getElementById('statusMessage') as HTMLDivElement;
+const themeToggle = document.getElementById('themeToggle') as HTMLButtonElement;
+const themeIcon = document.getElementById('themeIcon') as SVGElement;
 
 const CONFIG_KEY = 'storage_config';
 
@@ -26,6 +28,7 @@ const CONFIG_KEY = 'storage_config';
 async function init() {
   await loadSettings();
   await checkAuthStatus();
+  await loadTheme();
 
   // Event listeners
   driveEnabled.addEventListener('change', () => {
@@ -35,6 +38,10 @@ async function init() {
   authBtn.addEventListener('click', handleAuth);
   signOutBtn.addEventListener('click', handleSignOut);
   saveBtn.addEventListener('click', handleSave);
+  
+  if (themeToggle) {
+    themeToggle.addEventListener('click', toggleTheme);
+  }
 
   // Show drive settings if enabled
   if (driveEnabled.checked) {
@@ -156,6 +163,67 @@ function showStatus(message: string, type: 'success' | 'error' | 'info') {
   setTimeout(() => {
     statusMessage.style.display = 'none';
   }, 5000);
+}
+
+/**
+ * Load theme from storage and apply it
+ */
+async function loadTheme() {
+  const theme = await ChromeStorage.get<string>('theme');
+  const isLightMode = theme === 'light';
+  applyTheme(isLightMode);
+}
+
+/**
+ * Apply theme to the page
+ */
+function applyTheme(isLightMode: boolean) {
+  const root = document.documentElement;
+  if (isLightMode) {
+    root.classList.add('light-mode');
+  } else {
+    root.classList.remove('light-mode');
+  }
+  updateThemeIcon(isLightMode);
+}
+
+/**
+ * Update theme icon based on current theme
+ */
+function updateThemeIcon(isLightMode: boolean) {
+  if (!themeIcon) return;
+  
+  if (isLightMode) {
+    // Moon icon for light mode (to switch to dark)
+    themeIcon.innerHTML = `
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+    `;
+  } else {
+    // Sun icon for dark mode (to switch to light)
+    themeIcon.innerHTML = `
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    `;
+  }
+}
+
+/**
+ * Toggle theme between light and dark
+ */
+async function toggleTheme() {
+  const root = document.documentElement;
+  const isLightMode = root.classList.contains('light-mode');
+  const newTheme = isLightMode ? 'dark' : 'light';
+  
+  await ChromeStorage.set('theme', newTheme);
+  applyTheme(!isLightMode);
 }
 
 // Initialize when DOM is ready

@@ -44,6 +44,10 @@ async function handleDownloadRequestMessage(payload: {
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
+  hlsQuality?: {
+    videoPlaylistUrl?: string | null;
+    audioPlaylistUrl?: string | null;
+  };
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const downloadResult = await handleDownloadRequest(payload);
@@ -312,8 +316,12 @@ async function handleDownloadRequest(payload: {
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
+  hlsQuality?: {
+    videoPlaylistUrl?: string | null;
+    audioPlaylistUrl?: string | null;
+  };
 }): Promise<{ error?: string } | void> {
-  const { url, filename, uploadToDrive, metadata, tabTitle, website } = payload;
+  const { url, filename, uploadToDrive, metadata, tabTitle, website, hlsQuality } = payload;
   const normalizedUrl = normalizeUrl(url);
   const existing = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
 
@@ -373,6 +381,7 @@ async function handleDownloadRequest(payload: {
     metadata,
     tabTitle,
     website,
+    hlsQuality,
   );
   activeDownloads.set(normalizedUrl, downloadPromise);
 
@@ -448,6 +457,10 @@ async function startDownload(
   metadata: VideoMetadata,
   tabTitle?: string,
   website?: string,
+  hlsQuality?: {
+    videoPlaylistUrl?: string | null;
+    audioPlaylistUrl?: string | null;
+  },
 ): Promise<void> {
   try {
     // Generate filename if not provided
@@ -466,6 +479,7 @@ async function startDownload(
       url,
       finalFilename,
       metadata,
+      hlsQuality,
     );
 
     // Handle failed downloads (e.g., unknown format)
