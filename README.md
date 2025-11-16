@@ -11,6 +11,7 @@ A Chromium browser extension that downloads videos from the web (HLS, DASH, and 
 - **Progress Tracking**: Real-time download and upload progress
 - **Segment Merging**: Uses FFmpeg.wasm to merge HLS/DASH segments into MP4 files
 - **Concurrent Downloads**: Download multiple segments simultaneously for faster downloads
+- **Offscreen Document**: Utilizes Chrome's offscreen API for background processing
 
 ## Installation
 
@@ -89,18 +90,64 @@ Videos will now automatically upload to Google Drive after downloading.
 
 ### Architecture
 
-- **Background Service Worker**: Handles download orchestration and state management
-- **Content Script**: Detects videos on web pages and injects download buttons
-- **Popup UI**: User interface for manual downloads and viewing progress
-- **Options Page**: Configuration interface for Google Drive settings
+- **Background Service Worker** (`service-worker.ts`): Handles download orchestration and state management
+- **Content Script** (`content.ts`): Detects videos on web pages and injects download buttons
+- **Popup UI** (`popup/`): User interface for manual downloads and viewing progress
+- **Options Page** (`options/`): Configuration interface for Google Drive settings
+- **Offscreen Document** (`offscreen/`): Background document for FFmpeg processing
 
 ### Technologies
 
-- TypeScript for type safety
-- Webpack for bundling
-- FFmpeg.wasm for segment merging
-- Chrome Extension APIs (storage, downloads, identity)
-- Google Drive API v3
+- **TypeScript** for type safety
+- **Vite** for bundling and development
+- **FFmpeg.wasm** for segment merging
+- **Chrome Extension APIs** (storage, downloads, identity, offscreen)
+- **Google Drive API v3** for cloud uploads
+- **Redux Toolkit** and **RxJS** for state management
+- **IndexedDB** (via idb) for chunk storage
+
+### Project Structure
+
+```
+src/
+├── service-worker.ts      # Background service worker
+├── content.ts            # Content script for video detection
+├── core/
+│   ├── cloud/           # Google Drive integration
+│   │   ├── google-auth.ts
+│   │   ├── google-drive.ts
+│   │   └── upload-manager.ts
+│   ├── detection/       # Video detection logic
+│   │   ├── detection-manager.ts
+│   │   ├── direct/
+│   │   └── hls/
+│   ├── downloader/      # Download handlers
+│   │   ├── download-manager.ts
+│   │   ├── direct/
+│   │   ├── hls/
+│   │   └── m3u8/
+│   ├── metadata/        # Metadata extraction
+│   ├── storage/         # Storage utilities
+│   │   ├── chrome-storage.ts
+│   │   ├── download-state.ts
+│   │   └── indexeddb-chunks.ts
+│   ├── types.ts         # Type definitions
+│   └── utils/           # Utility functions
+│       ├── crypto-utils.ts
+│       ├── errors.ts
+│       ├── fetch-utils.ts
+│       ├── ffmpeg-singleton.ts
+│       ├── file-utils.ts
+│       ├── logger.ts
+│       ├── m3u8-parser.ts
+│       ├── offscreen-manager.ts
+│       └── url-utils.ts
+├── popup/               # Popup UI
+├── options/             # Options page
+├── offscreen/           # Offscreen document
+└── shared/              # Shared types and messages
+    └── messages.ts
+```
 
 ### Permissions
 
@@ -109,6 +156,9 @@ Videos will now automatically upload to Google Drive after downloading.
 - `identity`: Google OAuth authentication
 - `activeTab`: Access current tab for video detection
 - `scripting`: Inject content scripts
+- `offscreen`: Create offscreen documents for background processing
+- `unlimitedStorage`: Store large video chunks
+- `webRequest` & `declarativeNetRequest`: Handle network requests
 - Host permissions: Access video URLs from various domains
 
 ## Development
@@ -126,22 +176,22 @@ npm run build
 npm run type-check
 ```
 
-### Project Structure
+### Dependencies
 
-```
-src/
-├── background/          # Service worker
-├── content/            # Content script
-├── popup/              # Popup UI
-├── options/            # Options page
-├── lib/
-│   ├── downloader/     # Download logic
-│   ├── parsers/       # HLS/MPD parsers
-│   ├── merger/        # Segment merging
-│   ├── storage/       # Storage utilities
-│   └── cloud/         # Google Drive integration
-└── shared/            # Shared types and messages
-```
+**Runtime Dependencies:**
+- `@ffmpeg/ffmpeg` & `@ffmpeg/util`: FFmpeg.wasm for video processing
+- `@reduxjs/toolkit`, `redux`, `redux-observable`, `rxjs`: State management
+- `idb`: IndexedDB wrapper
+- `m3u8-parser`: Parse HLS playlists
+- `uuid`: Generate unique identifiers
+- `url-toolkit`: URL manipulation utilities
+
+**Development Dependencies:**
+- `typescript`: TypeScript compiler
+- `vite`: Build tool and dev server
+- `vite-plugin-static-copy`: Copy static assets
+- `@types/chrome`: Chrome extension types
+- `@types/node`: Node.js types
 
 ## Limitations
 
@@ -149,6 +199,7 @@ src/
 - Some websites may block video downloading
 - Large files may take significant time to process
 - FFmpeg.wasm has size limitations (consider native messaging for very large files)
+- Browser memory constraints may limit concurrent processing
 
 ## Troubleshooting
 
@@ -157,18 +208,28 @@ src/
 - Check if the URL is accessible and not DRM-protected
 - Verify network connection
 - Check browser console for error messages
+- Ensure the video format is supported (HLS, DASH, or direct)
 
 ### Google Drive Upload Fails
 
 - Ensure you're signed in (check Options page)
 - Verify Google Drive API is enabled
 - Check that you have sufficient storage quota
+- Review browser console for API errors
 
 ### Extension Not Detecting Videos
 
 - Some websites use complex player implementations
 - Try using the manual download feature with the video URL
 - Check browser console for errors
+- Ensure content script is running (check extension details)
+
+### FFmpeg Processing Issues
+
+- Large videos may exceed memory limits
+- Check offscreen document is created properly
+- Review console logs for FFmpeg errors
+- Consider reducing concurrent download count
 
 ## License
 
