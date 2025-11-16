@@ -17,10 +17,10 @@ let noVideoNotice: HTMLDivElement | null = null;
 let settingsBtn: HTMLButtonElement | null = null;
 let downloadsBtn: HTMLButtonElement | null = null;
 let clearCompletedBtn: HTMLButtonElement | null = null;
-let manualHlsDownloadBtn: HTMLButtonElement | null = null;
-let hlsQualityModal: HTMLDivElement | null = null;
-let closeHlsModalBtn: HTMLButtonElement | null = null;
-let cancelHlsDownloadBtn: HTMLButtonElement | null = null;
+let autoDetectTab: HTMLButtonElement | null = null;
+let manualHlsTab: HTMLButtonElement | null = null;
+let autoDetectContent: HTMLDivElement | null = null;
+let manualHlsContent: HTMLDivElement | null = null;
 let startHlsDownloadBtn: HTMLButtonElement | null = null;
 let loadHlsPlaylistBtn: HTMLButtonElement | null = null;
 let videoQualitySelect: HTMLSelectElement | null = null;
@@ -48,10 +48,10 @@ async function init() {
   settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
   downloadsBtn = document.getElementById('downloadsBtn') as HTMLButtonElement;
   clearCompletedBtn = document.getElementById('clearCompletedBtn') as HTMLButtonElement;
-  manualHlsDownloadBtn = document.getElementById('manualHlsDownloadBtn') as HTMLButtonElement;
-  hlsQualityModal = document.getElementById('hlsQualityModal') as HTMLDivElement;
-  closeHlsModalBtn = document.getElementById('closeHlsModalBtn') as HTMLButtonElement;
-  cancelHlsDownloadBtn = document.getElementById('cancelHlsDownloadBtn') as HTMLButtonElement;
+  autoDetectTab = document.getElementById('autoDetectTab') as HTMLButtonElement;
+  manualHlsTab = document.getElementById('manualHlsTab') as HTMLButtonElement;
+  autoDetectContent = document.getElementById('autoDetectContent') as HTMLDivElement;
+  manualHlsContent = document.getElementById('manualHlsContent') as HTMLDivElement;
   startHlsDownloadBtn = document.getElementById('startHlsDownloadBtn') as HTMLButtonElement;
   loadHlsPlaylistBtn = document.getElementById('loadHlsPlaylistBtn') as HTMLButtonElement;
   videoQualitySelect = document.getElementById('videoQualitySelect') as HTMLSelectElement;
@@ -87,14 +87,11 @@ async function init() {
   if (clearCompletedBtn) {
     clearCompletedBtn.addEventListener('click', handleClearCompleted);
   }
-  if (manualHlsDownloadBtn) {
-    manualHlsDownloadBtn.addEventListener('click', handleManualHlsDownload);
+  if (autoDetectTab) {
+    autoDetectTab.addEventListener('click', () => switchTab('auto'));
   }
-  if (closeHlsModalBtn) {
-    closeHlsModalBtn.addEventListener('click', closeHlsQualityModal);
-  }
-  if (cancelHlsDownloadBtn) {
-    cancelHlsDownloadBtn.addEventListener('click', closeHlsQualityModal);
+  if (manualHlsTab) {
+    manualHlsTab.addEventListener('click', () => switchTab('manual'));
   }
   if (startHlsDownloadBtn) {
     startHlsDownloadBtn.addEventListener('click', handleStartHlsDownload);
@@ -114,14 +111,6 @@ async function init() {
   }
   if (audioQualitySelect) {
     audioQualitySelect.addEventListener('change', updateDownloadButtonState);
-  }
-  if (hlsQualityModal) {
-    hlsQualityModal.addEventListener('click', (e) => {
-      // Close modal if clicking on the backdrop (not the content)
-      if (e.target === hlsQualityModal) {
-        closeHlsQualityModal();
-      }
-    });
   }
 
   // Listen for messages
@@ -1101,12 +1090,29 @@ function formatQualityLabel(level: Level): string {
 }
 
 /**
- * Handle manual HLS download button click
+ * Switch between tabs
  */
-async function handleManualHlsDownload() {
-  if (!hlsQualityModal) return;
-  
-  // Reset form
+function switchTab(tabName: 'auto' | 'manual') {
+  if (tabName === 'auto') {
+    if (autoDetectTab) autoDetectTab.classList.add('active');
+    if (manualHlsTab) manualHlsTab.classList.remove('active');
+    if (autoDetectContent) autoDetectContent.classList.add('active');
+    if (manualHlsContent) manualHlsContent.classList.remove('active');
+  } else {
+    if (autoDetectTab) autoDetectTab.classList.remove('active');
+    if (manualHlsTab) manualHlsTab.classList.add('active');
+    if (autoDetectContent) autoDetectContent.classList.remove('active');
+    if (manualHlsContent) manualHlsContent.classList.add('active');
+    
+    // Reset form when switching to manual tab
+    resetManualHlsForm();
+  }
+}
+
+/**
+ * Reset manual HLS form
+ */
+function resetManualHlsForm() {
   isMediaPlaylistMode = false;
   if (hlsUrlInput) {
     hlsUrlInput.value = '';
@@ -1132,17 +1138,6 @@ async function handleManualHlsDownload() {
     loadHlsPlaylistBtn.disabled = false;
     loadHlsPlaylistBtn.textContent = 'Load';
   }
-  
-  // Show modal
-  hlsQualityModal.style.display = 'flex';
-}
-
-/**
- * Close HLS quality modal
- */
-function closeHlsQualityModal() {
-  if (!hlsQualityModal) return;
-  hlsQualityModal.style.display = 'none';
 }
 
 /**
@@ -1398,7 +1393,10 @@ async function handleStartHlsDownload() {
     });
     
     if (response && response.success) {
-      closeHlsQualityModal();
+      // Reset form after successful download
+      resetManualHlsForm();
+      // Switch to auto detect tab to see the download progress
+      switchTab('auto');
       await loadDownloadStates();
       renderDetectedVideos();
     } else if (response && response.error) {
