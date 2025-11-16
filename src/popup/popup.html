@@ -584,7 +584,7 @@
   <!-- Tabs -->
   <div class="tabs">
     <button id="autoDetectTab" class="tab active" data-tab="auto">Auto Detect</button>
-    <button id="manualHlsTab" class="tab" data-tab="manual">Manual HLS</button>
+    <button id="manualHlsTab" class="tab" data-tab="manual">HLS</button>
   </div>
 
   <!-- Auto Detect Tab Content -->
@@ -643,9 +643,8 @@
   <!-- Manual HLS Tab Content -->
   <div id="manualHlsContent" class="tab-content">
     <div style="display: flex; flex-direction: column; height: 100%;">
-      <div style="flex: 1; overflow-y: auto;">
+      <div style="flex: 1; overflow-y: auto; padding: 20px;">
         <div class="hls-quality-form-group">
-          <label for="hlsUrlInput">HLS Playlist URL:</label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="hlsUrlInput" class="hls-quality-input" placeholder="Enter HLS playlist URL (.m3u8)" style="flex: 1;">
             <button id="loadHlsPlaylistBtn" class="primary-btn">Load</button>
@@ -670,6 +669,8 @@
           </div>
         </div>
       </div>
+      <!-- Download Progress Display -->
+      <div id="manualHlsProgress" style="display: none; padding: 12px; background: white; border-top: 1px solid #e0e0e0;"></div>
       <div style="padding: 16px; border-top: 1px solid #e0e0e0; background: white; flex-shrink: 0;">
         <button id="startHlsDownloadBtn" class="primary-btn" style="width: 100%;" disabled>Download</button>
       </div>

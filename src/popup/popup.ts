@@ -28,7 +28,9 @@ let audioQualitySelect: HTMLSelectElement | null = null;
 let hlsUrlInput: HTMLInputElement | null = null;
 let hlsMediaPlaylistWarning: HTMLDivElement | null = null;
 let hlsQualitySelection: HTMLDivElement | null = null;
+let manualHlsProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
+let currentManualHlsUrl: string | null = null;
 
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
@@ -59,6 +61,7 @@ async function init() {
   hlsUrlInput = document.getElementById('hlsUrlInput') as HTMLInputElement;
   hlsMediaPlaylistWarning = document.getElementById('hlsMediaPlaylistWarning') as HTMLDivElement;
   hlsQualitySelection = document.getElementById('hlsQualitySelection') as HTMLDivElement;
+  manualHlsProgress = document.getElementById('manualHlsProgress') as HTMLDivElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
@@ -114,7 +117,7 @@ async function init() {
   }
 
   // Listen for messages
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener(async (message) => {
     // Check if extension context is still valid
     if (chrome.runtime.lastError && chrome.runtime.lastError.message) {
       if (chrome.runtime.lastError.message.includes('Extension context invalidated')) {
@@ -125,12 +128,14 @@ async function init() {
     
     try {
       if (message.type === MessageType.DOWNLOAD_PROGRESS) {
-        loadDownloadStates();
+        await loadDownloadStates();
         renderDetectedVideos();
+        renderManualHlsProgress();
       }
       if (message.type === MessageType.DOWNLOAD_COMPLETE) {
-        loadDownloadStates();
+        await loadDownloadStates();
         renderDetectedVideos();
+        renderManualHlsProgress();
       }
       if (message.type === MessageType.VIDEO_DETECTED) {
         addDetectedVideo(message.payload);
@@ -143,8 +148,9 @@ async function init() {
         renderDetectedVideos();
       }
       if (message.type === MessageType.DOWNLOAD_FAILED) {
-        loadDownloadStates();
+        await loadDownloadStates();
         renderDetectedVideos();
+        renderManualHlsProgress();
         // Log error for debugging
         if (message.payload && message.payload.error) {
           console.warn('Download failed:', message.payload.error);
@@ -184,6 +190,7 @@ async function init() {
     if (!document.hidden) {
       await loadDownloadStates();
       renderDetectedVideos();
+      renderManualHlsProgress();
     }
   }, 2000);
 }
@@ -1104,8 +1111,8 @@ function switchTab(tabName: 'auto' | 'manual') {
     if (autoDetectContent) autoDetectContent.classList.remove('active');
     if (manualHlsContent) manualHlsContent.classList.add('active');
     
-    // Reset form when switching to manual tab
-    resetManualHlsForm();
+    // Render progress if there's an active download
+    renderManualHlsProgress();
   }
 }
 
@@ -1114,6 +1121,7 @@ function switchTab(tabName: 'auto' | 'manual') {
  */
 function resetManualHlsForm() {
   isMediaPlaylistMode = false;
+  currentManualHlsUrl = null;
   if (hlsUrlInput) {
     hlsUrlInput.value = '';
   }
@@ -1138,6 +1146,126 @@ function resetManualHlsForm() {
     loadHlsPlaylistBtn.disabled = false;
     loadHlsPlaylistBtn.textContent = 'Load';
   }
+  if (manualHlsProgress) {
+    manualHlsProgress.style.display = 'none';
+    manualHlsProgress.innerHTML = '';
+  }
+}
+
+/**
+ * Render manual HLS download progress
+ */
+function renderManualHlsProgress() {
+  if (!manualHlsProgress || !currentManualHlsUrl) {
+    return;
+  }
+
+  const normalizedUrl = normalizeUrl(currentManualHlsUrl);
+  const downloadState = downloadStates.find(d => {
+    if (!d.metadata) return false;
+    return normalizeUrl(d.metadata.url) === normalizedUrl;
+  });
+
+  if (!downloadState) {
+    if (manualHlsProgress) {
+      manualHlsProgress.style.display = 'none';
+    }
+    return;
+  }
+
+  const isDownloading = downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
+  const isCompleted = downloadState.progress.stage === 'completed';
+  const isFailed = downloadState.progress.stage === 'failed';
+
+  if (!isDownloading && !isCompleted && !isFailed) {
+    if (manualHlsProgress) {
+      manualHlsProgress.style.display = 'none';
+    }
+    return;
+  }
+
+  if (!manualHlsProgress) return;
+  manualHlsProgress.style.display = 'block';
+
+  const stage = downloadState.progress.stage;
+  const statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
+  
+  let progressBar = '';
+  const isHlsDownload = (downloadState.metadata.format === 'hls' || downloadState.metadata.format === 'm3u8') && (stage === 'downloading' || stage === 'merging');
+  
+  if (isDownloading && isHlsDownload) {
+    const percentage = downloadState.progress.percentage || 0;
+    
+    if (stage === 'downloading') {
+      const downloaded = downloadState.progress.downloaded || 0;
+      const total = downloadState.progress.total || 0;
+      const speed = downloadState.progress.speed || 0;
+      
+      const downloadedText = formatFileSize(downloaded);
+      const totalText = total > 0 ? formatFileSize(total) : '?';
+      const speedText = formatSpeed(speed);
+      
+      progressBar = `
+        <div class="hls-progress-container">
+          <div class="hls-progress-bar-wrapper">
+            <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+          </div>
+          <div class="hls-progress-info">
+            <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
+            ${speed > 0 ? `<span class="hls-progress-speed">${speedText}</span>` : ''}
+          </div>
+        </div>
+      `;
+    } else if (stage === 'merging') {
+      const message = downloadState.progress.message || 'Merging streams...';
+      const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
+      
+      progressBar = `
+        <div class="hls-progress-container">
+          <div class="hls-progress-bar-wrapper">
+            <div class="hls-progress-bar" style="width: ${mergingPercentage}%"></div>
+          </div>
+          <div class="hls-progress-info">
+            <span class="hls-progress-size">${message}</span>
+            <span class="hls-progress-speed">${Math.round(mergingPercentage)}%</span>
+          </div>
+        </div>
+      `;
+    }
+  } else if (isDownloading) {
+    const fileSize = downloadState.progress.total;
+    const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
+    
+    progressBar = `
+      <div class="downloading-label">
+        <span class="downloading-dots">
+          <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+        </span>
+        ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ''}
+      </div>
+    `;
+  }
+
+  const title = downloadState.metadata.title || getVideoTitleFromUrl(currentManualHlsUrl);
+  
+  manualHlsProgress.innerHTML = `
+    <div class="video-item" style="margin: 0;">
+      <div class="video-item-content">
+        <div class="video-item-header">
+          <div class="video-item-title" title="${escapeHtml(currentManualHlsUrl)}">
+            ${escapeHtml(title)}
+          </div>
+          ${statusBadge}
+        </div>
+        ${progressBar}
+        ${isFailed && downloadState.progress.error ? `
+          <div style="font-size: 11px; color: #d32f2f; margin-top: 4px;">
+            ${escapeHtml(downloadState.progress.error)}
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
 }
 
 /**
@@ -1393,12 +1521,12 @@ async function handleStartHlsDownload() {
     });
     
     if (response && response.success) {
-      // Reset form after successful download
-      resetManualHlsForm();
-      // Switch to auto detect tab to see the download progress
-      switchTab('auto');
+      // Store the URL to track progress
+      currentManualHlsUrl = playlistUrl;
+      // Don't reset form, show progress instead
+      // Don't switch tabs, keep user in manual HLS tab
       await loadDownloadStates();
-      renderDetectedVideos();
+      renderManualHlsProgress();
     } else if (response && response.error) {
       alert(response.error);
       startHlsDownloadBtn.disabled = false;
