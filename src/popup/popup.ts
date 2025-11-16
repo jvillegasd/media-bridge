@@ -658,16 +658,16 @@ function renderDetectedVideos() {
           ${displayDimensions ? `<span class="video-resolution">${displayDimensions}</span>` : ''}
           <span class="video-link-type">${escapeHtml(getLinkTypeDisplayName(video.format))}</span>
           <span class="video-format">${escapeHtml(getFormatDisplayName(video.format, actualFormat))}</span>
-          ${video.duration ? `<span style="color: #666; margin-left: 4px;">⏱ ${formatDuration(video.duration)}</span>` : ''}
+          ${video.duration ? `<span style="color: #999; margin-left: 4px;">⏱ ${formatDuration(video.duration)}</span>` : ''}
         </div>
         ${video.pageUrl ? `
-          <div style="font-size: 11px; color: #999; margin-top: 4px;">
+          <div style="font-size: 11px; color: #b0b0b0; margin-top: 4px;">
             From: ${escapeHtml(new URL(video.pageUrl).hostname)}
           </div>
         ` : ''}
         ${progressBar}
         ${isFailed && downloadState.progress.error ? `
-          <div style="font-size: 11px; color: #d32f2f; margin-top: 4px;">
+          <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
             ${escapeHtml(downloadState.progress.error)}
           </div>
         ` : ''}
@@ -1329,7 +1329,7 @@ function renderManualHlsProgress() {
         </div>
         ${progressBar}
         ${isFailed && downloadState.progress.error ? `
-          <div style="font-size: 11px; color: #d32f2f; margin-top: 4px;">
+          <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
             ${escapeHtml(downloadState.progress.error)}
           </div>
         ` : ''}

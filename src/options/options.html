@@ -13,7 +13,8 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
+      background: #1e1e1e;
+      color: #e0e0e0;
       padding: 20px;
       max-width: 800px;
       margin: 0 auto;
@@ -25,27 +26,28 @@
 
     .header h1 {
       font-size: 24px;
-      color: #333;
+      color: #e0e0e0;
       margin-bottom: 8px;
     }
 
     .header p {
-      color: #666;
+      color: #999;
       font-size: 14px;
     }
 
     .section {
-      background: white;
+      background: #2d2d2d;
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      border: 1px solid #404040;
     }
 
     .section-title {
       font-size: 18px;
       font-weight: 500;
-      color: #333;
+      color: #e0e0e0;
       margin-bottom: 16px;
     }
 
@@ -57,21 +59,28 @@
       display: block;
       font-size: 14px;
       font-weight: 500;
-      color: #333;
+      color: #e0e0e0;
       margin-bottom: 8px;
     }
 
     .form-input {
       width: 100%;
       padding: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid #555;
       border-radius: 4px;
       font-size: 14px;
+      background: #1e1e1e;
+      color: #e0e0e0;
     }
 
     .form-input:focus {
       outline: none;
       border-color: #4285f4;
+    }
+
+    .form-input option {
+      background: #2d2d2d;
+      color: #e0e0e0;
     }
 
     .form-checkbox {
@@ -80,7 +89,7 @@
 
     .form-help {
       font-size: 12px;
-      color: #666;
+      color: #999;
       margin-top: 4px;
     }
 
@@ -104,13 +113,15 @@
     }
 
     .btn-secondary {
-      background: #f5f5f5;
-      color: #333;
+      background: #2d2d2d;
+      color: #e0e0e0;
+      border: 1px solid #555;
       margin-left: 8px;
     }
 
     .btn-secondary:hover {
-      background: #e0e0e0;
+      background: #353535;
+      border-color: #666;
     }
 
     .status {
@@ -121,18 +132,18 @@
     }
 
     .status-success {
-      background: #e8f5e9;
-      color: #388e3c;
+      background: #1e3a2e;
+      color: #66bb6a;
     }
 
     .status-error {
-      background: #ffebee;
-      color: #d32f2f;
+      background: #4a1e1e;
+      color: #ef5350;
     }
 
     .status-info {
-      background: #e3f2fd;
-      color: #1976d2;
+      background: #1e3a5f;
+      color: #64b5f6;
     }
 
     .auth-section {
@@ -149,13 +160,13 @@
     }
 
     .auth-status.authenticated {
-      background: #e8f5e9;
-      color: #388e3c;
+      background: #1e3a2e;
+      color: #66bb6a;
     }
 
     .auth-status.not-authenticated {
-      background: #ffebee;
-      color: #d32f2f;
+      background: #4a1e1e;
+      color: #ef5350;
     }
   </style>
 </head>
