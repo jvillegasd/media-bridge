@@ -7,6 +7,7 @@ import { DownloadStateManager } from '../core/storage/download-state';
 import { MessageType } from '../shared/messages';
 import { normalizeUrl, detectFormatFromUrl } from '../core/utils/url-utils';
 import { parseMasterPlaylist, isMasterPlaylist, isMediaPlaylist } from '../core/utils/m3u8-parser';
+import { ChromeStorage } from '../core/storage/chrome-storage';
 
 
 // DOM elements
@@ -31,6 +32,8 @@ let hlsQualitySelection: HTMLDivElement | null = null;
 let manualHlsProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
 let currentManualHlsUrl: string | null = null;
+let themeToggle: HTMLButtonElement | null = null;
+let themeIcon: SVGElement | null = null;
 
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
@@ -62,11 +65,21 @@ async function init() {
   hlsMediaPlaylistWarning = document.getElementById('hlsMediaPlaylistWarning') as HTMLDivElement;
   hlsQualitySelection = document.getElementById('hlsQualitySelection') as HTMLDivElement;
   manualHlsProgress = document.getElementById('manualHlsProgress') as HTMLDivElement;
+  themeToggle = document.getElementById('themeToggle') as HTMLButtonElement;
+  themeIcon = document.getElementById('themeIcon') as SVGElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
     noVideoNotice.classList.remove('show');
     noVideoNotice.classList.remove('visible');
+  }
+
+  // Load and apply theme
+  await loadTheme();
+  
+  // Setup theme toggle
+  if (themeToggle) {
+    themeToggle.addEventListener('click', toggleTheme);
   }
 
   // Setup event listeners
@@ -1601,6 +1614,67 @@ async function handleStartHlsDownload() {
     // Re-enable form elements on error
     updateManualHlsFormState();
   }
+}
+
+/**
+ * Load theme from storage and apply it
+ */
+async function loadTheme() {
+  const theme = await ChromeStorage.get<string>('theme');
+  const isLightMode = theme === 'light';
+  applyTheme(isLightMode);
+}
+
+/**
+ * Apply theme to the page
+ */
+function applyTheme(isLightMode: boolean) {
+  const root = document.documentElement;
+  if (isLightMode) {
+    root.classList.add('light-mode');
+  } else {
+    root.classList.remove('light-mode');
+  }
+  updateThemeIcon(isLightMode);
+}
+
+/**
+ * Update theme icon based on current theme
+ */
+function updateThemeIcon(isLightMode: boolean) {
+  if (!themeIcon) return;
+  
+  if (isLightMode) {
+    // Moon icon for light mode (to switch to dark)
+    themeIcon.innerHTML = `
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+    `;
+  } else {
+    // Sun icon for dark mode (to switch to light)
+    themeIcon.innerHTML = `
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    `;
+  }
+}
+
+/**
+ * Toggle theme between light and dark
+ */
+async function toggleTheme() {
+  const root = document.documentElement;
+  const isLightMode = root.classList.contains('light-mode');
+  const newTheme = isLightMode ? 'dark' : 'light';
+  
+  await ChromeStorage.set('theme', newTheme);
+  applyTheme(!isLightMode);
 }
 
 // Initialize when DOM is ready

@@ -5,6 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Media Bridge</title>
   <style>
+    :root {
+      /* Dark mode (default) */
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #2d2d2d;
+      --bg-tertiary: #252525;
+      --bg-hover: #353535;
+      --bg-active: #404040;
+      --text-primary: #e0e0e0;
+      --text-secondary: #999;
+      --text-tertiary: #b0b0b0;
+      --border-color: #404040;
+      --border-color-light: #555;
+      --border-color-hover: #666;
+    }
+
+    :root.light-mode {
+      /* Light mode */
+      --bg-primary: #f5f5f5;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #f5f5f5;
+      --bg-hover: #f5f5f5;
+      --bg-active: #e8e8e8;
+      --text-primary: #333;
+      --text-secondary: #666;
+      --text-tertiary: #999;
+      --border-color: #ddd;
+      --border-color-light: #ccc;
+      --border-color-hover: #4285f4;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -17,20 +47,50 @@
       max-height: 480px;
       height: 480px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1e1e1e;
-      color: #e0e0e0;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       display: flex;
       flex-direction: column;
       margin: 0;
       padding: 0;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* Theme Toggle */
+    .theme-toggle {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      z-index: 100;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .theme-toggle svg {
+      width: 18px;
+      height: 18px;
     }
 
     /* Tabs */
     .tabs {
       display: flex;
-      background: #2d2d2d;
-      border-bottom: 1px solid #404040;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
       flex-shrink: 0;
+      position: relative;
     }
 
     .tab {
@@ -39,7 +99,7 @@
       background: transparent;
       border: none;
       border-bottom: 2px solid transparent;
-      color: #999;
+      color: var(--text-secondary);
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
@@ -48,14 +108,14 @@
     }
 
     .tab:hover {
-      background: #353535;
-      color: #e0e0e0;
+      background: var(--bg-hover);
+      color: var(--text-primary);
     }
 
     .tab.active {
       color: #4285f4;
       border-bottom-color: #4285f4;
-      background: #2d2d2d;
+      background: var(--bg-secondary);
     }
 
     /* Tab Content */
@@ -87,9 +147,9 @@
 
     .secondary-btn {
       padding: 8px 12px;
-      border: 1px solid #555;
-      background: #2d2d2d;
-      color: #e0e0e0;
+      border: 1px solid var(--border-color-light);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
       border-radius: 4px;
       font-size: 13px;
       cursor: pointer;
@@ -97,8 +157,8 @@
     }
 
     .secondary-btn:hover {
-      background: #353535;
-      border-color: #666;
+      background: var(--bg-hover);
+      border-color: var(--border-color-hover);
     }
 
     .primary-btn {
@@ -126,14 +186,14 @@
       margin-bottom: 0;
       border-radius: 0;
       padding: 12px;
-      background: #252525;
-      color: #e0e0e0;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
       display: none;
       box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
       position: sticky;
       bottom: 50px;
       z-index: 15;
-      border-top: 1px solid #404040;
+      border-top: 1px solid var(--border-color);
     }
 
     .no-video-notice.show {
@@ -155,7 +215,7 @@
 
     .no-video-notice p {
       font-size: 12px;
-      color: #b0b0b0;
+      color: var(--text-tertiary);
       line-height: 1.4;
     }
 
@@ -168,7 +228,7 @@
     .notice-close {
       background: transparent;
       border: none;
-      color: #999;
+      color: var(--text-secondary);
       font-size: 20px;
       font-weight: bold;
       cursor: pointer;
@@ -185,13 +245,13 @@
     }
 
     .notice-close:hover {
-      color: #e0e0e0;
+      color: var(--text-primary);
       background: rgba(255, 255, 255, 0.1);
     }
 
     .video-item, .download-item {
-      background: #2d2d2d;
-      border: 1px solid #404040;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
       border-radius: 4px;
       padding: 10px;
       margin-bottom: 6px;
@@ -205,7 +265,7 @@
       height: 68px;
       border-radius: 4px;
       overflow: hidden;
-      background: #1a1a1a;
+      background: var(--bg-primary);
       position: relative;
     }
 
@@ -241,7 +301,7 @@
     .video-item-title, .download-item-title {
       font-size: 13px;
       font-weight: 500;
-      color: #e0e0e0;
+      color: var(--text-primary);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -250,10 +310,11 @@
 
     .video-meta {
       font-size: 11px;
-      color: #999;
+      color: var(--text-secondary);
       margin-top: 3px;
     }
 
+    /* Badge colors - dark mode */
     .video-resolution {
       display: inline-block;
       background: #1e3a5f;
@@ -287,6 +348,22 @@
       font-weight: 500;
     }
 
+    /* Badge colors - light mode */
+    :root.light-mode .video-resolution {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    :root.light-mode .video-format {
+      background: #f3e5f5;
+      color: #7b1fa2;
+    }
+
+    :root.light-mode .video-link-type {
+      background: #fff3e0;
+      color: #f57c00;
+    }
+
     .video-btn {
       padding: 5px 10px;
       background: #4285f4;
@@ -311,11 +388,11 @@
     .video-quality-select {
       width: 100%;
       padding: 6px 8px;
-      border: 1px solid #555;
+      border: 1px solid var(--border-color-light);
       border-radius: 4px;
       font-size: 12px;
-      background: #2d2d2d;
-      color: #e0e0e0;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
       cursor: pointer;
       margin-top: 8px;
       font-family: inherit;
@@ -326,15 +403,15 @@
     }
 
     .video-quality-select:disabled {
-      background: #252525;
+      background: var(--bg-tertiary);
       cursor: not-allowed;
       opacity: 0.7;
     }
 
     .video-quality-select option {
       padding: 4px;
-      background: #2d2d2d;
-      color: #e0e0e0;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
     }
 
     .video-status {
@@ -352,6 +429,7 @@
       margin-left: 8px;
     }
 
+    /* Status badges - dark mode */
     .status-detecting { background: #1e3a5f; color: #64b5f6; }
     .status-downloading { background: #5a3a1a; color: #ffb74d; }
     .status-merging { background: #4a2c4a; color: #ba68c8; }
@@ -360,12 +438,21 @@
     .status-completed { background: #1e3a2e; color: #66bb6a; }
     .status-failed { background: #4a1e1e; color: #ef5350; }
 
+    /* Status badges - light mode */
+    :root.light-mode .status-detecting { background: #e3f2fd; color: #1976d2; }
+    :root.light-mode .status-downloading { background: #fff3e0; color: #f57c00; }
+    :root.light-mode .status-merging { background: #f3e5f5; color: #7b1fa2; }
+    :root.light-mode .status-saving { background: #e8f5e9; color: #388e3c; }
+    :root.light-mode .status-uploading { background: #e8f5e9; color: #388e3c; }
+    :root.light-mode .status-completed { background: #e8f5e9; color: #388e3c; }
+    :root.light-mode .status-failed { background: #ffebee; color: #d32f2f; }
+
     .downloading-label {
       display: flex;
       align-items: center;
       margin-top: 8px;
       font-size: 12px;
-      color: #999;
+      color: var(--text-secondary);
     }
 
     .downloading-dots {
@@ -375,7 +462,7 @@
     }
 
     .file-size {
-      color: #b0b0b0;
+      color: var(--text-tertiary);
       font-size: 11px;
       margin-left: 4px;
     }
@@ -388,7 +475,7 @@
     .hls-progress-bar-wrapper {
       width: 100%;
       height: 6px;
-      background: #404040;
+      background: var(--border-color);
       border-radius: 3px;
       overflow: hidden;
       margin-bottom: 6px;
@@ -406,12 +493,12 @@
       justify-content: space-between;
       align-items: center;
       font-size: 11px;
-      color: #999;
+      color: var(--text-secondary);
     }
 
     .hls-progress-size {
       font-weight: 500;
-      color: #e0e0e0;
+      color: var(--text-primary);
     }
 
     .hls-progress-speed {
@@ -447,7 +534,7 @@
 
     .empty-state {
       text-align: center;
-      color: #999;
+      color: var(--text-secondary);
       padding: 40px 20px;
       font-size: 14px;
     }
@@ -456,8 +543,8 @@
       display: flex;
       align-items: center;
       justify-content: space-around;
-      background: #2d2d2d;
-      border-top: 1px solid #404040;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-color);
       padding: 0;
       flex-shrink: 0;
       position: sticky;
@@ -474,7 +561,7 @@
       padding: 10px;
       background: transparent;
       border: none;
-      color: #999;
+      color: var(--text-secondary);
       cursor: pointer;
       border-radius: 0;
       transition: all 0.2s;
@@ -483,12 +570,12 @@
     }
 
     .bottom-bar-btn:hover {
-      background: #353535;
+      background: var(--bg-hover);
       color: #4285f4;
     }
 
     .bottom-bar-btn:active {
-      background: #404040;
+      background: var(--bg-active);
     }
 
     .bottom-bar-btn svg {
@@ -513,19 +600,19 @@
       margin-bottom: 8px;
       font-size: 14px;
       font-weight: 500;
-      color: #e0e0e0;
+      color: var(--text-primary);
     }
 
     .hls-quality-select,
     .hls-quality-input {
       width: 100%;
       padding: 10px 12px;
-      border: 1px solid #555;
+      border: 1px solid var(--border-color-light);
       border-radius: 4px;
       font-size: 14px;
       font-family: inherit;
-      background: #2d2d2d;
-      color: #e0e0e0;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
       transition: border-color 0.2s;
     }
 
@@ -542,7 +629,7 @@
     }
 
     .hls-quality-select:disabled {
-      background: #252525;
+      background: var(--bg-tertiary);
       cursor: not-allowed;
       opacity: 0.7;
     }
@@ -555,10 +642,11 @@
 
     .hls-quality-option-info {
       font-size: 12px;
-      color: #999;
+      color: var(--text-secondary);
       margin-left: 8px;
     }
 
+    /* Warning - dark mode */
     .hls-quality-warning {
       background: #5a3a1a;
       border: 1px solid #ffb74d;
@@ -582,6 +670,20 @@
       line-height: 1.4;
     }
 
+    /* Warning - light mode */
+    :root.light-mode .hls-quality-warning {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+    }
+
+    :root.light-mode .hls-quality-warning strong {
+      color: #856404;
+    }
+
+    :root.light-mode .hls-quality-warning p {
+      color: #856404;
+    }
+
   </style>
 </head>
 <body>
@@ -589,6 +691,19 @@
   <div class="tabs">
     <button id="autoDetectTab" class="tab active" data-tab="auto">Auto Detect</button>
     <button id="manualHlsTab" class="tab" data-tab="manual">HLS</button>
+    <button id="themeToggle" class="theme-toggle" title="Toggle theme">
+      <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
   </div>
 
   <!-- Auto Detect Tab Content -->
@@ -674,8 +789,8 @@
         </div>
       </div>
       <!-- Download Progress Display -->
-      <div id="manualHlsProgress" style="display: none; padding: 12px; background: #2d2d2d; border-top: 1px solid #404040;"></div>
-      <div style="padding: 16px; border-top: 1px solid #404040; background: #2d2d2d; flex-shrink: 0;">
+      <div id="manualHlsProgress" style="display: none; padding: 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);"></div>
+      <div style="padding: 16px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); flex-shrink: 0;">
         <button id="startHlsDownloadBtn" class="primary-btn" style="width: 100%;" disabled>Download</button>
       </div>
     </div>
