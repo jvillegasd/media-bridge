@@ -3,7 +3,12 @@
  */
 
 import { VideoMetadata } from "../../types";
-import { isMasterPlaylist, isMediaPlaylist, parseMasterPlaylist, belongsToMasterPlaylist } from "../../utils/m3u8-parser";
+import {
+  isMasterPlaylist,
+  isMediaPlaylist,
+  parseMasterPlaylist,
+  belongsToMasterPlaylist,
+} from "../../utils/m3u8-parser";
 import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
@@ -47,9 +52,13 @@ export class HlsDetectionHandler {
 
       // Check if this media playlist belongs to any tracked master playlist
       if (isMedia) {
-        const belongsToMaster = this.checkIfBelongsToMasterPlaylist(normalizedUrl);
+        const belongsToMaster =
+          this.checkIfBelongsToMasterPlaylist(normalizedUrl);
         if (belongsToMaster) {
-          logger.info("[Media Bridge] M3U8 media playlist belongs to a master playlist, removing it", { url });
+          logger.debug(
+            "[Media Bridge] M3U8 media playlist belongs to a master playlist, removing it",
+            { url },
+          );
           // Remove this media playlist from detected videos
           if (this.onVideoRemoved) {
             this.onVideoRemoved(normalizedUrl);
@@ -58,7 +67,9 @@ export class HlsDetectionHandler {
         }
 
         // It's a standalone media playlist, add it as M3U8 format
-        logger.info("[Media Bridge] Detected standalone M3U8 media playlist", { url });
+        logger.info("[Media Bridge] Detected standalone M3U8 media playlist", {
+          url,
+        });
         const metadata = await this.extractMetadata(url, "m3u8");
 
         if (metadata && this.onVideoDetected) {
@@ -71,11 +82,11 @@ export class HlsDetectionHandler {
       // Handle master playlist
       if (isMaster) {
         logger.info("[Media Bridge] Detected HLS Master Playlist", { url });
-        
+
         // Track this master playlist and its variants
         const levels = parseMasterPlaylist(playlistText, url);
         const variantUrls = new Set<string>();
-        levels.forEach(level => {
+        levels.forEach((level) => {
           const normalizedVariantUrl = normalizeUrl(level.uri);
           variantUrls.add(normalizedVariantUrl);
         });
@@ -100,14 +111,14 @@ export class HlsDetectionHandler {
       }
 
       // Not a master or media playlist, skip
-      logger.warn("[Media Bridge] HLS URL is neither master nor media playlist, skipping", { url });
+      logger.warn(
+        "[Media Bridge] HLS URL is neither master nor media playlist, skipping",
+        { url },
+      );
       return null;
     } catch (error) {
       // If we can't fetch or parse the playlist, don't add it to the UI
-      logger.debug(
-        "[Media Bridge] Failed to validate HLS playlist:",
-        error,
-      );
+      logger.debug("[Media Bridge] Failed to validate HLS playlist:", error);
       return null;
     }
   }
@@ -151,11 +162,20 @@ export class HlsDetectionHandler {
       }
       // Also check using the parser function for more robust matching
       try {
-        if (belongsToMasterPlaylist(masterInfo.playlistText, masterInfo.url, mediaPlaylistUrl)) {
+        if (
+          belongsToMasterPlaylist(
+            masterInfo.playlistText,
+            masterInfo.url,
+            mediaPlaylistUrl,
+          )
+        ) {
           return true;
         }
       } catch (error) {
-        logger.debug("[Media Bridge] Error checking master playlist membership", { error });
+        logger.debug(
+          "[Media Bridge] Error checking master playlist membership",
+          { error },
+        );
       }
     }
     return false;
@@ -170,8 +190,11 @@ export class HlsDetectionHandler {
     }
 
     const onVideoRemoved = this.onVideoRemoved;
-    variantUrls.forEach(variantUrl => {
-      logger.debug("[Media Bridge] Removing variant video that belongs to master playlist", { variantUrl });
+    variantUrls.forEach((variantUrl) => {
+      logger.debug(
+        "[Media Bridge] Removing variant video that belongs to master playlist",
+        { variantUrl },
+      );
       onVideoRemoved(variantUrl);
     });
   }
@@ -179,7 +202,10 @@ export class HlsDetectionHandler {
   /**
    * Extract metadata from HLS playlist URL
    */
-  private async extractMetadata(url: string, format: "hls" | "m3u8" = "hls"): Promise<VideoMetadata | null> {
+  private async extractMetadata(
+    url: string,
+    format: "hls" | "m3u8" = "hls",
+  ): Promise<VideoMetadata | null> {
     const metadata: VideoMetadata = {
       url,
       format,
