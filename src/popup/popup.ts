@@ -86,6 +86,9 @@ async function init() {
       if (message.type === MessageType.VIDEO_DETECTED) {
         addDetectedVideo(message.payload);
       }
+      if (message.type === MessageType.VIDEO_REMOVED) {
+        removeDetectedVideo(message.payload?.url);
+      }
       if (message.type === MessageType.SET_ICON_GRAY) {
         // Icon reset - just refresh the display (keep videos until page refresh)
         renderDetectedVideos();
@@ -362,6 +365,20 @@ async function requestDetectedVideos() {
   } catch (error) {
     // Tab might not have content script, ignore
     console.debug('Could not get detected videos:', error);
+  }
+}
+
+/**
+ * Remove detected video from store and refresh UI
+ */
+function removeDetectedVideo(url: string | undefined) {
+  if (!url) return;
+  
+  const normalizedUrl = normalizeUrl(url);
+  
+  if (detectedVideos[normalizedUrl]) {
+    delete detectedVideos[normalizedUrl];
+    renderDetectedVideos();
   }
 }
 

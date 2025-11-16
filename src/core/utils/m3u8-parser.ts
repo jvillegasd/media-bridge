@@ -186,9 +186,8 @@ export function belongsToMasterPlaylist(
   // Normalize the media playlist URL for comparison
   const normalizedMediaUrl = normalizeUrl(mediaPlaylistUrl);
   
-  logger.info("normalizedMediaUrl", { normalizedMediaUrl });
-  logger.info("levels", { levels });
-
+  logger.debug("Normalized media URL", { normalizedMediaUrl });
+  logger.debug("levels", { levels });
 
   // Check if the media playlist URL matches any variant URL from the master playlist
   return levels.some((level) => {

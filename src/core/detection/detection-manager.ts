@@ -10,20 +10,24 @@ import { HlsDetectionHandler } from "./hls/hls-detection-handler";
 
 export interface DetectionManagerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
+  onVideoRemoved?: (url: string) => void;
 }
 
 export class DetectionManager {
   private onVideoDetected?: (video: VideoMetadata) => void;
+  private onVideoRemoved?: (url: string) => void;
   public readonly directHandler: DirectDetectionHandler;
   private hlsHandler: HlsDetectionHandler;
 
   constructor(options: DetectionManagerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
+    this.onVideoRemoved = options.onVideoRemoved;
     this.directHandler = new DirectDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
     });
     this.hlsHandler = new HlsDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
+      onVideoRemoved: (url) => this.handleVideoRemoved(url),
     });
   }
 
@@ -35,18 +39,18 @@ export class DetectionManager {
 
     switch (format) {
       case "direct":
-        logger.info("[Media Bridge] Direct video detected", { url });
+        logger.debug("[Media Bridge] Direct video detected", { url });
         this.directHandler.handleNetworkRequest(url);
         break;
 
       case "hls":
-        logger.info("[Media Bridge] HLS video detected", { url });
+        logger.debug("[Media Bridge] HLS video detected", { url });
         this.hlsHandler.handleNetworkRequest(url);
         break;
 
       default:
         // Reject unknown formats - don't process them
-        logger.info("[Media Bridge] Unknown format detected", { url });
+        logger.debug("[Media Bridge] Unknown format detected", { url });
         break;
     }
   }
@@ -70,6 +74,15 @@ export class DetectionManager {
   private handleVideoDetected(video: VideoMetadata): void {
     if (this.onVideoDetected) {
       this.onVideoDetected(video);
+    }
+  }
+
+  /**
+   * Handle video removal
+   */
+  private handleVideoRemoved(url: string): void {
+    if (this.onVideoRemoved) {
+      this.onVideoRemoved(url);
     }
   }
 }

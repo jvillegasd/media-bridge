@@ -43,6 +43,26 @@ function safeSendMessage(message: any): Promise<void> {
 }
 
 /**
+ * Remove detected video and notify popup
+ */
+function removeDetectedVideo(url: string): void {
+  const normalizedUrl = normalizeUrl(url);
+  
+  if (detectedVideos[normalizedUrl]) {
+    delete detectedVideos[normalizedUrl];
+    sentToPopup.delete(normalizedUrl);
+    
+    logger.info("[Media Bridge] Removed detected video", { url: normalizedUrl });
+    
+    // Notify popup about removal
+    safeSendMessage({
+      type: MessageType.VIDEO_REMOVED,
+      payload: { url: normalizedUrl },
+    });
+  }
+}
+
+/**
  * Add or update detected video and notify popup
  * Uses normalized URL as unique key to prevent duplicates
  */
@@ -147,6 +167,9 @@ function init() {
   detectionManager = new DetectionManager({
     onVideoDetected: (video) => {
       addDetectedVideo(video);
+    },
+    onVideoRemoved: (url) => {
+      removeDetectedVideo(url);
     },
   });
 
