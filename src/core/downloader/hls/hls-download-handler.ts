@@ -463,6 +463,10 @@ export class HlsDownloadHandler {
     masterPlaylistUrl: string,
     filename: string,
     stateId: string,
+    hlsQuality?: {
+      videoPlaylistUrl?: string | null;
+      audioPlaylistUrl?: string | null;
+    },
   ): Promise<{ filePath: string; fileExtension?: string }> {
     try {
       logger.info(`Starting HLS download from ${masterPlaylistUrl}`);
@@ -475,22 +479,33 @@ export class HlsDownloadHandler {
       // Update progress: parsing playlist
       await this.updateProgress(stateId, 0, 0, "Parsing playlist...");
 
-      // Fetch and parse master playlist
-      const masterPlaylistText = await fetchText(masterPlaylistUrl, 3);
-      const levels = parseMasterPlaylist(masterPlaylistText, masterPlaylistUrl);
+      let videoPlaylistUrl: string | null = null;
+      let audioPlaylistUrl: string | null = null;
 
-      if (levels.length === 0) {
-        throw new Error("No levels found in master playlist");
+      // If quality preferences are provided, use them directly
+      if (hlsQuality) {
+        videoPlaylistUrl = hlsQuality.videoPlaylistUrl || null;
+        audioPlaylistUrl = hlsQuality.audioPlaylistUrl || null;
+        logger.info(`Using provided quality preferences - video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
+      } else {
+        // Otherwise, fetch and parse master playlist to auto-select
+        const masterPlaylistText = await fetchText(masterPlaylistUrl, 3);
+        const levels = parseMasterPlaylist(masterPlaylistText, masterPlaylistUrl);
+
+        if (levels.length === 0) {
+          throw new Error("No levels found in master playlist");
+        }
+
+        // Select video and audio levels
+        const selected = this.selectLevels(levels);
+        videoPlaylistUrl = selected.video;
+        audioPlaylistUrl = selected.audio;
+        logger.info(`Auto-selected video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
       }
-
-      // Select video and audio levels
-      const { video: videoPlaylistUrl, audio: audioPlaylistUrl } = this.selectLevels(levels);
 
       if (!videoPlaylistUrl && !audioPlaylistUrl) {
         throw new Error("No video or audio levels found in master playlist");
       }
-
-      logger.info(`Selected video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
 
       // Initialize byte tracking
       this.bytesDownloaded = 0;

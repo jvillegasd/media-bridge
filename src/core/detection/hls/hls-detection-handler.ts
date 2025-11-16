@@ -54,7 +54,11 @@ export class HlsDetectionHandler {
       }
 
       if (isMaster) {
-        return await this.handleMasterPlaylist(url, normalizedUrl, playlistText);
+        return await this.handleMasterPlaylist(
+          url,
+          normalizedUrl,
+          playlistText,
+        );
       }
 
       logger.warn(
@@ -82,22 +86,19 @@ export class HlsDetectionHandler {
     url: string,
     normalizedUrl: string,
   ): Promise<VideoMetadata | null> {
-    const belongsToMaster =
-      this.checkIfBelongsToMasterPlaylist(normalizedUrl);
+    const belongsToMaster = this.checkIfBelongsToMasterPlaylist(normalizedUrl);
 
     if (belongsToMaster) {
       logger.debug(
         "[Media Bridge] M3U8 media playlist belongs to a master playlist, removing it",
-        { url },
+        url,
       );
       this.removeDetectedVideo(normalizedUrl);
       return null;
     }
 
     // It's a standalone media playlist, add it as M3U8 format
-    logger.info("[Media Bridge] Detected standalone M3U8 media playlist", {
-      url,
-    });
+    logger.info("[Media Bridge] Detected standalone M3U8 media playlist", url);
     return await this.addDetectedVideo(url, "m3u8");
   }
 

@@ -2,10 +2,11 @@
  * Popup UI for displaying detected videos and managing downloads
  */
 
-import { DownloadState, VideoMetadata, VideoFormat } from '../core/types';
+import { DownloadState, VideoMetadata, VideoFormat, Level } from '../core/types';
 import { DownloadStateManager } from '../core/storage/download-state';
 import { MessageType } from '../shared/messages';
-import { normalizeUrl } from '../core/utils/url-utils';
+import { normalizeUrl, detectFormatFromUrl } from '../core/utils/url-utils';
+import { parseMasterPlaylist, isMasterPlaylist, isMediaPlaylist } from '../core/utils/m3u8-parser';
 
 
 // DOM elements
@@ -16,6 +17,18 @@ let noVideoNotice: HTMLDivElement | null = null;
 let settingsBtn: HTMLButtonElement | null = null;
 let downloadsBtn: HTMLButtonElement | null = null;
 let clearCompletedBtn: HTMLButtonElement | null = null;
+let manualHlsDownloadBtn: HTMLButtonElement | null = null;
+let hlsQualityModal: HTMLDivElement | null = null;
+let closeHlsModalBtn: HTMLButtonElement | null = null;
+let cancelHlsDownloadBtn: HTMLButtonElement | null = null;
+let startHlsDownloadBtn: HTMLButtonElement | null = null;
+let loadHlsPlaylistBtn: HTMLButtonElement | null = null;
+let videoQualitySelect: HTMLSelectElement | null = null;
+let audioQualitySelect: HTMLSelectElement | null = null;
+let hlsUrlInput: HTMLInputElement | null = null;
+let hlsMediaPlaylistWarning: HTMLDivElement | null = null;
+let hlsQualitySelection: HTMLDivElement | null = null;
+let isMediaPlaylistMode: boolean = false;
 
 // List containers
 const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
@@ -35,6 +48,17 @@ async function init() {
   settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
   downloadsBtn = document.getElementById('downloadsBtn') as HTMLButtonElement;
   clearCompletedBtn = document.getElementById('clearCompletedBtn') as HTMLButtonElement;
+  manualHlsDownloadBtn = document.getElementById('manualHlsDownloadBtn') as HTMLButtonElement;
+  hlsQualityModal = document.getElementById('hlsQualityModal') as HTMLDivElement;
+  closeHlsModalBtn = document.getElementById('closeHlsModalBtn') as HTMLButtonElement;
+  cancelHlsDownloadBtn = document.getElementById('cancelHlsDownloadBtn') as HTMLButtonElement;
+  startHlsDownloadBtn = document.getElementById('startHlsDownloadBtn') as HTMLButtonElement;
+  loadHlsPlaylistBtn = document.getElementById('loadHlsPlaylistBtn') as HTMLButtonElement;
+  videoQualitySelect = document.getElementById('videoQualitySelect') as HTMLSelectElement;
+  audioQualitySelect = document.getElementById('audioQualitySelect') as HTMLSelectElement;
+  hlsUrlInput = document.getElementById('hlsUrlInput') as HTMLInputElement;
+  hlsMediaPlaylistWarning = document.getElementById('hlsMediaPlaylistWarning') as HTMLDivElement;
+  hlsQualitySelection = document.getElementById('hlsQualitySelection') as HTMLDivElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
@@ -62,6 +86,42 @@ async function init() {
   }
   if (clearCompletedBtn) {
     clearCompletedBtn.addEventListener('click', handleClearCompleted);
+  }
+  if (manualHlsDownloadBtn) {
+    manualHlsDownloadBtn.addEventListener('click', handleManualHlsDownload);
+  }
+  if (closeHlsModalBtn) {
+    closeHlsModalBtn.addEventListener('click', closeHlsQualityModal);
+  }
+  if (cancelHlsDownloadBtn) {
+    cancelHlsDownloadBtn.addEventListener('click', closeHlsQualityModal);
+  }
+  if (startHlsDownloadBtn) {
+    startHlsDownloadBtn.addEventListener('click', handleStartHlsDownload);
+  }
+  if (loadHlsPlaylistBtn) {
+    loadHlsPlaylistBtn.addEventListener('click', handleLoadHlsPlaylist);
+  }
+  if (hlsUrlInput) {
+    hlsUrlInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        handleLoadHlsPlaylist();
+      }
+    });
+  }
+  if (videoQualitySelect) {
+    videoQualitySelect.addEventListener('change', updateDownloadButtonState);
+  }
+  if (audioQualitySelect) {
+    audioQualitySelect.addEventListener('change', updateDownloadButtonState);
+  }
+  if (hlsQualityModal) {
+    hlsQualityModal.addEventListener('click', (e) => {
+      // Close modal if clicking on the backdrop (not the content)
+      if (e.target === hlsQualityModal) {
+        closeHlsQualityModal();
+      }
+    });
   }
 
   // Listen for messages
@@ -972,6 +1032,386 @@ function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Fetch text from URL using background script (for CORS)
+ */
+async function fetchTextViaBackground(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        type: MessageType.FETCH_RESOURCE,
+        payload: {
+          input: url,
+          init: {
+            method: 'GET',
+          },
+        },
+      },
+      (response: [any, Error | null] | undefined) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response) {
+          reject(new Error('No response from background script'));
+          return;
+        }
+        const [res, error] = response;
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (res && res.status === 200 && res.body) {
+          // Convert array of bytes to string
+          const bytes = new Uint8Array(res.body);
+          const text = new TextDecoder().decode(bytes);
+          resolve(text);
+        } else {
+          reject(new Error(`Failed to fetch: ${res?.status || 'unknown status'}`));
+        }
+      }
+    );
+  });
+}
+
+/**
+ * Format quality label for display
+ */
+function formatQualityLabel(level: Level): string {
+  const parts: string[] = [];
+  
+  if (level.height) {
+    parts.push(`${level.height}p`);
+  } else if (level.width && level.height) {
+    parts.push(`${level.width}x${level.height}`);
+  }
+  
+  if (level.bitrate) {
+    const bitrateMbps = (level.bitrate / 1000000).toFixed(2);
+    parts.push(`${bitrateMbps} Mbps`);
+  }
+  
+  if (level.fps) {
+    parts.push(`${level.fps} fps`);
+  }
+  
+  return parts.length > 0 ? parts.join(' • ') : 'Unknown';
+}
+
+/**
+ * Handle manual HLS download button click
+ */
+async function handleManualHlsDownload() {
+  if (!hlsQualityModal) return;
+  
+  // Reset form
+  isMediaPlaylistMode = false;
+  if (hlsUrlInput) {
+    hlsUrlInput.value = '';
+  }
+  if (videoQualitySelect) {
+    videoQualitySelect.innerHTML = '<option value="">Select video quality...</option>';
+    videoQualitySelect.disabled = true;
+  }
+  if (audioQualitySelect) {
+    audioQualitySelect.innerHTML = '<option value="">Select audio quality...</option>';
+    audioQualitySelect.disabled = true;
+  }
+  if (startHlsDownloadBtn) {
+    startHlsDownloadBtn.disabled = true;
+  }
+  if (hlsMediaPlaylistWarning) {
+    hlsMediaPlaylistWarning.style.display = 'none';
+  }
+  if (hlsQualitySelection) {
+    hlsQualitySelection.style.display = 'none';
+  }
+  if (loadHlsPlaylistBtn) {
+    loadHlsPlaylistBtn.disabled = false;
+    loadHlsPlaylistBtn.textContent = 'Load';
+  }
+  
+  // Show modal
+  hlsQualityModal.style.display = 'flex';
+}
+
+/**
+ * Close HLS quality modal
+ */
+function closeHlsQualityModal() {
+  if (!hlsQualityModal) return;
+  hlsQualityModal.style.display = 'none';
+}
+
+/**
+ * Handle Load HLS playlist button click
+ */
+async function handleLoadHlsPlaylist() {
+  if (!hlsUrlInput || !loadHlsPlaylistBtn) return;
+  
+  const rawUrl = hlsUrlInput.value.trim();
+  
+  if (!rawUrl) {
+    alert('Please enter an HLS playlist URL');
+    return;
+  }
+  
+  // Normalize URL first
+  const normalizedUrl = normalizeUrl(rawUrl);
+  
+  // Use format detector to check if it's an HLS URL (same as detection uses)
+  const format = detectFormatFromUrl(normalizedUrl);
+  if (format !== 'hls') {
+    alert('Please enter a valid HLS playlist URL (.m3u8)');
+    return;
+  }
+  
+  // Update input with normalized URL
+  hlsUrlInput.value = normalizedUrl;
+  
+  // Show loading state
+  loadHlsPlaylistBtn.disabled = true;
+  loadHlsPlaylistBtn.textContent = 'Loading...';
+  
+  // Hide previous states
+  if (hlsMediaPlaylistWarning) {
+    hlsMediaPlaylistWarning.style.display = 'none';
+  }
+  if (hlsQualitySelection) {
+    hlsQualitySelection.style.display = 'none';
+  }
+  if (startHlsDownloadBtn) {
+    startHlsDownloadBtn.disabled = true;
+  }
+  
+  try {
+    // Fetch playlist using normalized URL
+    const playlistText = await fetchTextViaBackground(normalizedUrl);
+    
+    // Check if it's a media playlist or master playlist
+    if (isMediaPlaylist(playlistText)) {
+      // It's a media playlist - show warning and enable download
+      isMediaPlaylistMode = true;
+      if (hlsMediaPlaylistWarning) {
+        hlsMediaPlaylistWarning.style.display = 'block';
+      }
+      if (hlsQualitySelection) {
+        hlsQualitySelection.style.display = 'none';
+      }
+      // Enable download button for media playlist
+      if (startHlsDownloadBtn) {
+        startHlsDownloadBtn.disabled = false;
+      }
+    } else if (isMasterPlaylist(playlistText)) {
+      // It's a master playlist - show quality selection
+      isMediaPlaylistMode = false;
+      if (hlsMediaPlaylistWarning) {
+        hlsMediaPlaylistWarning.style.display = 'none';
+      }
+      if (hlsQualitySelection && videoQualitySelect && audioQualitySelect) {
+        hlsQualitySelection.style.display = 'block';
+        
+        // Parse master playlist using normalized URL
+        const levels = parseMasterPlaylist(playlistText, normalizedUrl);
+        
+        // Separate video and audio levels
+        const videoLevels = levels.filter(level => level.type === 'stream');
+        const audioLevels = levels.filter(level => level.type === 'audio');
+        
+        // Populate video quality select (we've already checked it's not null)
+        if (videoQualitySelect) {
+          videoQualitySelect.innerHTML = '<option value="">None (audio only)</option>';
+          videoLevels.forEach((level, index) => {
+            const option = document.createElement('option');
+            option.value = level.uri;
+            option.textContent = formatQualityLabel(level);
+            option.setAttribute('data-level-index', index.toString());
+            videoQualitySelect!.appendChild(option);
+          });
+          videoQualitySelect.disabled = false;
+        }
+        
+        // Populate audio quality select (we've already checked it's not null)
+        if (audioQualitySelect) {
+          audioQualitySelect.innerHTML = '<option value="">None (video only)</option>';
+          audioLevels.forEach((level, index) => {
+            const option = document.createElement('option');
+            option.value = level.uri;
+            option.textContent = `Audio ${index + 1}${level.bitrate ? ` • ${(level.bitrate / 1000).toFixed(0)} kbps` : ''}`;
+            option.setAttribute('data-level-index', index.toString());
+            audioQualitySelect!.appendChild(option);
+          });
+          audioQualitySelect.disabled = false;
+        }
+        
+        // Auto-select first options if available
+        if (videoLevels.length > 0 && videoQualitySelect && videoQualitySelect.options.length > 1) {
+          videoQualitySelect.selectedIndex = 1;
+        }
+        if (audioLevels.length > 0 && audioQualitySelect && audioQualitySelect.options.length > 1) {
+          audioQualitySelect.selectedIndex = 1;
+        }
+        
+        updateDownloadButtonState();
+      }
+    } else {
+      throw new Error('Invalid playlist format');
+    }
+  } catch (error) {
+    console.error('Failed to load HLS playlist:', error);
+    alert('Failed to load HLS playlist. Please check the URL and try again.');
+    if (hlsMediaPlaylistWarning) {
+      hlsMediaPlaylistWarning.style.display = 'none';
+    }
+    if (hlsQualitySelection) {
+      hlsQualitySelection.style.display = 'none';
+    }
+  } finally {
+    if (loadHlsPlaylistBtn) {
+      loadHlsPlaylistBtn.disabled = false;
+      loadHlsPlaylistBtn.textContent = 'Load';
+    }
+  }
+}
+
+/**
+ * Update download button state based on selections
+ */
+function updateDownloadButtonState() {
+  if (!startHlsDownloadBtn) return;
+  
+  // If it's a media playlist, button is enabled after loading
+  if (isMediaPlaylistMode) {
+    startHlsDownloadBtn.disabled = false;
+    return;
+  }
+  
+  // For master playlists, check if at least one quality is selected
+  if (!videoQualitySelect || !audioQualitySelect) return;
+  
+  const videoSelected = videoQualitySelect.value !== '';
+  const audioSelected = audioQualitySelect.value !== '';
+  
+  // Enable button if at least one quality is selected
+  startHlsDownloadBtn.disabled = !(videoSelected || audioSelected);
+}
+
+/**
+ * Handle start HLS download
+ */
+async function handleStartHlsDownload() {
+  if (!hlsUrlInput || !startHlsDownloadBtn) return;
+  
+  const rawPlaylistUrl = hlsUrlInput.value.trim();
+  
+  if (!rawPlaylistUrl) {
+    alert('Please enter an HLS playlist URL');
+    return;
+  }
+  
+  // Normalize URL first
+  const playlistUrl = normalizeUrl(rawPlaylistUrl);
+  
+  // For media playlists, download directly without quality selection
+  // For master playlists, use selected qualities
+  let videoPlaylistUrl: string | null = null;
+  let audioPlaylistUrl: string | null = null;
+  
+  if (!isMediaPlaylistMode) {
+    // Master playlist - use selected qualities
+    if (!videoQualitySelect || !audioQualitySelect) return;
+    
+    const rawVideoUrl = videoQualitySelect.value || null;
+    const rawAudioUrl = audioQualitySelect.value || null;
+    
+    // Normalize selected quality URLs
+    videoPlaylistUrl = rawVideoUrl ? normalizeUrl(rawVideoUrl) : null;
+    audioPlaylistUrl = rawAudioUrl ? normalizeUrl(rawAudioUrl) : null;
+    
+    if (!videoPlaylistUrl && !audioPlaylistUrl) {
+      alert('Please select at least one quality (video or audio)');
+      return;
+    }
+  }
+  // For media playlists, we don't set videoPlaylistUrl or audioPlaylistUrl
+  // The URL will be passed directly and handled by the m3u8 download handler
+  
+  // Disable button
+  startHlsDownloadBtn.disabled = true;
+  startHlsDownloadBtn.textContent = 'Starting...';
+  
+  try {
+    // Get current tab information for filename
+    let tabTitle: string | undefined;
+    let website: string | undefined;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) {
+        tabTitle = tab.title || undefined;
+        if (tab.url) {
+          try {
+            const urlObj = new URL(tab.url);
+            website = urlObj.hostname.replace(/^www\./, '');
+          } catch {
+            // Ignore URL parsing errors
+          }
+        }
+      }
+    } catch (error) {
+      // Ignore errors getting tab info
+      console.debug('Could not get tab information:', error);
+    }
+    
+    // Create video metadata
+    const metadata: VideoMetadata = {
+      url: playlistUrl,
+      format: isMediaPlaylistMode ? 'm3u8' : 'hls',
+      title: tabTitle || 'HLS Video',
+    };
+    
+    // Send download request with quality preferences
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.DOWNLOAD_REQUEST,
+          payload: {
+            url: playlistUrl,
+            metadata,
+            tabTitle,
+            website,
+            hlsQuality: isMediaPlaylistMode ? undefined : {
+              videoPlaylistUrl,
+              audioPlaylistUrl,
+            },
+          },
+        },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(response);
+        }
+      );
+    });
+    
+    if (response && response.success) {
+      closeHlsQualityModal();
+      await loadDownloadStates();
+      renderDetectedVideos();
+    } else if (response && response.error) {
+      alert(response.error);
+      startHlsDownloadBtn.disabled = false;
+      startHlsDownloadBtn.textContent = 'Download';
+    }
+  } catch (error: any) {
+    console.error('Download request failed:', error);
+    alert('Failed to start download: ' + (error?.message || 'Unknown error'));
+    startHlsDownloadBtn.disabled = false;
+    startHlsDownloadBtn.textContent = 'Download';
+  }
 }
 
 // Initialize when DOM is ready

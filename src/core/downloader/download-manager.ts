@@ -55,6 +55,10 @@ export class DownloadManager {
     url: string,
     filename: string,
     metadata: VideoMetadata,
+    hlsQuality?: {
+      videoPlaylistUrl?: string | null;
+      audioPlaylistUrl?: string | null;
+    },
   ): Promise<DownloadState> {
     const downloadId = this.generateDownloadId(url);
 
@@ -101,6 +105,7 @@ export class DownloadManager {
           actualVideoUrl,
           filename,
           state.id,
+          hlsQuality,
         );
       } else if (format === "m3u8") {
         // Use M3U8 download handler
