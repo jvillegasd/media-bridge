@@ -1,6 +1,28 @@
 /**
  * HLS download handler - orchestrates HLS video downloads
- * Downloads fragments, decrypts if needed, stores in IndexedDB, and concatenates
+ * 
+ * This handler is responsible for downloading HLS (HTTP Live Streaming) videos from master playlists.
+ * HLS videos typically consist of multiple quality variants (video streams) and separate audio tracks
+ * that need to be downloaded separately and then merged together.
+ * 
+ * Key features:
+ * - Parses master playlists to extract video and audio stream URLs
+ * - Downloads video and audio fragments separately with concurrency control
+ * - Handles AES-128 encrypted fragments (decryption)
+ * - Stores fragments in IndexedDB for processing
+ * - Merges video and audio streams using FFmpeg via offscreen document
+ * - Tracks download progress with byte-level accuracy and speed calculation
+ * - Supports manual quality selection or auto-selection (highest quality)
+ * 
+ * Download process:
+ * 1. Parse master playlist to extract levels (video/audio variants)
+ * 2. Select best quality (or use provided quality preferences)
+ * 3. Download video fragments (indices 0 to videoLength-1)
+ * 4. Download audio fragments (indices videoLength to videoLength+audioLength-1)
+ * 5. Merge video and audio streams using FFmpeg
+ * 6. Save final MP4 file using Chrome downloads API
+ * 
+ * @module HlsDownloadHandler
  */
 
 import { DownloadError } from "../../utils/errors";
@@ -18,11 +40,25 @@ import {
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
 
+/**
+ * Configuration options for HLS download handler
+ * 
+ * @interface HlsDownloadHandlerOptions
+ * @property {DownloadProgressCallback} [onProgress] - Optional callback for progress updates
+ * @property {number} [maxConcurrent] - Maximum concurrent fragment downloads (default: 3)
+ */
 export interface HlsDownloadHandlerOptions {
   onProgress?: DownloadProgressCallback;
   maxConcurrent?: number;
 }
 
+/**
+ * Encryption key information for fragment decryption
+ * 
+ * @interface Key
+ * @property {string | null} iv - Initialization vector (hex string, 16 bytes for AES-128)
+ * @property {string | null} uri - URI to fetch the encryption key
+ */
 interface Key {
   iv: string | null;
   uri: string | null;
@@ -30,7 +66,15 @@ interface Key {
 
 /**
  * Decrypt a single fragment if it's encrypted
- * Based on the guidance provided by the user
+ * 
+ * Handles AES-128 decryption for encrypted HLS fragments. If the fragment is not encrypted
+ * (no key URI or IV), returns the data unchanged.
+ * 
+ * @param {Key} key - Encryption key information (IV and key URI)
+ * @param {ArrayBuffer} data - Encrypted fragment data
+ * @param {number} [fetchAttempts=3] - Number of retry attempts for fetching the key
+ * @returns {Promise<ArrayBuffer>} Decrypted fragment data
+ * @throws {Error} If decryption fails
  */
 async function decryptSingleFragment(
   key: Key,
@@ -68,17 +112,62 @@ async function decryptSingleFragment(
   }
 }
 
+/**
+ * HLS download handler class
+ * 
+ * Handles downloading HLS videos from master playlists. Supports both automatic quality
+ * selection (highest quality) and manual quality selection via the hlsQuality parameter.
+ * 
+ * @class HlsDownloadHandler
+ * @example
+ * ```typescript
+ * const handler = new HlsDownloadHandler({
+ *   onProgress: (state) => console.log(`Progress: ${state.progress.percentage}%`),
+ *   maxConcurrent: 5
+ * });
+ * 
+ * // Auto-select best quality
+ * const result = await handler.download(
+ *   'https://example.com/master.m3u8',
+ *   'video.mp4',
+ *   'state-id-123'
+ * );
+ * 
+ * // Manual quality selection
+ * const result2 = await handler.download(
+ *   'https://example.com/master.m3u8',
+ *   'video.mp4',
+ *   'state-id-123',
+ *   {
+ *     videoPlaylistUrl: 'https://example.com/video-1080p.m3u8',
+ *     audioPlaylistUrl: 'https://example.com/audio.m3u8'
+ *   }
+ * );
+ * ```
+ */
 export class HlsDownloadHandler {
   private readonly onProgress?: ProgressCallback;
   private readonly maxConcurrent: number;
+  /** Number of video fragments downloaded */
   private videoLength: number = 0;
+  /** Number of audio fragments downloaded */
   private audioLength: number = 0;
+  /** Download ID (same as stateId) */
   private downloadId: string = "";
+  /** Total bytes downloaded across all fragments */
   private bytesDownloaded: number = 0;
+  /** Estimated total bytes (updated as download progresses) */
   private totalBytes: number = 0;
+  /** Timestamp of last progress update (for speed calculation) */
   private lastUpdateTime: number = 0;
+  /** Bytes downloaded at last update (for speed calculation) */
   private lastDownloadedBytes: number = 0;
 
+  /**
+   * Create a new HLS download handler
+   * 
+   * @param {HlsDownloadHandlerOptions} [options={}] - Configuration options
+   */
   constructor(options: HlsDownloadHandlerOptions = {}) {
     this.onProgress = options.onProgress;
     this.maxConcurrent = options.maxConcurrent || 3;
@@ -86,6 +175,16 @@ export class HlsDownloadHandler {
 
   /**
    * Update download progress with bytes and speed calculation
+   * 
+   * Calculates download speed based on bytes downloaded over time and updates
+   * the download state with current progress information.
+   * 
+   * @private
+   * @param {string} stateId - Download state ID
+   * @param {number} downloadedBytes - Total bytes downloaded so far
+   * @param {number} totalBytes - Estimated total bytes
+   * @param {string} [message] - Optional progress message
+   * @returns {Promise<void>}
    */
   private async updateProgress(
     stateId: string,
@@ -133,6 +232,12 @@ export class HlsDownloadHandler {
 
   /**
    * Format file size helper
+   * 
+   * Converts bytes to human-readable format (B, KB, MB, GB).
+   * 
+   * @private
+   * @param {number} bytes - Size in bytes
+   * @returns {string} Formatted size string
    */
   private formatFileSize(bytes: number): string {
     if (bytes < 1024) {
@@ -179,8 +284,23 @@ export class HlsDownloadHandler {
 
   /**
    * Download all fragments with concurrency control
-   * Tracks actual bytes downloaded instead of fragment count
-   * Accumulates bytes across multiple calls (for video + audio)
+   * 
+   * Downloads fragments with controlled concurrency. Tracks actual bytes downloaded
+   * instead of fragment count for accurate progress reporting. Accumulates bytes across
+   * multiple calls (for video + audio streams).
+   * 
+   * Process:
+   * 1. Downloads first fragment to estimate total size
+   * 2. Downloads remaining fragments concurrently (up to maxConcurrent)
+   * 3. Updates progress after each fragment
+   * 4. Handles errors gracefully (continues if some fragments fail)
+   * 
+   * @private
+   * @param {Fragment[]} fragments - Array of fragments to download
+   * @param {string} downloadId - Download ID for IndexedDB storage
+   * @param {string} stateId - Download state ID for progress tracking
+   * @returns {Promise<void>}
+   * @throws {Error} If all fragments fail to download
    */
   private async downloadAllFragments(
     fragments: Fragment[],
@@ -298,6 +418,16 @@ export class HlsDownloadHandler {
 
   /**
    * Process chunks using offscreen document and FFmpeg
+   * 
+   * Sends fragments to the offscreen document for processing with FFmpeg. The offscreen
+   * document merges video and audio streams into a single MP4 file and returns a blob URL.
+   * 
+   * @private
+   * @param {string} fileName - Base filename (without extension)
+   * @param {string} stateId - Download state ID for progress tracking
+   * @param {(progress: number, message: string) => void} [onProgress] - Optional progress callback
+   * @returns {Promise<string>} Blob URL of the processed MP4 file
+   * @throws {Error} If FFmpeg processing fails or times out
    */
   private async streamToMp4Blob(
     fileName: string,
@@ -361,6 +491,16 @@ export class HlsDownloadHandler {
 
   /**
    * Save blob URL to file using Chrome downloads API
+   * 
+   * Downloads the processed MP4 blob URL to a file using Chrome's downloads API.
+   * Monitors the download until completion and cleans up the blob URL afterward.
+   * 
+   * @private
+   * @param {string} blobUrl - Blob URL of the processed MP4 file
+   * @param {string} filename - Target filename
+   * @param {string} stateId - Download state ID
+   * @returns {Promise<string>} File path of the saved file
+   * @throws {Error} If download fails or is interrupted
    */
   private async saveBlobUrlToFile(
     blobUrl: string,
@@ -428,6 +568,13 @@ export class HlsDownloadHandler {
 
   /**
    * Select the best video and audio levels from master playlist
+   * 
+   * Automatically selects the highest quality video stream (by bitrate or resolution)
+   * and the first available audio stream from the master playlist levels.
+   * 
+   * @private
+   * @param {Level[]} levels - Array of levels parsed from master playlist
+   * @returns {{ video: string | null; audio: string | null }} Selected video and audio playlist URLs
    */
   private selectLevels(levels: Level[]): { video: string | null; audio: string | null } {
     // Separate video and audio levels
@@ -458,6 +605,45 @@ export class HlsDownloadHandler {
 
   /**
    * Download HLS video
+   * 
+   * Main entry point for downloading an HLS video. This method orchestrates the entire
+   * download process:
+   * 1. Parses master playlist (or uses provided quality preferences)
+   * 2. Downloads video fragments
+   * 3. Downloads audio fragments (if separate)
+   * 4. Merges streams using FFmpeg
+   * 5. Saves final MP4 file
+   * 
+   * @public
+   * @param {string} masterPlaylistUrl - URL of the HLS master playlist (.m3u8)
+   * @param {string} filename - Target filename for the downloaded video
+   * @param {string} stateId - Download state ID for progress tracking
+   * @param {Object} [hlsQuality] - Optional quality preferences to bypass auto-selection
+   * @param {string | null} [hlsQuality.videoPlaylistUrl] - Specific video playlist URL
+   * @param {string | null} [hlsQuality.audioPlaylistUrl] - Specific audio playlist URL
+   * @returns {Promise<{ filePath: string; fileExtension?: string }>} Result with file path and extension
+   * @throws {DownloadError} If download fails at any stage
+   * 
+   * @example
+   * ```typescript
+   * // Auto-select best quality
+   * const result = await handler.download(
+   *   'https://example.com/master.m3u8',
+   *   'video.mp4',
+   *   'state-123'
+   * );
+   * 
+   * // Manual quality selection
+   * const result2 = await handler.download(
+   *   'https://example.com/master.m3u8',
+   *   'video.mp4',
+   *   'state-123',
+   *   {
+   *     videoPlaylistUrl: 'https://example.com/video-720p.m3u8',
+   *     audioPlaylistUrl: 'https://example.com/audio.m3u8'
+   *   }
+   * );
+   * ```
    */
   async download(
     masterPlaylistUrl: string,
@@ -658,6 +844,12 @@ export class HlsDownloadHandler {
 
   /**
    * Notify progress callback
+   * 
+   * Invokes the progress callback if one was provided during handler construction.
+   * 
+   * @private
+   * @param {DownloadState} state - Current download state
+   * @returns {void}
    */
   private notifyProgress(state: DownloadState): void {
     if (this.onProgress) {
