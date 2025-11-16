@@ -40,41 +40,23 @@ import {
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
 
-/**
- * Configuration options for M3U8 download handler
- * 
- * @interface M3u8DownloadHandlerOptions
- * @property {DownloadProgressCallback} [onProgress] - Optional callback for progress updates
- * @property {number} [maxConcurrent] - Maximum concurrent fragment downloads (default: 3)
- */
+/** Configuration options for M3U8 download handler */
 export interface M3u8DownloadHandlerOptions {
+  /** Optional callback for progress updates */
   onProgress?: DownloadProgressCallback;
+  /** Maximum concurrent fragment downloads @default 3 */
   maxConcurrent?: number;
 }
 
-/**
- * Encryption key information for fragment decryption
- * 
- * @interface Key
- * @property {string | null} iv - Initialization vector (hex string, 16 bytes for AES-128)
- * @property {string | null} uri - URI to fetch the encryption key
- */
+/** Encryption key information for fragment decryption */
 interface Key {
   iv: string | null;
   uri: string | null;
 }
 
 /**
- * Decrypt a single fragment if it's encrypted
- * 
- * Handles AES-128 decryption for encrypted M3U8 fragments. If the fragment is not encrypted
- * (no key URI or IV), returns the data unchanged.
- * 
- * @param {Key} key - Encryption key information (IV and key URI)
- * @param {ArrayBuffer} data - Encrypted fragment data
- * @param {number} [fetchAttempts=3] - Number of retry attempts for fetching the key
- * @returns {Promise<ArrayBuffer>} Decrypted fragment data
- * @throws {Error} If decryption fails
+ * Decrypt a single fragment if encrypted (AES-128)
+ * Returns data unchanged if not encrypted
  */
 async function decryptSingleFragment(
   key: Key,
@@ -113,25 +95,8 @@ async function decryptSingleFragment(
 }
 
 /**
- * M3U8 download handler class
- * 
- * Handles downloading videos from standalone M3U8 media playlists. This is simpler than
- * the HLS handler as it only deals with a single stream (no quality selection or merging).
- * 
- * @class M3u8DownloadHandler
- * @example
- * ```typescript
- * const handler = new M3u8DownloadHandler({
- *   onProgress: (state) => console.log(`Progress: ${state.progress.percentage}%`),
- *   maxConcurrent: 5
- * });
- * 
- * const result = await handler.download(
- *   'https://example.com/media-playlist.m3u8',
- *   'video.mp4',
- *   'state-id-123'
- * );
- * ```
+ * M3U8 download handler for media playlists
+ * Simpler than HLS handler - single stream, no quality selection or merging
  */
 export class M3u8DownloadHandler {
   private readonly onProgress?: ProgressCallback;
@@ -151,8 +116,7 @@ export class M3u8DownloadHandler {
 
   /**
    * Create a new M3U8 download handler
-   * 
-   * @param {M3u8DownloadHandlerOptions} [options={}] - Configuration options
+   * @param options - Configuration options
    */
   constructor(options: M3u8DownloadHandlerOptions = {}) {
     this.onProgress = options.onProgress;
@@ -161,16 +125,7 @@ export class M3u8DownloadHandler {
 
   /**
    * Update download progress with bytes and speed calculation
-   * 
-   * Calculates download speed based on bytes downloaded over time and updates
-   * the download state with current progress information.
-   * 
    * @private
-   * @param {string} stateId - Download state ID
-   * @param {number} downloadedBytes - Total bytes downloaded so far
-   * @param {number} totalBytes - Estimated total bytes
-   * @param {string} [message] - Optional progress message
-   * @returns {Promise<void>}
    */
   private async updateProgress(
     stateId: string,
@@ -217,13 +172,8 @@ export class M3u8DownloadHandler {
   }
 
   /**
-   * Format file size helper
-   * 
-   * Converts bytes to human-readable format (B, KB, MB, GB).
-   * 
+   * Format file size helper (B, KB, MB, GB)
    * @private
-   * @param {number} bytes - Size in bytes
-   * @returns {string} Formatted size string
    */
   private formatFileSize(bytes: number): string {
     if (bytes < 1024) {
@@ -239,16 +189,7 @@ export class M3u8DownloadHandler {
 
   /**
    * Download a single fragment
-   * 
-   * Fetches a fragment, decrypts it if encrypted, stores it in IndexedDB, and returns
-   * the size of the downloaded fragment.
-   * 
    * @private
-   * @param {Fragment} fragment - Fragment to download
-   * @param {string} downloadId - Download ID for IndexedDB storage
-   * @param {number} [fetchAttempts=3] - Number of retry attempts
-   * @returns {Promise<number>} Size of the downloaded fragment in bytes
-   * @throws {Error} If download or decryption fails
    */
   private async downloadFragment(
     fragment: Fragment,
@@ -279,22 +220,7 @@ export class M3u8DownloadHandler {
 
   /**
    * Download all fragments with concurrency control
-   * 
-   * Downloads fragments with controlled concurrency. Tracks actual bytes downloaded
-   * instead of fragment count for accurate progress reporting.
-   * 
-   * Process:
-   * 1. Downloads first fragment to estimate total size
-   * 2. Downloads remaining fragments concurrently (up to maxConcurrent)
-   * 3. Updates progress after each fragment
-   * 4. Handles errors gracefully (continues if some fragments fail)
-   * 
    * @private
-   * @param {Fragment[]} fragments - Array of fragments to download
-   * @param {string} downloadId - Download ID for IndexedDB storage
-   * @param {string} stateId - Download state ID for progress tracking
-   * @returns {Promise<void>}
-   * @throws {Error} If all fragments fail to download
    */
   private async downloadAllFragments(
     fragments: Fragment[],
@@ -403,17 +329,8 @@ export class M3u8DownloadHandler {
   }
 
   /**
-   * Process chunks using offscreen document and FFmpeg
-   * 
-   * Sends fragments to the offscreen document for processing with FFmpeg. The offscreen
-   * document concatenates fragments into a single MP4 file and returns a blob URL.
-   * 
+   * Process chunks using offscreen document and FFmpeg (5-minute timeout)
    * @private
-   * @param {string} fileName - Base filename (without extension)
-   * @param {string} stateId - Download state ID for progress tracking
-   * @param {(progress: number, message: string) => void} [onProgress] - Optional progress callback
-   * @returns {Promise<string>} Blob URL of the processed MP4 file
-   * @throws {Error} If FFmpeg processing fails or times out
    */
   private async streamToMp4Blob(
     fileName: string,
@@ -476,16 +393,7 @@ export class M3u8DownloadHandler {
 
   /**
    * Save blob URL to file using Chrome downloads API
-   * 
-   * Downloads the processed MP4 blob URL to a file using Chrome's downloads API.
-   * Monitors the download until completion and cleans up the blob URL afterward.
-   * 
    * @private
-   * @param {string} blobUrl - Blob URL of the processed MP4 file
-   * @param {string} filename - Target filename
-   * @param {string} stateId - Download state ID
-   * @returns {Promise<string>} File path of the saved file
-   * @throws {Error} If download fails or is interrupted
    */
   private async saveBlobUrlToFile(
     blobUrl: string,
@@ -553,30 +461,11 @@ export class M3u8DownloadHandler {
 
   /**
    * Download M3U8 media playlist video
-   * 
-   * Main entry point for downloading a video from an M3U8 media playlist. This method
-   * orchestrates the entire download process:
-   * 1. Parses media playlist to extract fragments
-   * 2. Downloads all fragments with concurrency control
-   * 3. Processes fragments using FFmpeg (concatenate into MP4)
-   * 4. Saves final MP4 file
-   * 
-   * @public
-   * @param {string} mediaPlaylistUrl - URL of the M3U8 media playlist (.m3u8)
-   * @param {string} filename - Target filename for the downloaded video
-   * @param {string} stateId - Download state ID for progress tracking
-   * @returns {Promise<{ filePath: string; fileExtension?: string }>} Result with file path and extension
-   * @throws {DownloadError} If download fails at any stage
-   * 
-   * @example
-   * ```typescript
-   * const result = await handler.download(
-   *   'https://example.com/media-playlist.m3u8',
-   *   'video.mp4',
-   *   'download-state-123'
-   * );
-   * console.log(`Downloaded to: ${result.filePath}`);
-   * ```
+   * @param mediaPlaylistUrl - URL of M3U8 media playlist
+   * @param filename - Target filename
+   * @param stateId - Download state ID for progress tracking
+   * @returns Promise resolving to file path and extension
+   * @throws {DownloadError} If download fails
    */
   async download(
     mediaPlaylistUrl: string,
@@ -711,13 +600,8 @@ export class M3u8DownloadHandler {
   }
 
   /**
-   * Notify progress callback
-   * 
-   * Invokes the progress callback if one was provided during handler construction.
-   * 
+   * Notify progress callback if configured
    * @private
-   * @param {DownloadState} state - Current download state
-   * @returns {void}
    */
   private notifyProgress(state: DownloadState): void {
     if (this.onProgress) {

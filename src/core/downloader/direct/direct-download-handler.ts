@@ -30,15 +30,7 @@ import {
   DirectDownloadResult,
 } from "../types";
 
-/**
- * Internal listener structure for tracking Chrome download progress
- * 
- * @interface DownloadListener
- * @property {Function} resolve - Promise resolver for download completion
- * @property {Function} reject - Promise rejecter for download failure
- * @property {string} stateId - Download state ID for progress tracking
- * @property {DirectDownloadHandler} handler - Reference to handler instance
- */
+/** Internal listener structure for tracking Chrome download progress */
 interface DownloadListener {
   resolve: (result: DirectDownloadResult) => void;
   reject: (error: Error) => void;
@@ -47,24 +39,8 @@ interface DownloadListener {
 }
 
 /**
- * Direct download handler class
- * 
- * Handles direct video file downloads using Chrome's downloads API. This is the simplest
- * download method as it doesn't require fragment downloading, decryption, or merging.
- * 
- * @class DirectDownloadHandler
- * @example
- * ```typescript
- * const handler = new DirectDownloadHandler({
- *   onProgress: (state) => console.log(`Progress: ${state.progress.percentage}%`)
- * });
- * 
- * const result = await handler.download(
- *   'https://example.com/video.mp4',
- *   'video.mp4',
- *   'state-id-123'
- * );
- * ```
+ * Direct download handler using Chrome downloads API
+ * Simplest download method - no fragments, decryption, or merging required
  */
 export class DirectDownloadHandler {
   private readonly onProgress?: DownloadProgressCallback;
@@ -79,15 +55,7 @@ export class DirectDownloadHandler {
 
   /**
    * Set up Chrome downloads progress tracking (static, only once)
-   * 
-   * Initializes a global listener for Chrome download events. This is set up once
-   * per extension lifecycle and tracks all downloads initiated by this handler.
-   * 
-   * The listener monitors download state changes and updates the corresponding
-   * download state with progress information.
-   * 
    * @private
-   * @static
    */
   private setupDownloadProgressTracking(): void {
     if (DirectDownloadHandler.listenerSetup) {
@@ -118,15 +86,7 @@ export class DirectDownloadHandler {
 
   /**
    * Handle download change event from Chrome
-   * 
-   * Processes download state changes from Chrome's download API. Updates progress
-   * information and handles completion or failure events.
-   * 
    * @private
-   * @param {number} chromeDownloadId - Chrome's internal download ID
-   * @param {DownloadListener} listener - Download listener with promise resolvers
-   * @param {chrome.downloads.DownloadDelta} delta - Download state change delta
-   * @returns {Promise<void>}
    */
   private async handleDownloadChange(
     chromeDownloadId: number,
@@ -157,12 +117,7 @@ export class DirectDownloadHandler {
 
   /**
    * Get Chrome download item by ID
-   * 
-   * Retrieves the current state of a Chrome download by its ID.
-   * 
    * @private
-   * @param {number} chromeDownloadId - Chrome's internal download ID
-   * @returns {Promise<chrome.downloads.DownloadItem | null>} Download item or null if not found
    */
   private async getDownloadItem(
     chromeDownloadId: number,
@@ -180,14 +135,7 @@ export class DirectDownloadHandler {
 
   /**
    * Update download state with progress information
-   * 
-   * Updates the download state with current progress (bytes downloaded, percentage, etc.)
-   * and notifies the progress callback if provided.
-   * 
    * @private
-   * @param {string} stateId - Download state ID
-   * @param {chrome.downloads.DownloadItem} downloadItem - Chrome download item with progress info
-   * @returns {Promise<void>}
    */
   private async updateDownloadStateProgress(
     stateId: string,
@@ -218,15 +166,7 @@ export class DirectDownloadHandler {
 
   /**
    * Handle download completion
-   * 
-   * Processes successful download completion, resolves the download promise,
-   * and cleans up the download listener.
-   * 
    * @private
-   * @param {number} chromeDownloadId - Chrome's internal download ID
-   * @param {chrome.downloads.DownloadItem} downloadItem - Completed download item
-   * @param {DownloadListener} listener - Download listener with promise resolvers
-   * @returns {void}
    */
   private handleDownloadCompletion(
     chromeDownloadId: number,
@@ -244,15 +184,7 @@ export class DirectDownloadHandler {
 
   /**
    * Handle download failure
-   * 
-   * Processes download interruption or failure, rejects the download promise,
-   * and cleans up the download listener.
-   * 
    * @private
-   * @param {number} chromeDownloadId - Chrome's internal download ID
-   * @param {chrome.downloads.DownloadItem} downloadItem - Failed download item
-   * @param {DownloadListener} listener - Download listener with promise resolvers
-   * @returns {void}
    */
   private handleDownloadFailure(
     chromeDownloadId: number,
@@ -265,16 +197,7 @@ export class DirectDownloadHandler {
 
   /**
    * Extract file extension from URL or HTTP headers
-   * 
-   * Attempts to detect the file extension by:
-   * 1. Checking the URL path for a file extension
-   * 2. Checking the Content-Type HTTP header
-   * 
-   * Falls back to URL-based detection if HTTP header check fails.
-   * 
    * @private
-   * @param {string} url - Video URL
-   * @returns {Promise<string | undefined>} Detected file extension or undefined
    */
   private async extractFileExtension(url: string): Promise<string | undefined> {
     // Try to get extension from HTTP headers first
@@ -298,15 +221,7 @@ export class DirectDownloadHandler {
 
   /**
    * Start Chrome download and return download ID
-   * 
-   * Initiates a download using Chrome's downloads API. The download is started
-   * without prompting the user (saveAs: false).
-   * 
    * @private
-   * @param {string} url - Video URL to download
-   * @param {string} filename - Target filename
-   * @returns {Promise<number>} Chrome download ID
-   * @throws {Error} If download initiation fails
    */
   private async startChromeDownload(
     url: string,
@@ -331,17 +246,8 @@ export class DirectDownloadHandler {
   }
 
   /**
-   * Wait for download to complete
-   * 
-   * Sets up a promise that resolves when the download completes or rejects on failure.
-   * Uses Chrome's download events to track progress and completion.
-   * 
-   * Includes a 5-minute timeout as a fallback in case the completion event doesn't fire.
-   * 
+   * Wait for download to complete (5-minute timeout)
    * @private
-   * @param {number} chromeDownloadId - Chrome's internal download ID
-   * @param {string} stateId - Download state ID for progress tracking
-   * @returns {Promise<DirectDownloadResult>} Download result with file path and size
    */
   private async waitForDownloadCompletion(
     chromeDownloadId: number,
@@ -372,15 +278,7 @@ export class DirectDownloadHandler {
 
   /**
    * Mark download state as completed
-   * 
-   * Updates the download state to mark it as completed, including file path,
-   * final progress, and file extension if detected.
-   * 
    * @private
-   * @param {string} stateId - Download state ID
-   * @param {DirectDownloadResult} result - Download result with file path and size
-   * @param {string} [fileExtension] - Optional file extension to store in metadata
-   * @returns {Promise<void>}
    */
   private async markDownloadAsCompleted(
     stateId: string,
@@ -415,31 +313,12 @@ export class DirectDownloadHandler {
   }
 
   /**
-   * Download direct video using Chrome downloads API and return file path with extracted metadata
-   * 
-   * Main entry point for downloading a direct video file. This method:
-   * 1. Extracts file extension from URL or HTTP headers
-   * 2. Initiates Chrome download
-   * 3. Waits for download completion
-   * 4. Updates download state
-   * 5. Returns file path and extension
-   * 
-   * @public
-   * @param {string} url - Direct video URL (e.g., https://example.com/video.mp4)
-   * @param {string} filename - Target filename for the downloaded file
-   * @param {string} stateId - Download state ID for progress tracking
-   * @returns {Promise<DirectDownloadHandlerResult>} Result containing file path and extension
-   * @throws {DownloadError} If download fails at any stage
-   * 
-   * @example
-   * ```typescript
-   * const result = await handler.download(
-   *   'https://example.com/video.mp4',
-   *   'my-video.mp4',
-   *   'download-state-123'
-   * );
-   * console.log(`Downloaded to: ${result.filePath}`);
-   * ```
+   * Download direct video using Chrome downloads API
+   * @param url - Direct video URL
+   * @param filename - Target filename
+   * @param stateId - Download state ID for progress tracking
+   * @returns Promise resolving to file path and extension
+   * @throws {DownloadError} If download fails
    */
   async download(
     url: string,
@@ -479,13 +358,8 @@ export class DirectDownloadHandler {
   }
 
   /**
-   * Notify progress callback
-   * 
-   * Invokes the progress callback if one was provided during handler construction.
-   * 
+   * Notify progress callback if configured
    * @private
-   * @param {DownloadState} state - Current download state
-   * @returns {void}
    */
   private notifyProgress(state: DownloadState): void {
     if (this.onProgress) {
