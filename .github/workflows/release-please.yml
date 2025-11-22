@@ -17,4 +17,3 @@ jobs:
         id: release
         with:
           config-file: .github/release-please-config.json
-
