@@ -2,17 +2,17 @@
  * Google OAuth using chrome.identity API
  */
 
-import { AuthError } from '../utils/errors';
-import { logger } from '../utils/logger';
-import { ChromeStorage } from '../storage/chrome-storage';
+import { AuthError } from "../utils/errors";
+import { logger } from "../utils/logger";
+import { ChromeStorage } from "../storage/chrome-storage";
 
-const CLIENT_ID_STORAGE_KEY = 'google_client_id';
-const TOKEN_STORAGE_KEY = 'google_access_token';
-const REFRESH_TOKEN_STORAGE_KEY = 'google_refresh_token';
+const CLIENT_ID_STORAGE_KEY = "google_client_id";
+const TOKEN_STORAGE_KEY = "google_access_token";
+const REFRESH_TOKEN_STORAGE_KEY = "google_refresh_token";
 
 // Google OAuth scopes
 export const GOOGLE_DRIVE_SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
+  "https://www.googleapis.com/auth/drive.file",
 ];
 
 export interface GoogleAuthConfig {
@@ -41,7 +41,9 @@ export class GoogleAuth {
     try {
       const clientId = await this.getClientId();
       if (!clientId) {
-        throw new AuthError('Google OAuth client ID not configured. Please set it in options.');
+        throw new AuthError(
+          "Google OAuth client ID not configured. Please set it in options.",
+        );
       }
 
       // Use chrome.identity.getAuthToken for OAuth
@@ -53,26 +55,32 @@ export class GoogleAuth {
           },
           (token) => {
             if (chrome.runtime.lastError) {
-              reject(new AuthError(`Authentication failed: ${chrome.runtime.lastError.message}`));
+              reject(
+                new AuthError(
+                  `Authentication failed: ${chrome.runtime.lastError.message}`,
+                ),
+              );
               return;
             }
             if (!token) {
-              reject(new AuthError('No token received'));
+              reject(new AuthError("No token received"));
               return;
             }
             resolve(token);
-          }
+          },
         );
       });
 
       // Store token
       await ChromeStorage.set(TOKEN_STORAGE_KEY, token);
-      logger.info('Google authentication successful');
+      logger.info("Google authentication successful");
 
       return token;
     } catch (error) {
-      logger.error('Google authentication failed:', error);
-      throw error instanceof AuthError ? error : new AuthError(`Authentication failed: ${error}`);
+      logger.error("Google authentication failed:", error);
+      throw error instanceof AuthError
+        ? error
+        : new AuthError(`Authentication failed: ${error}`);
     }
   }
 
@@ -81,8 +89,8 @@ export class GoogleAuth {
    */
   static async getAccessToken(scopes: string[]): Promise<string> {
     const storedToken = await ChromeStorage.get<string>(TOKEN_STORAGE_KEY);
-    
-    if (storedToken && await this.isTokenValid(storedToken)) {
+
+    if (storedToken && (await this.isTokenValid(storedToken))) {
       return storedToken;
     }
 
@@ -96,7 +104,9 @@ export class GoogleAuth {
   private static async isTokenValid(token: string): Promise<boolean> {
     try {
       // Verify token by making a simple API call
-      const response = await fetch('https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=' + token);
+      const response = await fetch(
+        "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=" + token,
+      );
       return response.ok;
     } catch {
       return false;
@@ -108,31 +118,36 @@ export class GoogleAuth {
    */
   static async signOut(): Promise<void> {
     const token = await ChromeStorage.get<string>(TOKEN_STORAGE_KEY);
-    
+
     if (token) {
       try {
         // Revoke token using Google API
-        await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`);
-        
+        await fetch(
+          `https://accounts.google.com/o/oauth2/revoke?token=${token}`,
+        );
+
         // Remove token from Chrome identity
         await new Promise<void>((resolve, reject) => {
           chrome.identity.removeCachedAuthToken({ token }, () => {
             if (chrome.runtime.lastError) {
-              logger.warn('Failed to remove cached token:', chrome.runtime.lastError);
+              logger.warn(
+                "Failed to remove cached token:",
+                chrome.runtime.lastError,
+              );
             }
             resolve();
           });
         });
       } catch (error) {
-        logger.warn('Failed to revoke token:', error);
+        logger.warn("Failed to revoke token:", error);
       }
     }
 
     // Clear stored tokens
     await ChromeStorage.remove(TOKEN_STORAGE_KEY);
     await ChromeStorage.remove(REFRESH_TOKEN_STORAGE_KEY);
-    
-    logger.info('Signed out successfully');
+
+    logger.info("Signed out successfully");
   }
 
   /**
@@ -146,4 +161,3 @@ export class GoogleAuth {
     return await this.isTokenValid(token);
   }
 }
-

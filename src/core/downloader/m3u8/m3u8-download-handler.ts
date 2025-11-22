@@ -1,10 +1,10 @@
 /**
  * M3U8 media playlist download handler - orchestrates M3U8 media playlist video downloads
- * 
+ *
  * This handler is responsible for downloading videos from standalone M3U8 media playlists.
  * Unlike HLS master playlists, media playlists contain a single stream (video+audio combined)
  * and don't require quality selection or stream merging.
- * 
+ *
  * Key features:
  * - Downloads fragments from a single media playlist
  * - Handles AES-128 encrypted fragments (decryption)
@@ -12,16 +12,16 @@
  * - Processes fragments using FFmpeg via offscreen document
  * - Tracks download progress with byte-level accuracy and speed calculation
  * - Simpler than HLS handler (no master playlist parsing or stream merging)
- * 
+ *
  * Download process:
  * 1. Parse media playlist to extract fragments
  * 2. Download all fragments with concurrency control
  * 3. Process fragments using FFmpeg (concatenate into MP4)
  * 4. Save final MP4 file using Chrome downloads API
- * 
+ *
  * Note: This handler is used for standalone media playlists. For master playlists with
  * multiple quality variants, use HlsDownloadHandler instead.
- * 
+ *
  * @module M3u8DownloadHandler
  */
 
@@ -74,12 +74,12 @@ async function decryptSingleFragment(
 
     // Convert IV from hex string to Uint8Array
     // IV should be 16 bytes for AES-128
-    const hexString = key.iv.startsWith('0x') ? key.iv.slice(2) : key.iv;
+    const hexString = key.iv.startsWith("0x") ? key.iv.slice(2) : key.iv;
     const ivBytes = new Uint8Array(16);
-    
+
     // Parse hex string (should be 32 hex chars = 16 bytes)
     // Pad or truncate to exactly 16 bytes
-    const normalizedHex = hexString.padEnd(32, '0').slice(0, 32);
+    const normalizedHex = hexString.padEnd(32, "0").slice(0, 32);
     for (let i = 0; i < 16; i++) {
       const hexByte = normalizedHex.substring(i * 2, i * 2 + 2);
       ivBytes[i] = parseInt(hexByte, 16);
@@ -90,7 +90,11 @@ async function decryptSingleFragment(
     return decryptedData;
   } catch (error) {
     logger.error(`Failed to decrypt fragment:`, error);
-    throw new Error(`Decryption failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Decryption failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
@@ -145,7 +149,7 @@ export class M3u8DownloadHandler {
     if (this.lastUpdateTime > 0 && this.lastDownloadedBytes > 0) {
       const timeDelta = (now - this.lastUpdateTime) / 1000; // Convert to seconds
       const bytesDelta = downloadedBytes - this.lastDownloadedBytes;
-      
+
       if (timeDelta > 0) {
         speed = bytesDelta / timeDelta; // bytes per second
       }
@@ -157,12 +161,17 @@ export class M3u8DownloadHandler {
     this.bytesDownloaded = downloadedBytes;
     this.totalBytes = totalBytes;
 
-    const percentage = totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
+    const percentage =
+      totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
     state.progress.downloaded = downloadedBytes;
     state.progress.total = totalBytes;
     state.progress.percentage = percentage;
     state.progress.stage = "downloading";
-    state.progress.message = message || `Downloaded ${this.formatFileSize(downloadedBytes)}/${this.formatFileSize(totalBytes)}`;
+    state.progress.message =
+      message ||
+      `Downloaded ${this.formatFileSize(downloadedBytes)}/${this.formatFileSize(
+        totalBytes,
+      )}`;
     state.progress.speed = speed;
     state.progress.lastUpdateTime = now;
     state.progress.lastDownloaded = downloadedBytes;
@@ -242,15 +251,18 @@ export class M3u8DownloadHandler {
     let estimatedTotalBytes = 0;
     if (fragments.length > 0) {
       try {
-        const firstFragmentSize = await this.downloadFragment(fragments[0], downloadId);
+        const firstFragmentSize = await this.downloadFragment(
+          fragments[0],
+          downloadId,
+        );
         sessionBytesDownloaded += firstFragmentSize;
         downloadedFragments++;
         this.bytesDownloaded += firstFragmentSize;
-        
+
         // Estimate total based on first fragment size
         estimatedTotalBytes = firstFragmentSize * totalFragments;
         this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
-        
+
         await this.updateProgress(
           stateId,
           this.bytesDownloaded,
@@ -258,7 +270,10 @@ export class M3u8DownloadHandler {
           `Downloading fragments...`,
         );
       } catch (error) {
-        logger.error(`Failed to download first fragment for size estimation:`, error);
+        logger.error(
+          `Failed to download first fragment for size estimation:`,
+          error,
+        );
         estimatedTotalBytes = 0;
       }
     }
@@ -273,19 +288,23 @@ export class M3u8DownloadHandler {
         const fragment = fragments[fragmentIndex];
 
         try {
-          const fragmentSize = await this.downloadFragment(fragment, downloadId);
+          const fragmentSize = await this.downloadFragment(
+            fragment,
+            downloadId,
+          );
           sessionBytesDownloaded += fragmentSize;
           downloadedFragments++;
           this.bytesDownloaded += fragmentSize;
-          
+
           // Update estimated total if we have better data
           if (estimatedTotalBytes === 0 || downloadedFragments > 0) {
-            const averageFragmentSize = sessionBytesDownloaded / downloadedFragments;
+            const averageFragmentSize =
+              sessionBytesDownloaded / downloadedFragments;
             const sessionEstimatedTotal = averageFragmentSize * totalFragments;
             estimatedTotalBytes = sessionEstimatedTotal;
             this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
           }
-          
+
           await this.updateProgress(
             stateId,
             this.bytesDownloaded,
@@ -302,7 +321,11 @@ export class M3u8DownloadHandler {
     };
 
     // Start concurrent downloads
-    for (let i = 0; i < Math.min(this.maxConcurrent, totalFragments - downloadedFragments); i++) {
+    for (
+      let i = 0;
+      i < Math.min(this.maxConcurrent, totalFragments - downloadedFragments);
+      i++
+    ) {
       downloadQueue.push(downloadNext());
     }
 
@@ -324,7 +347,9 @@ export class M3u8DownloadHandler {
     }
 
     if (downloadedFragments < totalFragments) {
-      logger.warn(`Downloaded ${downloadedFragments}/${totalFragments} fragments. Some fragments failed.`);
+      logger.warn(
+        `Downloaded ${downloadedFragments}/${totalFragments} fragments. Some fragments failed.`,
+      );
     }
   }
 
@@ -348,7 +373,13 @@ export class M3u8DownloadHandler {
           message.type === MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE &&
           message.payload?.downloadId === this.downloadId
         ) {
-          const { type, blobUrl, error, progress, message: progressMessage } = message.payload;
+          const {
+            type,
+            blobUrl,
+            error,
+            progress,
+            message: progressMessage,
+          } = message.payload;
 
           if (type === "success") {
             chrome.runtime.onMessage.removeListener(messageListener);
@@ -366,22 +397,29 @@ export class M3u8DownloadHandler {
       chrome.runtime.onMessage.addListener(messageListener);
 
       // Send processing request for M3U8 media playlist
-      chrome.runtime.sendMessage({
-        type: MessageType.OFFSCREEN_PROCESS_M3U8,
-        payload: {
-          downloadId: this.downloadId,
-          fragmentCount: this.fragmentCount,
-          filename: fileName,
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.OFFSCREEN_PROCESS_M3U8,
+          payload: {
+            downloadId: this.downloadId,
+            fragmentCount: this.fragmentCount,
+            filename: fileName,
+          },
         },
-      }, (response) => {
-        // Check for errors to prevent "unchecked runtime.lastError" warning
-        if (chrome.runtime.lastError) {
-          chrome.runtime.onMessage.removeListener(messageListener);
-          reject(new Error(`Failed to send processing request: ${chrome.runtime.lastError.message}`));
-          return;
-        }
-        // Response is handled by messageListener
-      });
+        (response) => {
+          // Check for errors to prevent "unchecked runtime.lastError" warning
+          if (chrome.runtime.lastError) {
+            chrome.runtime.onMessage.removeListener(messageListener);
+            reject(
+              new Error(
+                `Failed to send processing request: ${chrome.runtime.lastError.message}`,
+              ),
+            );
+            return;
+          }
+          // Response is handled by messageListener
+        },
+      );
 
       // Set timeout to prevent hanging
       setTimeout(() => {
@@ -429,12 +467,12 @@ export class M3u8DownloadHandler {
 
                   if (item.state === "complete") {
                     // Clean up blob URL after successful download
-                    if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+                    if (typeof URL !== "undefined" && URL.revokeObjectURL) {
                       URL.revokeObjectURL(blobUrl);
                     }
                     resolve(item.filename);
                   } else if (item.state === "interrupted") {
-                    if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+                    if (typeof URL !== "undefined" && URL.revokeObjectURL) {
                       URL.revokeObjectURL(blobUrl);
                     }
                     reject(new Error(item.error || "Download interrupted"));
@@ -452,7 +490,7 @@ export class M3u8DownloadHandler {
       });
     } catch (error) {
       // Clean up blob URL on error
-      if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+      if (typeof URL !== "undefined" && URL.revokeObjectURL) {
         URL.revokeObjectURL(blobUrl);
       }
       throw error;
@@ -473,7 +511,9 @@ export class M3u8DownloadHandler {
     stateId: string,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     try {
-      logger.info(`Starting M3U8 media playlist download from ${mediaPlaylistUrl}`);
+      logger.info(
+        `Starting M3U8 media playlist download from ${mediaPlaylistUrl}`,
+      );
 
       // Initialize downloadId
       this.downloadId = stateId;
@@ -483,7 +523,10 @@ export class M3u8DownloadHandler {
 
       // Fetch and parse media playlist
       const mediaPlaylistText = await fetchText(mediaPlaylistUrl, 3);
-      const fragments = parseLevelsPlaylist(mediaPlaylistText, mediaPlaylistUrl);
+      const fragments = parseLevelsPlaylist(
+        mediaPlaylistText,
+        mediaPlaylistUrl,
+      );
 
       if (fragments.length === 0) {
         throw new Error("No fragments found in media playlist");
@@ -500,7 +543,7 @@ export class M3u8DownloadHandler {
 
       // Download all fragments
       await this.downloadAllFragments(fragments, this.downloadId, stateId);
-      
+
       // Set fragment count after download completes
       this.fragmentCount = fragments.length;
 
@@ -546,7 +589,11 @@ export class M3u8DownloadHandler {
       }
 
       // Save to file using blob URL
-      const filePath = await this.saveBlobUrlToFile(blobUrl, `${baseFileName}.mp4`, stateId);
+      const filePath = await this.saveBlobUrlToFile(
+        blobUrl,
+        `${baseFileName}.mp4`,
+        stateId,
+      );
 
       // Clean up IndexedDB chunks
       await deleteChunks(this.downloadId);
@@ -558,11 +605,12 @@ export class M3u8DownloadHandler {
         finalState.progress.stage = "completed";
         finalState.progress.message = "Download completed";
         finalState.progress.percentage = 100;
-        finalState.progress.downloaded = finalState.progress.total || this.bytesDownloaded || 0;
+        finalState.progress.downloaded =
+          finalState.progress.total || this.bytesDownloaded || 0;
         finalState.updatedAt = Date.now();
         await DownloadStateManager.saveDownload(finalState);
         this.notifyProgress(finalState);
-        
+
         // Verify state is persisted
         const verifyState = await DownloadStateManager.getDownload(stateId);
         if (verifyState && verifyState.progress.stage !== "completed") {
@@ -574,7 +622,9 @@ export class M3u8DownloadHandler {
           this.notifyProgress(verifyState);
         }
       } else {
-        logger.error(`Could not find download state ${stateId} to mark as completed`);
+        logger.error(
+          `Could not find download state ${stateId} to mark as completed`,
+        );
       }
 
       logger.info(`M3U8 media playlist download completed: ${filePath}`);
@@ -595,7 +645,11 @@ export class M3u8DownloadHandler {
 
       throw error instanceof DownloadError
         ? error
-        : new DownloadError(`M3U8 download failed: ${error instanceof Error ? error.message : String(error)}`);
+        : new DownloadError(
+            `M3U8 download failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
     }
   }
 
@@ -609,4 +663,3 @@ export class M3u8DownloadHandler {
     }
   }
 }
-

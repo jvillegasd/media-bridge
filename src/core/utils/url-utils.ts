@@ -2,7 +2,7 @@
  * URL utility functions
  */
 
-import { VideoFormat } from '../types';
+import { VideoFormat } from "../types";
 
 /**
  * Normalize URL by removing hash fragments and trailing slashes
@@ -12,11 +12,11 @@ export function normalizeUrl(url: string): string {
   try {
     const urlObj = new URL(url);
     // Remove hash fragment (it doesn't affect the downloaded content)
-    urlObj.hash = '';
+    urlObj.hash = "";
     return urlObj.href;
   } catch {
     // If URL parsing fails, just remove hash manually
-    const hashIndex = url.indexOf('#');
+    const hashIndex = url.indexOf("#");
     return hashIndex >= 0 ? url.substring(0, hashIndex) : url;
   }
 }
@@ -73,4 +73,3 @@ export function detectFormatFromUrl(url: string): VideoFormat {
 
   return "unknown";
 }
-

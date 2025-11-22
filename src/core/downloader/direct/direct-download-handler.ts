@@ -1,17 +1,17 @@
 /**
  * Direct download handler - orchestrates direct video downloads using Chrome downloads API
- * 
+ *
  * This handler is responsible for downloading videos that are available as direct file URLs
  * (e.g., .mp4, .webm, .mov files). It uses the Chrome downloads API to handle the actual
  * download process, which provides native download progress tracking and file management.
- * 
+ *
  * Key features:
  * - Uses Chrome downloads API for native download handling
  * - Tracks download progress via Chrome's download events
  * - Extracts file extensions from URL or HTTP headers
  * - Handles download completion, interruption, and error states
  * - Updates download state with progress information
- * 
+ *
  * @module DirectDownloadHandler
  */
 

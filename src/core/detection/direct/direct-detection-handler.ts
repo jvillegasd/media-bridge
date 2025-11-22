@@ -1,10 +1,10 @@
 /**
  * Direct video detection handler - orchestrates direct video detection
- * 
+ *
  * This handler is responsible for detecting direct video file URLs (e.g., .mp4, .webm, .mov files)
  * from network requests and DOM video elements. It monitors the DOM for video elements and
  * associates network requests with those elements to extract comprehensive metadata.
- * 
+ *
  * Key features:
  * - Detects direct video URLs from network requests
  * - Monitors DOM for video elements using MutationObserver
@@ -12,14 +12,14 @@
  * - Extracts metadata from video elements (dimensions, duration, thumbnails)
  * - Filters out audio-only URLs
  * - Performs initial DOM scan and continuous monitoring
- * 
+ *
  * Detection process:
  * 1. Network requests are intercepted and checked for direct video URLs
  * 2. URLs are associated with video elements in the DOM
  * 3. DOM observer monitors for dynamically added video elements
  * 4. Metadata is extracted from video elements (dimensions, duration, thumbnails)
  * 5. Detected videos trigger callbacks with complete metadata
- * 
+ *
  * @module DirectDetectionHandler
  */
 

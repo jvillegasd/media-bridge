@@ -3,11 +3,11 @@
  * Stores chunks in order so they can be concatenated later
  */
 
-import { logger } from '../utils/logger';
+import { logger } from "../utils/logger";
 
-const DB_NAME = 'media-bridge-chunks';
+const DB_NAME = "media-bridge-chunks";
 const DB_VERSION = 1;
-const STORE_NAME = 'chunks';
+const STORE_NAME = "chunks";
 
 interface ChunkRecord {
   downloadId: string;
@@ -33,9 +33,11 @@ function openDatabase(): Promise<IDBDatabase> {
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: ['downloadId', 'index'] });
-        store.createIndex('downloadId', 'downloadId', { unique: false });
-        store.createIndex('index', 'index', { unique: false });
+        const store = db.createObjectStore(STORE_NAME, {
+          keyPath: ["downloadId", "index"],
+        });
+        store.createIndex("downloadId", "downloadId", { unique: false });
+        store.createIndex("index", "index", { unique: false });
       }
     };
   });
@@ -51,7 +53,7 @@ export async function storeChunk(
 ): Promise<void> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const transaction = db.transaction([STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
 
     const record: ChunkRecord = {
@@ -63,12 +65,16 @@ export async function storeChunk(
     await new Promise<void>((resolve, reject) => {
       const request = store.put(record);
       request.onsuccess = () => resolve();
-      request.onerror = () => reject(new Error(`Failed to store chunk: ${request.error}`));
+      request.onerror = () =>
+        reject(new Error(`Failed to store chunk: ${request.error}`));
     });
 
     db.close();
   } catch (error) {
-    logger.error(`Failed to store chunk ${index} for download ${downloadId}:`, error);
+    logger.error(
+      `Failed to store chunk ${index} for download ${downloadId}:`,
+      error,
+    );
     throw error;
   }
 }
@@ -79,9 +85,9 @@ export async function storeChunk(
 export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const transaction = db.transaction([STORE_NAME], "readonly");
     const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('downloadId');
+    const index = store.index("downloadId");
 
     const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
       const request = index.getAll(downloadId);
@@ -91,7 +97,8 @@ export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
         records.sort((a, b) => a.index - b.index);
         resolve(records);
       };
-      request.onerror = () => reject(new Error(`Failed to get chunks: ${request.error}`));
+      request.onerror = () =>
+        reject(new Error(`Failed to get chunks: ${request.error}`));
     });
 
     db.close();
@@ -109,14 +116,15 @@ export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
 export async function deleteChunks(downloadId: string): Promise<void> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const transaction = db.transaction([STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('downloadId');
+    const index = store.index("downloadId");
 
     const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
       const request = index.getAll(downloadId);
       request.onsuccess = () => resolve(request.result as ChunkRecord[]);
-      request.onerror = () => reject(new Error(`Failed to get chunks: ${request.error}`));
+      request.onerror = () =>
+        reject(new Error(`Failed to get chunks: ${request.error}`));
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -155,14 +163,15 @@ export async function deleteChunks(downloadId: string): Promise<void> {
 export async function getChunkCount(downloadId: string): Promise<number> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const transaction = db.transaction([STORE_NAME], "readonly");
     const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('downloadId');
+    const index = store.index("downloadId");
 
     const count = await new Promise<number>((resolve, reject) => {
       const request = index.count(downloadId);
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(new Error(`Failed to count chunks: ${request.error}`));
+      request.onerror = () =>
+        reject(new Error(`Failed to count chunks: ${request.error}`));
     });
 
     db.close();
@@ -182,14 +191,18 @@ export async function readChunkByIndex(
 ): Promise<Uint8Array | null> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const transaction = db.transaction([STORE_NAME], "readonly");
     const store = transaction.objectStore(STORE_NAME);
 
-    const record = await new Promise<ChunkRecord | undefined>((resolve, reject) => {
-      const request = store.get([downloadId, index]);
-      request.onsuccess = () => resolve(request.result as ChunkRecord | undefined);
-      request.onerror = () => reject(new Error(`Failed to read chunk: ${request.error}`));
-    });
+    const record = await new Promise<ChunkRecord | undefined>(
+      (resolve, reject) => {
+        const request = store.get([downloadId, index]);
+        request.onsuccess = () =>
+          resolve(request.result as ChunkRecord | undefined);
+        request.onerror = () =>
+          reject(new Error(`Failed to read chunk: ${request.error}`));
+      },
+    );
 
     db.close();
 
@@ -199,8 +212,10 @@ export async function readChunkByIndex(
 
     return new Uint8Array(record.data);
   } catch (error) {
-    logger.error(`Failed to read chunk ${index} for download ${downloadId}:`, error);
+    logger.error(
+      `Failed to read chunk ${index} for download ${downloadId}:`,
+      error,
+    );
     throw error;
   }
 }
-

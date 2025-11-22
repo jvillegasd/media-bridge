@@ -10,7 +10,10 @@ import { MessageType } from "./shared/messages";
 import { DownloadState, StorageConfig, VideoMetadata } from "./core/types";
 import { logger } from "./core/utils/logger";
 import { normalizeUrl, detectFormatFromUrl } from "./core/utils/url-utils";
-import { generateFilenameWithExtension, generateFilenameFromTabInfo } from "./core/utils/file-utils";
+import {
+  generateFilenameWithExtension,
+  generateFilenameFromTabInfo,
+} from "./core/utils/file-utils";
 
 const CONFIG_KEY = "storage_config";
 const MAX_CONCURRENT_KEY = "max_concurrent";
@@ -321,7 +324,15 @@ async function handleDownloadRequest(payload: {
     audioPlaylistUrl?: string | null;
   };
 }): Promise<{ error?: string } | void> {
-  const { url, filename, uploadToDrive, metadata, tabTitle, website, hlsQuality } = payload;
+  const {
+    url,
+    filename,
+    uploadToDrive,
+    metadata,
+    tabTitle,
+    website,
+    hlsQuality,
+  } = payload;
   const normalizedUrl = normalizeUrl(url);
   const existing = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
 
@@ -469,7 +480,11 @@ async function startDownload(
       const extension = metadata.fileExtension || "mp4";
       // Use tab info if available, otherwise fall back to URL-based generation
       if (tabTitle || website) {
-        finalFilename = generateFilenameFromTabInfo(tabTitle, website, extension);
+        finalFilename = generateFilenameFromTabInfo(
+          tabTitle,
+          website,
+          extension,
+        );
       } else {
         finalFilename = generateFilenameWithExtension(url, extension);
       }

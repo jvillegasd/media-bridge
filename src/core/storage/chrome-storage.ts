@@ -2,7 +2,7 @@
  * Chrome Storage API wrapper
  */
 
-import { logger } from '../utils/logger';
+import { logger } from "../utils/logger";
 
 export class ChromeStorage {
   /**
@@ -49,7 +49,7 @@ export class ChromeStorage {
     try {
       return await chrome.storage.local.get(null);
     } catch (error) {
-      logger.error('Failed to get all storage:', error);
+      logger.error("Failed to get all storage:", error);
       return {};
     }
   }
@@ -61,9 +61,8 @@ export class ChromeStorage {
     try {
       await chrome.storage.local.clear();
     } catch (error) {
-      logger.error('Failed to clear storage:', error);
+      logger.error("Failed to clear storage:", error);
       throw error;
     }
   }
 }
-

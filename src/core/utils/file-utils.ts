@@ -10,8 +10,8 @@ function sanitizeFilename(filename: string): string {
   // Windows: < > : " / \ | ? *
   // Unix/Mac: / and null
   return filename
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '') // Remove invalid characters
-    .replace(/\s+/g, ' ') // Normalize whitespace
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "") // Remove invalid characters
+    .replace(/\s+/g, " ") // Normalize whitespace
     .trim();
 }
 
@@ -24,7 +24,7 @@ export function generateFilenameFromTabInfo(
   extension: string,
 ): string {
   const parts: string[] = [];
-  
+
   if (tabTitle) {
     // Sanitize and truncate tab title if too long
     let sanitizedTitle = sanitizeFilename(tabTitle);
@@ -33,18 +33,18 @@ export function generateFilenameFromTabInfo(
     }
     parts.push(sanitizedTitle);
   }
-  
+
   if (website) {
     // Sanitize website name
     const sanitizedWebsite = sanitizeFilename(website);
     parts.push(sanitizedWebsite);
   }
-  
+
   // If we have at least one part, use the template
   if (parts.length > 0) {
-    return `${parts.join(' - ')}.${extension}`;
+    return `${parts.join(" - ")}.${extension}`;
   }
-  
+
   // Fallback to timestamp if no info available
   const timestamp = Date.now();
   return `video_${timestamp}.${extension}`;
@@ -72,4 +72,3 @@ export function generateFilenameWithExtension(
     return `video_${timestamp}.${extension}`;
   }
 }
-

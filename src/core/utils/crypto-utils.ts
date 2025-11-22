@@ -41,4 +41,3 @@ export async function decrypt(
 export const CryptoDecryptor = {
   decrypt,
 };
-

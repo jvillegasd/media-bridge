@@ -18,10 +18,10 @@ import { M3u8DownloadHandler } from "./m3u8/m3u8-download-handler";
 export interface DownloadManagerOptions {
   /** Maximum number of concurrent downloads/chunks @default 3 */
   maxConcurrent?: number;
-  
+
   /** Optional callback for download progress updates */
   onProgress?: DownloadProgressCallback;
-  
+
   /** Whether to upload completed downloads to Google Drive @default false */
   uploadToDrive?: boolean;
 }

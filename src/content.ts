@@ -47,13 +47,15 @@ function safeSendMessage(message: any): Promise<void> {
  */
 function removeDetectedVideo(url: string): void {
   const normalizedUrl = normalizeUrl(url);
-  
+
   if (detectedVideos[normalizedUrl]) {
     delete detectedVideos[normalizedUrl];
     sentToPopup.delete(normalizedUrl);
-    
-    logger.info("[Media Bridge] Removed detected video", { url: normalizedUrl });
-    
+
+    logger.info("[Media Bridge] Removed detected video", {
+      url: normalizedUrl,
+    });
+
     // Notify popup about removal
     safeSendMessage({
       type: MessageType.VIDEO_REMOVED,
