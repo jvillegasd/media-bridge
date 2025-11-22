@@ -18,7 +18,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           release-type: node
           config-file: .github/release-please-config.json
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set zip filename
+        id: set-zip-name
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          echo "zip_name=media-bridge-extension-${{ steps.release.outputs.tag_name }}.zip" >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          ref: ${{ steps.release.outputs.tag_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Install dependencies
+        run: npm ci
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Build extension
+        run: npm run build
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Create extension zip
+        run: |
+          cd dist
+          zip -r ../${{ steps.set-zip-name.outputs.zip_name }} .
+          cd ..
+          ls -lh ${{ steps.set-zip-name.outputs.zip_name }}
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Verify zip file exists
+        run: |
+          if [ ! -f "${{ steps.set-zip-name.outputs.zip_name }}" ]; then
+            echo "Error: Zip file not found!"
+            exit 1
+          fi
+          echo "Zip file found: $(ls -lh ${{ steps.set-zip-name.outputs.zip_name }})"
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Upload release asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ steps.release.outputs.tag_name }} ${{ steps.set-zip-name.outputs.zip_name }} --clobber
+        if: ${{ steps.release.outputs.release_created }}
