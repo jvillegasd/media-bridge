@@ -10,6 +10,8 @@ name: build-release
 jobs:
   build-and-attach:
     runs-on: ubuntu-latest
+    env:
+      ZIP_NAME: media-bridge-extension-${{ github.event.release.tag_name }}.zip
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,23 +32,20 @@ jobs:
       - name: Create extension zip
         run: |
           cd dist
-          zip -r ../media-bridge-extension-${{ github.event.release.tag_name }}.zip .
+          zip -r ../${{ env.ZIP_NAME }} .
           cd ..
-          ls -lh media-bridge-extension-${{ github.event.release.tag_name }}.zip
+          ls -lh ${{ env.ZIP_NAME }}
 
       - name: Verify zip file exists
         run: |
-          if [ ! -f "media-bridge-extension-${{ github.event.release.tag_name }}.zip" ]; then
+          if [ ! -f "${{ env.ZIP_NAME }}" ]; then
             echo "Error: Zip file not found!"
             exit 1
           fi
-          echo "Zip file found: $(ls -lh media-bridge-extension-${{ github.event.release.tag_name }}.zip)"
+          echo "Zip file found: $(ls -lh ${{ env.ZIP_NAME }})"
 
       - name: Upload release asset
-        uses: ncipollo/upload-release-asset@v1
-        with:
-          file: media-bridge-extension-${{ github.event.release.tag_name }}.zip
-          tag: ${{ github.event.release.tag_name }}
-          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} ${{ env.ZIP_NAME }} --clobber

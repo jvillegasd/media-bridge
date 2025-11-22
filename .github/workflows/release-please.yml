@@ -21,4 +21,4 @@ jobs:
         with:
           release-type: node
           config-file: .github/release-please-config.json
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_GITHUB }}
