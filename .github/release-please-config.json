@@ -5,10 +5,13 @@
       "package-name": "media-bridge-extension",
       "version-file": "package.json",
       "extra-files": [
-        "manifest.json"
+        {
+          "type": "json",
+          "path": "manifest.json",
+          "jsonpath": "$.version"
+        }
       ]
     }
   },
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
 }
-
