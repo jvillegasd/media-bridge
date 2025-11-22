@@ -1,16 +1,16 @@
-name: Rewrite and Validate PR Title
-description: |
-  This GitHub Action will rewrite the PR title if it is in the slash format
-  (e.g., feat/new stuff or chore(main)/new stuff), which is commonly set by GitHub during pull request creation,
-  and validate that the title is in the conventional commit format (e.g., 'feat: description').
-  If the title is not in the conventional commit format, the action will fail.
-
 on:
   pull_request:
     types: [opened, edited]
 
 permissions:
   pull-requests: write
+
+name: Rewrite and Validate PR Title
+description: |
+  This GitHub Action will rewrite the PR title if it is in the slash format
+  (e.g., feat/new stuff or chore(main)/new stuff), which is commonly set by GitHub during pull request creation,
+  and validate that the title is in the conventional commit format (e.g., 'feat: description').
+  If the title is not in the conventional commit format, the action will fail.
 
 jobs:
   rewrite-pr-title:
