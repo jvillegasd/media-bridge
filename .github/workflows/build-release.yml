@@ -1,6 +1,6 @@
 on:
   release:
-    types: [published, created]
+    types: [published]
 
 permissions:
   contents: write
@@ -32,11 +32,21 @@ jobs:
           cd dist
           zip -r ../media-bridge-extension-${{ github.event.release.tag_name }}.zip .
           cd ..
+          ls -lh media-bridge-extension-${{ github.event.release.tag_name }}.zip
+
+      - name: Verify zip file exists
+        run: |
+          if [ ! -f "media-bridge-extension-${{ github.event.release.tag_name }}.zip" ]; then
+            echo "Error: Zip file not found!"
+            exit 1
+          fi
+          echo "Zip file found: $(ls -lh media-bridge-extension-${{ github.event.release.tag_name }}.zip)"
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v1
+        uses: ncipollo/upload-release-asset@v1
         with:
-          files: media-bridge-extension-${{ github.event.release.tag_name }}.zip
-          tag_name: ${{ github.event.release.tag_name }}
+          file: media-bridge-extension-${{ github.event.release.tag_name }}.zip
+          tag: ${{ github.event.release.tag_name }}
+          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
