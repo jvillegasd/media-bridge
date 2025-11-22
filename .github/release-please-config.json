@@ -1,4 +1,5 @@
 {
+  "include-component-in-tag": false,
   "changelog-sections": [
     { "type": "feat", "section": "🎉 New Features" },
     { "type": "fix", "section": "🐛 Bug Fixes" },
