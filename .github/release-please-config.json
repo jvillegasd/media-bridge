@@ -1,20 +1,22 @@
 {
+  "changelog-sections": [
+    { "type": "feat", "section": "🎉 New Features" },
+    { "type": "fix", "section": "🐛 Bug Fixes" },
+    { "type": "perf", "section": "⚡ Performance Improvements" },
+    { "type": "deps", "section": "📦 Dependency Updates" },
+    { "type": "docs", "section": "📚 Documentation", "hidden": false },
+    { "type": "chore", "section": "🔧 Maintenance", "hidden": true },
+    { "type": "test", "section": "✅ Tests", "hidden": true }
+  ],
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "media-bridge-extension",
-      "version-file": "package.json",
       "extra-files": [
-        "manifest.json"
-      ],
-      "changelog-sections": [
-        {"type": "feat", "section": "🎉 New Features"},
-        {"type": "fix", "section": "🐛 Bug Fixes"},
-        {"type": "perf", "section": "⚡ Performance Improvements"},
-        {"type": "deps", "section": "📦 Dependency Updates"},
-        {"type": "docs", "section": "📚 Documentation", "hidden": false},
-        {"type": "chore", "section": "🔧 Maintenance", "hidden": true},
-        {"type": "test", "section": "✅ Tests", "hidden": true}
+        {
+          "type": "json",
+          "path": "manifest.json",
+          "jsonpath": "$.version"
+        }
       ]
     }
   },
