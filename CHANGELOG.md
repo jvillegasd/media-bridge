@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/jvillegasd/media-bridge/compare/v1.0.1...v1.1.0) (2025-11-22)
+
+
+### Features
+
+* update build-release workflow for release asset handling ([#7](https://github.com/jvillegasd/media-bridge/issues/7)) ([4e5af73](https://github.com/jvillegasd/media-bridge/commit/4e5af73d9e5a56bf06be775f8dbca55d3b9a8a14))
+
 ## 1.0.0 (2025-11-22)
 
 
