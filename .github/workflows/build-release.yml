@@ -1,6 +1,6 @@
 on:
   release:
-    types: [published]
+    types: [published, created]
 
 permissions:
   contents: write
@@ -39,4 +39,4 @@ jobs:
           files: media-bridge-extension-${{ github.event.release.tag_name }}.zip
           tag_name: ${{ github.event.release.tag_name }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
