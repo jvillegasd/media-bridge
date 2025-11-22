@@ -1,0 +1,54 @@
+name: Rewrite and Validate PR Title
+description: |
+  This GitHub Action will rewrite the PR title if it is in the slash format
+  (e.g., feat/new stuff or chore(main)/new stuff), which is commonly set by GitHub during pull request creation,
+  and validate that the title is in the conventional commit format (e.g., 'feat: description').
+  If the title is not in the conventional commit format, the action will fail.
+
+on:
+  pull_request:
+    types: [opened, edited]
+
+jobs:
+  rewrite-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rewrite PR Title if needed and validate format
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.info("No pull request payload found, skipping.");
+              return;
+            }
+            let title = pr.title;
+            core.info(`Original PR title: ${title}`);
+
+            // Regex to detect a slash format (e.g., feat(scope)/new stuff or chore(main)/new stuff)
+            const slashRegex = /^(feat|fix|chore|docs|style|refactor|perf|test)(?:\([^)]+\))?[/](.+)$/i;
+            if (slashRegex.test(title)) {
+              const match = title.match(slashRegex);
+              const type = match[1].toLowerCase();
+              const description = match[2].trim();
+              const newTitle = `${type}: ${description}`;
+              if (newTitle !== title) {
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  title: newTitle,
+                });
+                core.info(`PR title updated to: ${newTitle}`);
+                title = newTitle;
+              }
+            }
+
+            // Regex to check if the title is in the conventional commit format with optional scope
+            // Examples: feat(auth): description or feat: description
+            const conventionalRegex = /^(feat|fix|chore|docs|style|refactor|perf|test)(?:\([^)]+\))?:\s+.+$/i;
+            if (!conventionalRegex.test(title)) {
+              core.setFailed("PR title is not in the conventional commit format (e.g., 'feat: description'). Please update it accordingly.");
+            } else {
+              core.info("PR title is in the conventional commit format.");
+            }
