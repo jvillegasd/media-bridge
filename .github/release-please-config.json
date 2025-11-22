@@ -5,11 +5,7 @@
       "package-name": "media-bridge-extension",
       "version-file": "package.json",
       "extra-files": [
-        {
-          "type": "json",
-          "path": "manifest.json",
-          "jsonpath": "$.json.version"
-        }
+        "manifest.json"
       ],
       "changelog-sections": [
         {"type": "feat", "section": "🎉 New Features"},
