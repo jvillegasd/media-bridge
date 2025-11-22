@@ -21,6 +21,7 @@ jobs:
         id: release
         with:
           config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set zip filename
