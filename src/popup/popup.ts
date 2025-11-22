@@ -810,11 +810,24 @@ function renderDetectedVideos() {
         ${
           !isDownloading
             ? `
-          <button class="video-btn ${buttonDisabled ? "disabled" : ""}" 
-                  data-url="${escapeHtml(video.url)}" 
-                  ${buttonDisabled ? "disabled" : ""}>
-            ${buttonText}
-          </button>
+          <div style="display: flex; gap: 6px; margin-top: 6px;">
+            <button class="video-btn ${buttonDisabled ? "disabled" : ""}" 
+                    data-url="${escapeHtml(video.url)}" 
+                    ${buttonDisabled ? "disabled" : ""}>
+              ${buttonText}
+            </button>
+            ${
+              (video.format === "hls" || video.format === "m3u8")
+                ? `
+              <button class="video-btn-hls" 
+                      data-url="${escapeHtml(video.url)}" 
+                      title="Select quality">
+                Select Quality
+              </button>
+            `
+                : ""
+            }
+          </div>
         `
             : ""
         }
@@ -833,6 +846,15 @@ function renderDetectedVideos() {
       const normalizedUrl = normalizeUrl(url);
       const videoMetadata = detectedVideos[normalizedUrl];
       startDownload(url, videoMetadata, { triggerButton: button });
+    });
+  });
+
+  // Add click handlers for HLS quality selection buttons
+  detectedVideosList.querySelectorAll(".video-btn-hls").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const button = e.target as HTMLButtonElement;
+      const url = button.getAttribute("data-url")!;
+      handleSendToHlsTab(url);
     });
   });
 }
@@ -1699,6 +1721,25 @@ async function handleLoadHlsPlaylist() {
  */
 function updateDownloadButtonState() {
   updateManualHlsFormState();
+}
+
+/**
+ * Handle sending video from autodetect to HLS tab for quality selection
+ */
+async function handleSendToHlsTab(url: string) {
+  // Switch to HLS tab
+  switchTab("manual");
+
+  // Wait a bit for the tab to switch and DOM to be ready
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // Fill the HLS URL input with the video URL
+  if (hlsUrlInput) {
+    hlsUrlInput.value = url;
+  }
+
+  // Automatically load the playlist
+  await handleLoadHlsPlaylist();
 }
 
 /**

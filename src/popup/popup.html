@@ -372,7 +372,6 @@
       border-radius: 4px;
       font-size: 11px;
       cursor: pointer;
-      margin-top: 6px;
     }
 
     .video-btn:hover:not(.disabled) {
@@ -383,6 +382,23 @@
       background: #ccc;
       cursor: not-allowed;
       opacity: 0.7;
+    }
+
+    .video-btn-hls {
+      padding: 5px 10px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color-light);
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .video-btn-hls:hover {
+      background: var(--bg-hover);
+      border-color: #4285f4;
+      color: #4285f4;
     }
 
     .video-quality-select {
