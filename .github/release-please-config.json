@@ -3,6 +3,8 @@
     ".": {
       "release-type": "node",
       "package-name": "media-bridge-extension",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
       "version-file": "package.json",
       "extra-files": [
         {
