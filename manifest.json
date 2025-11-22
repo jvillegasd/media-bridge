@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Media Bridge",
-  "version": "0.4.0",
+  "version": "1.2.0",
   "description": "Download videos from the web (direct downloads only) and upload to Google Drive",
   "permissions": [
     "identity",
@@ -14,7 +14,10 @@
     "activeTab",
     "offscreen"
   ],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -30,8 +33,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
@@ -55,7 +62,9 @@
         "ffmpeg/ffmpeg/*.js",
         "ffmpeg/util/*.js"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
