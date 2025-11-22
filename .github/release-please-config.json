@@ -3,15 +3,24 @@
     ".": {
       "release-type": "node",
       "package-name": "media-bridge-extension",
-      "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": true,
+      "bump-minor-pre-major": false,
+      "bump-patch-for-minor-pre-major": false,
       "version-file": "package.json",
       "extra-files": [
         {
           "type": "json",
           "path": "manifest.json",
-          "jsonpath": "$.version"
+          "jsonpath": "$.json.version"
         }
+      ],
+      "changelog-sections": [
+        {"type": "feat", "section": "🎉 New Features"},
+        {"type": "fix", "section": "🐛 Bug Fixes"},
+        {"type": "perf", "section": "⚡ Performance Improvements"},
+        {"type": "deps", "section": "📦 Dependency Updates"},
+        {"type": "docs", "section": "📚 Documentation", "hidden": false},
+        {"type": "chore", "section": "🔧 Maintenance", "hidden": true},
+        {"type": "test", "section": "✅ Tests", "hidden": true}
       ]
     }
   },
