@@ -3,9 +3,9 @@
  * Creates and manages the offscreen document lifecycle
  */
 
-import { logger } from './logger';
+import { logger } from "./logger";
 
-const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
+const OFFSCREEN_DOCUMENT_PATH = "offscreen/offscreen.html";
 
 /**
  * Check if offscreen document already exists
@@ -23,7 +23,7 @@ async function hasOffscreenDocument(): Promise<boolean> {
 
     return contexts.length > 0;
   } catch (error) {
-    logger.error('Failed to check for offscreen document:', error);
+    logger.error("Failed to check for offscreen document:", error);
     return false;
   }
 }
@@ -33,12 +33,12 @@ async function hasOffscreenDocument(): Promise<boolean> {
  */
 export async function createOffscreenDocument(): Promise<void> {
   if (!chrome.offscreen) {
-    logger.warn('Offscreen API not available');
+    logger.warn("Offscreen API not available");
     return;
   }
 
   if (await hasOffscreenDocument()) {
-    logger.debug('Offscreen document already exists');
+    logger.debug("Offscreen document already exists");
     return;
   }
 
@@ -46,14 +46,14 @@ export async function createOffscreenDocument(): Promise<void> {
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_DOCUMENT_PATH,
       reasons: [chrome.offscreen.Reason.WORKERS],
-      justification: 'FFmpeg processing for HLS video downloads',
+      justification: "FFmpeg processing for HLS video downloads",
     });
-    logger.info('Offscreen document created');
-    
+    logger.info("Offscreen document created");
+
     // Wait a bit for the offscreen document to fully load
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
   } catch (error) {
-    logger.error('Failed to create offscreen document:', error);
+    logger.error("Failed to create offscreen document:", error);
     throw error;
   }
 }
@@ -72,9 +72,8 @@ export async function closeOffscreenDocument(): Promise<void> {
 
   try {
     await chrome.offscreen.closeDocument();
-    logger.info('Offscreen document closed');
+    logger.info("Offscreen document closed");
   } catch (error) {
-    logger.error('Failed to close offscreen document:', error);
+    logger.error("Failed to close offscreen document:", error);
   }
 }
-

@@ -1,10 +1,10 @@
 /**
  * HLS detection handler - orchestrates HLS playlist detection
- * 
+ *
  * This handler is responsible for detecting HLS (HTTP Live Streaming) playlists from network requests.
  * It distinguishes between master playlists (containing multiple quality variants) and media playlists
  * (containing actual video fragments), and manages the relationship between them.
- * 
+ *
  * Key features:
  * - Detects HLS master playlists and media playlists from network requests
  * - Distinguishes between master and media playlists
@@ -12,7 +12,7 @@
  * - Removes media playlists that belong to master playlists (to avoid duplicates)
  * - Extracts metadata from playlist URLs
  * - Handles both HLS format (master playlists) and M3U8 format (standalone media playlists)
- * 
+ *
  * Detection process:
  * 1. Network requests are intercepted and checked for .m3u8 URLs
  * 2. Playlist content is fetched and analyzed to determine type (master vs media)
@@ -21,7 +21,7 @@
  * 5. Standalone media playlists are detected as M3U8 format
  * 6. Master playlists are detected as HLS format
  * 7. Variant videos are removed when master playlist is detected
- * 
+ *
  * @module HlsDetectionHandler
  */
 

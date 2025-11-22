@@ -2,20 +2,22 @@
  * Download state management using Chrome Storage
  */
 
-import { ChromeStorage } from './chrome-storage';
-import { DownloadState, DownloadProgress } from '../types';
-import { logger } from '../utils/logger';
-import { normalizeUrl } from '../utils/url-utils';
+import { ChromeStorage } from "./chrome-storage";
+import { DownloadState, DownloadProgress } from "../types";
+import { logger } from "../utils/logger";
+import { normalizeUrl } from "../utils/url-utils";
 
-const STORAGE_KEY_DOWNLOADS = 'downloads';
-const STORAGE_KEY_DOWNLOAD_QUEUE = 'download_queue';
+const STORAGE_KEY_DOWNLOADS = "downloads";
+const STORAGE_KEY_DOWNLOAD_QUEUE = "download_queue";
 
 export class DownloadStateManager {
   /**
    * Get all download states
    */
   static async getAllDownloads(): Promise<DownloadState[]> {
-    const downloads = await ChromeStorage.get<Record<string, DownloadState>>(STORAGE_KEY_DOWNLOADS);
+    const downloads = await ChromeStorage.get<Record<string, DownloadState>>(
+      STORAGE_KEY_DOWNLOADS,
+    );
     return downloads ? Object.values(downloads) : [];
   }
 
@@ -23,7 +25,9 @@ export class DownloadStateManager {
    * Get download state by ID
    */
   static async getDownload(id: string): Promise<DownloadState | null> {
-    const downloads = await ChromeStorage.get<Record<string, DownloadState>>(STORAGE_KEY_DOWNLOADS);
+    const downloads = await ChromeStorage.get<Record<string, DownloadState>>(
+      STORAGE_KEY_DOWNLOADS,
+    );
     return downloads?.[id] ?? null;
   }
 
@@ -34,16 +38,18 @@ export class DownloadStateManager {
   static async getDownloadByUrl(url: string): Promise<DownloadState | null> {
     const downloads = await this.getAllDownloads();
     const normalizedUrl = normalizeUrl(url);
-    return downloads.find(d => normalizeUrl(d.url) === normalizedUrl) ?? null;
+    return downloads.find((d) => normalizeUrl(d.url) === normalizedUrl) ?? null;
   }
 
   /**
    * Get download state by videoId
    * Matches downloads by the unique video ID
    */
-  static async getDownloadByVideoId(videoId: string): Promise<DownloadState | null> {
+  static async getDownloadByVideoId(
+    videoId: string,
+  ): Promise<DownloadState | null> {
     const downloads = await this.getAllDownloads();
-    return downloads.find(d => d.metadata.videoId === videoId) ?? null;
+    return downloads.find((d) => d.metadata.videoId === videoId) ?? null;
   }
 
   /**
@@ -51,7 +57,10 @@ export class DownloadStateManager {
    */
   static async saveDownload(state: DownloadState): Promise<void> {
     try {
-      const downloads = await ChromeStorage.get<Record<string, DownloadState>>(STORAGE_KEY_DOWNLOADS) || {};
+      const downloads =
+        (await ChromeStorage.get<Record<string, DownloadState>>(
+          STORAGE_KEY_DOWNLOADS,
+        )) || {};
       downloads[state.id] = {
         ...state,
         updatedAt: Date.now(),
@@ -67,7 +76,10 @@ export class DownloadStateManager {
   /**
    * Update download progress
    */
-  static async updateProgress(id: string, progress: Partial<DownloadProgress>): Promise<void> {
+  static async updateProgress(
+    id: string,
+    progress: Partial<DownloadProgress>,
+  ): Promise<void> {
     const state = await this.getDownload(id);
     if (!state) {
       logger.warn(`Download ${id} not found for progress update`);
@@ -86,7 +98,10 @@ export class DownloadStateManager {
    */
   static async removeDownload(id: string): Promise<void> {
     try {
-      const downloads = await ChromeStorage.get<Record<string, DownloadState>>(STORAGE_KEY_DOWNLOADS) || {};
+      const downloads =
+        (await ChromeStorage.get<Record<string, DownloadState>>(
+          STORAGE_KEY_DOWNLOADS,
+        )) || {};
       delete downloads[id];
       await ChromeStorage.set(STORAGE_KEY_DOWNLOADS, downloads);
       logger.debug(`Removed download state for ${id}`);
@@ -128,8 +143,7 @@ export class DownloadStateManager {
    */
   static async removeFromQueue(id: string): Promise<void> {
     const queue = await this.getQueue();
-    const filtered = queue.filter(qId => qId !== id);
+    const filtered = queue.filter((qId) => qId !== id);
     await ChromeStorage.set(STORAGE_KEY_DOWNLOAD_QUEUE, filtered);
   }
 }
-

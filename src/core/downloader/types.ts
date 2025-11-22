@@ -75,4 +75,3 @@ export interface DirectDownloadHandlerResult {
   filePath: string;
   fileExtension?: string;
 }
-

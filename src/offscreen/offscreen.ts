@@ -3,11 +3,11 @@
  * Handles HLS video processing using FFmpeg.wasm
  */
 
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
-import { MessageType } from '../shared/messages';
-import { readChunkByIndex } from '../core/storage/indexeddb-chunks';
-import { logger } from '../core/utils/logger';
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile } from "@ffmpeg/util";
+import { MessageType } from "../shared/messages";
+import { readChunkByIndex } from "../core/storage/indexeddb-chunks";
+import { logger } from "../core/utils/logger";
 
 let ffmpegInstance: FFmpeg | null = null;
 
@@ -16,19 +16,19 @@ let ffmpegInstance: FFmpeg | null = null;
  */
 async function getFFmpeg(): Promise<FFmpeg> {
   if (!ffmpegInstance) {
-    logger.info('Initializing FFmpeg in offscreen document');
+    logger.info("Initializing FFmpeg in offscreen document");
     ffmpegInstance = new FFmpeg();
 
     await ffmpegInstance.load({
-      coreURL: chrome.runtime.getURL('./ffmpeg/core/ffmpeg-core.js'),
-      wasmURL: chrome.runtime.getURL('./ffmpeg/core/ffmpeg-core.wasm'),
+      coreURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.js"),
+      wasmURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.wasm"),
     });
 
-    ffmpegInstance.on('log', ({ message }) => {
-      logger.debug('FFmpeg:', message);
+    ffmpegInstance.on("log", ({ message }) => {
+      logger.debug("FFmpeg:", message);
     });
 
-    logger.info('FFmpeg initialized successfully');
+    logger.info("FFmpeg initialized successfully");
   }
 
   return ffmpegInstance;
@@ -51,7 +51,7 @@ async function concatenateChunks(
     }
   }
 
-  return new Blob(chunks, { type: 'video/mp2t' });
+  return new Blob(chunks, { type: "video/mp2t" });
 }
 
 /**
@@ -65,41 +65,45 @@ async function processVideoAndAudio(
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
 ): Promise<void> {
-  onProgress?.(0.1, 'Concatenating video chunks');
+  onProgress?.(0.1, "Concatenating video chunks");
   const videoBlob = await concatenateChunks(downloadId, 0, videoLength);
 
-  onProgress?.(0.3, 'Concatenating audio chunks');
-  const audioBlob = await concatenateChunks(downloadId, videoLength, audioLength);
+  onProgress?.(0.3, "Concatenating audio chunks");
+  const audioBlob = await concatenateChunks(
+    downloadId,
+    videoLength,
+    audioLength,
+  );
 
-  onProgress?.(0.5, 'Writing video stream');
-  await ffmpeg.writeFile('video.ts', await fetchFile(videoBlob));
+  onProgress?.(0.5, "Writing video stream");
+  await ffmpeg.writeFile("video.ts", await fetchFile(videoBlob));
 
-  onProgress?.(0.6, 'Writing audio stream');
-  await ffmpeg.writeFile('audio.ts', await fetchFile(audioBlob));
+  onProgress?.(0.6, "Writing audio stream");
+  await ffmpeg.writeFile("audio.ts", await fetchFile(audioBlob));
 
-  onProgress?.(0.7, 'Merging video and audio');
+  onProgress?.(0.7, "Merging video and audio");
   await ffmpeg.exec([
-    '-y',
-    '-i',
-    'video.ts',
-    '-i',
-    'audio.ts',
-    '-c:v',
-    'copy',
-    '-c:a',
-    'copy',
-    '-bsf:a',
-    'aac_adtstoasc',
-    '-shortest',
-    '-movflags',
-    '+faststart',
+    "-y",
+    "-i",
+    "video.ts",
+    "-i",
+    "audio.ts",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "copy",
+    "-bsf:a",
+    "aac_adtstoasc",
+    "-shortest",
+    "-movflags",
+    "+faststart",
     outputFileName,
   ]);
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile('video.ts');
-    await ffmpeg.deleteFile('audio.ts');
+    await ffmpeg.deleteFile("video.ts");
+    await ffmpeg.deleteFile("audio.ts");
   } catch (error) {
     // Files may not exist, ignore error
   }
@@ -115,27 +119,27 @@ async function processVideoOnly(
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
 ): Promise<void> {
-  onProgress?.(0.2, 'Concatenating video chunks');
+  onProgress?.(0.2, "Concatenating video chunks");
   const videoBlob = await concatenateChunks(downloadId, 0, videoLength);
 
-  onProgress?.(0.5, 'Writing video stream');
-  await ffmpeg.writeFile('video.ts', await fetchFile(videoBlob));
+  onProgress?.(0.5, "Writing video stream");
+  await ffmpeg.writeFile("video.ts", await fetchFile(videoBlob));
 
-  onProgress?.(0.7, 'Converting to MP4');
+  onProgress?.(0.7, "Converting to MP4");
   await ffmpeg.exec([
-    '-y',
-    '-i',
-    'video.ts',
-    '-c:v',
-    'copy',
-    '-movflags',
-    '+faststart',
+    "-y",
+    "-i",
+    "video.ts",
+    "-c:v",
+    "copy",
+    "-movflags",
+    "+faststart",
     outputFileName,
   ]);
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile('video.ts');
+    await ffmpeg.deleteFile("video.ts");
   } catch (error) {
     // File may not exist, ignore error
   }
@@ -152,31 +156,31 @@ async function processM3u8MediaPlaylist(
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
 ): Promise<void> {
-  onProgress?.(0.2, 'Concatenating media playlist chunks');
+  onProgress?.(0.2, "Concatenating media playlist chunks");
   const mediaBlob = await concatenateChunks(downloadId, 0, fragmentCount);
 
-  onProgress?.(0.5, 'Writing media stream');
-  await ffmpeg.writeFile('media.ts', await fetchFile(mediaBlob));
+  onProgress?.(0.5, "Writing media stream");
+  await ffmpeg.writeFile("media.ts", await fetchFile(mediaBlob));
 
-  onProgress?.(0.7, 'Converting to MP4');
+  onProgress?.(0.7, "Converting to MP4");
   // Use -c copy to copy all streams (video and audio) since media playlists
   // contain combined MPEG-TS streams with both video and audio
   await ffmpeg.exec([
-    '-y',
-    '-i',
-    'media.ts',
-    '-c',
-    'copy', // Copy all codecs (video and audio)
-    '-bsf:a',
-    'aac_adtstoasc', // Convert AAC ADTS to ASC for better compatibility
-    '-movflags',
-    '+faststart',
+    "-y",
+    "-i",
+    "media.ts",
+    "-c",
+    "copy", // Copy all codecs (video and audio)
+    "-bsf:a",
+    "aac_adtstoasc", // Convert AAC ADTS to ASC for better compatibility
+    "-movflags",
+    "+faststart",
     outputFileName,
   ]);
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile('media.ts');
+    await ffmpeg.deleteFile("media.ts");
   } catch (error) {
     // File may not exist, ignore error
   }
@@ -192,27 +196,27 @@ async function processAudioOnly(
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
 ): Promise<void> {
-  onProgress?.(0.2, 'Concatenating audio chunks');
+  onProgress?.(0.2, "Concatenating audio chunks");
   const audioBlob = await concatenateChunks(downloadId, 0, audioLength);
 
-  onProgress?.(0.5, 'Writing audio stream');
-  await ffmpeg.writeFile('audio.ts', await fetchFile(audioBlob));
+  onProgress?.(0.5, "Writing audio stream");
+  await ffmpeg.writeFile("audio.ts", await fetchFile(audioBlob));
 
-  onProgress?.(0.7, 'Converting to MP4');
+  onProgress?.(0.7, "Converting to MP4");
   await ffmpeg.exec([
-    '-y',
-    '-i',
-    'audio.ts',
-    '-c:a',
-    'copy',
-    '-movflags',
-    '+faststart',
+    "-y",
+    "-i",
+    "audio.ts",
+    "-c:a",
+    "copy",
+    "-movflags",
+    "+faststart",
     outputFileName,
   ]);
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile('audio.ts');
+    await ffmpeg.deleteFile("audio.ts");
   } catch (error) {
     // File may not exist, ignore error
   }
@@ -231,27 +235,46 @@ async function processHLSChunks(
   const ffmpeg = await getFFmpeg();
 
   // Extract base filename without extension
-  const baseFileName = filename.replace(/\.[^/.]+$/, '');
+  const baseFileName = filename.replace(/\.[^/.]+$/, "");
   const outputFileName = `/tmp/${baseFileName}.mp4`;
 
   // Process based on available streams
   if (videoLength > 0 && audioLength > 0) {
-    await processVideoAndAudio(ffmpeg, downloadId, videoLength, audioLength, outputFileName, onProgress);
+    await processVideoAndAudio(
+      ffmpeg,
+      downloadId,
+      videoLength,
+      audioLength,
+      outputFileName,
+      onProgress,
+    );
   } else if (videoLength > 0) {
-    await processVideoOnly(ffmpeg, downloadId, videoLength, outputFileName, onProgress);
+    await processVideoOnly(
+      ffmpeg,
+      downloadId,
+      videoLength,
+      outputFileName,
+      onProgress,
+    );
   } else if (audioLength > 0) {
-    await processAudioOnly(ffmpeg, downloadId, audioLength, outputFileName, onProgress);
+    await processAudioOnly(
+      ffmpeg,
+      downloadId,
+      audioLength,
+      outputFileName,
+      onProgress,
+    );
   } else {
-    throw new Error('No video or audio chunks to process');
+    throw new Error("No video or audio chunks to process");
   }
 
   // Read the output file
   try {
     const data = await ffmpeg.readFile(outputFileName);
-    onProgress?.(1, 'Done');
+    onProgress?.(1, "Done");
 
     // Create blob URL
-    const blob = new Blob([data], { type: 'video/mp4' });
+    const blob = new Blob([data], { type: "video/mp4" });
     const blobUrl = URL.createObjectURL(blob);
 
     // Cleanup output file
@@ -280,23 +303,29 @@ async function processM3u8Chunks(
   const ffmpeg = await getFFmpeg();
 
   // Extract base filename without extension
-  const baseFileName = filename.replace(/\.[^/.]+$/, '');
+  const baseFileName = filename.replace(/\.[^/.]+$/, "");
   const outputFileName = `/tmp/${baseFileName}.mp4`;
 
   if (fragmentCount === 0) {
-    throw new Error('No fragments to process');
+    throw new Error("No fragments to process");
   }
 
   // Process M3U8 media playlist
-  await processM3u8MediaPlaylist(ffmpeg, downloadId, fragmentCount, outputFileName, onProgress);
+  await processM3u8MediaPlaylist(
+    ffmpeg,
+    downloadId,
+    fragmentCount,
+    outputFileName,
+    onProgress,
+  );
 
   // Read the output file
   try {
     const data = await ffmpeg.readFile(outputFileName);
-    onProgress?.(1, 'Done');
+    onProgress?.(1, "Done");
 
     // Create blob URL
-    const blob = new Blob([data], { type: 'video/mp4' });
+    const blob = new Blob([data], { type: "video/mp4" });
     const blobUrl = URL.createObjectURL(blob);
 
     // Cleanup output file
@@ -332,53 +361,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       filename,
       (progress, message) => {
         // Send progress updates back to service worker
-        chrome.runtime.sendMessage({
-          type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-          payload: {
-            downloadId,
-            type: 'progress',
-            progress,
-            message,
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+            payload: {
+              downloadId,
+              type: "progress",
+              progress,
+              message,
+            },
           },
-        }, () => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - service worker might not be listening
-          }
-        });
+          () => {
+            // Check for errors to prevent "unchecked runtime.lastError" warning
+            if (chrome.runtime.lastError) {
+              // Ignore - service worker might not be listening
+            }
+          },
+        );
       },
     )
       .then((blobUrl) => {
         // Send success response
-        chrome.runtime.sendMessage({
-          type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-          payload: {
-            downloadId,
-            type: 'success',
-            blobUrl,
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+            payload: {
+              downloadId,
+              type: "success",
+              blobUrl,
+            },
           },
-        }, () => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - service worker might not be listening
-          }
-        });
+          () => {
+            // Check for errors to prevent "unchecked runtime.lastError" warning
+            if (chrome.runtime.lastError) {
+              // Ignore - service worker might not be listening
+            }
+          },
+        );
       })
       .catch((error) => {
         // Send error response
-        chrome.runtime.sendMessage({
-          type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-          payload: {
-            downloadId,
-            type: 'error',
-            error: error instanceof Error ? error.message : String(error),
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+            payload: {
+              downloadId,
+              type: "error",
+              error: error instanceof Error ? error.message : String(error),
+            },
           },
-        }, () => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - service worker might not be listening
-          }
-        });
+          () => {
+            // Check for errors to prevent "unchecked runtime.lastError" warning
+            if (chrome.runtime.lastError) {
+              // Ignore - service worker might not be listening
+            }
+          },
+        );
       });
 
     // Return true to indicate async response (we called sendResponse above)
@@ -399,62 +437,70 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       filename,
       (progress, message) => {
         // Send progress updates back to service worker
-        chrome.runtime.sendMessage({
-          type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-          payload: {
-            downloadId,
-            type: 'progress',
-            progress,
-            message,
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
+            payload: {
+              downloadId,
+              type: "progress",
+              progress,
+              message,
+            },
           },
-        }, () => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - service worker might not be listening
-          }
-        });
+          () => {
+            // Check for errors to prevent "unchecked runtime.lastError" warning
+            if (chrome.runtime.lastError) {
+              // Ignore - service worker might not be listening
+            }
+          },
+        );
       },
     )
       .then((blobUrl) => {
         // Send success response
-        chrome.runtime.sendMessage({
-          type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-          payload: {
-            downloadId,
-            type: 'success',
-            blobUrl,
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
+            payload: {
+              downloadId,
+              type: "success",
+              blobUrl,
+            },
           },
-        }, () => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - service worker might not be listening
-          }
-        });
+          () => {
+            // Check for errors to prevent "unchecked runtime.lastError" warning
+            if (chrome.runtime.lastError) {
+              // Ignore - service worker might not be listening
+            }
+          },
+        );
       })
       .catch((error) => {
         // Send error response
-        chrome.runtime.sendMessage({
-          type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-          payload: {
-            downloadId,
-            type: 'error',
-            error: error instanceof Error ? error.message : String(error),
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
+            payload: {
+              downloadId,
+              type: "error",
+              error: error instanceof Error ? error.message : String(error),
+            },
           },
-        }, () => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - service worker might not be listening
-          }
-        });
+          () => {
+            // Check for errors to prevent "unchecked runtime.lastError" warning
+            if (chrome.runtime.lastError) {
+              // Ignore - service worker might not be listening
+            }
+          },
+        );
       });
 
     // Return true to indicate async response (we called sendResponse above)
     return true;
   }
-  
+
   // Return false for messages we don't handle (don't log warnings)
   return false;
 });
 
-logger.info('Offscreen document script loaded');
-
+logger.info("Offscreen document script loaded");

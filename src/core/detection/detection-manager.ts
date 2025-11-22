@@ -1,22 +1,22 @@
 /**
  * Main detection manager - orchestrates video detection
- * 
+ *
  * This manager serves as the central coordinator for video detection across different formats.
  * It routes detection requests to format-specific handlers (direct, HLS) and manages the
  * overall detection lifecycle.
- * 
+ *
  * Key features:
  * - Routes network requests to appropriate detection handlers based on URL format
  * - Initializes DOM observers for direct video detection
  * - Coordinates between direct and HLS detection handlers
  * - Provides unified callbacks for video detection and removal events
- * 
+ *
  * Detection process:
  * 1. Network requests are intercepted and analyzed for video format
  * 2. Requests are routed to format-specific handlers (direct or HLS)
  * 3. DOM observers monitor for dynamically added video elements
  * 4. Detected videos trigger callbacks with metadata
- * 
+ *
  * @module DetectionManager
  */
 

@@ -1,10 +1,10 @@
 /**
  * HLS download handler - orchestrates HLS video downloads
- * 
+ *
  * This handler is responsible for downloading HLS (HTTP Live Streaming) videos from master playlists.
  * HLS videos typically consist of multiple quality variants (video streams) and separate audio tracks
  * that need to be downloaded separately and then merged together.
- * 
+ *
  * Key features:
  * - Parses master playlists to extract video and audio stream URLs
  * - Downloads video and audio fragments separately with concurrency control
@@ -13,7 +13,7 @@
  * - Merges video and audio streams using FFmpeg via offscreen document
  * - Tracks download progress with byte-level accuracy and speed calculation
  * - Supports manual quality selection or auto-selection (highest quality)
- * 
+ *
  * Download process:
  * 1. Parse master playlist to extract levels (video/audio variants)
  * 2. Select best quality (or use provided quality preferences)
@@ -21,7 +21,7 @@
  * 4. Download audio fragments (indices videoLength to videoLength+audioLength-1)
  * 5. Merge video and audio streams using FFmpeg
  * 6. Save final MP4 file using Chrome downloads API
- * 
+ *
  * @module HlsDownloadHandler
  */
 
@@ -31,7 +31,10 @@ import { DownloadState, Fragment, Level } from "../../types";
 import { logger } from "../../utils/logger";
 import { decrypt } from "../../utils/crypto-utils";
 import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
-import { parseMasterPlaylist, parseLevelsPlaylist } from "../../utils/m3u8-parser";
+import {
+  parseMasterPlaylist,
+  parseLevelsPlaylist,
+} from "../../utils/m3u8-parser";
 import { storeChunk, deleteChunks } from "../../storage/indexeddb-chunks";
 import { createOffscreenDocument } from "../../utils/offscreen-manager";
 import { MessageType } from "../../../shared/messages";
@@ -74,12 +77,12 @@ async function decryptSingleFragment(
 
     // Convert IV from hex string to Uint8Array
     // IV should be 16 bytes for AES-128
-    const hexString = key.iv.startsWith('0x') ? key.iv.slice(2) : key.iv;
+    const hexString = key.iv.startsWith("0x") ? key.iv.slice(2) : key.iv;
     const ivBytes = new Uint8Array(16);
-    
+
     // Parse hex string (should be 32 hex chars = 16 bytes)
     // Pad or truncate to exactly 16 bytes
-    const normalizedHex = hexString.padEnd(32, '0').slice(0, 32);
+    const normalizedHex = hexString.padEnd(32, "0").slice(0, 32);
     for (let i = 0; i < 16; i++) {
       const hexByte = normalizedHex.substring(i * 2, i * 2 + 2);
       ivBytes[i] = parseInt(hexByte, 16);
@@ -90,7 +93,11 @@ async function decryptSingleFragment(
     return decryptedData;
   } catch (error) {
     logger.error(`Failed to decrypt fragment:`, error);
-    throw new Error(`Decryption failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Decryption failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
@@ -147,7 +154,7 @@ export class HlsDownloadHandler {
     if (this.lastUpdateTime > 0 && this.lastDownloadedBytes > 0) {
       const timeDelta = (now - this.lastUpdateTime) / 1000; // Convert to seconds
       const bytesDelta = downloadedBytes - this.lastDownloadedBytes;
-      
+
       if (timeDelta > 0) {
         speed = bytesDelta / timeDelta; // bytes per second
       }
@@ -159,12 +166,17 @@ export class HlsDownloadHandler {
     this.bytesDownloaded = downloadedBytes;
     this.totalBytes = totalBytes;
 
-    const percentage = totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
+    const percentage =
+      totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
     state.progress.downloaded = downloadedBytes;
     state.progress.total = totalBytes;
     state.progress.percentage = percentage;
     state.progress.stage = "downloading";
-    state.progress.message = message || `Downloaded ${this.formatFileSize(downloadedBytes)}/${this.formatFileSize(totalBytes)}`;
+    state.progress.message =
+      message ||
+      `Downloaded ${this.formatFileSize(downloadedBytes)}/${this.formatFileSize(
+        totalBytes,
+      )}`;
     state.progress.speed = speed;
     state.progress.lastUpdateTime = now;
     state.progress.lastDownloaded = downloadedBytes;
@@ -245,19 +257,23 @@ export class HlsDownloadHandler {
     let estimatedTotalBytes = 0;
     if (fragments.length > 0) {
       try {
-        const firstFragmentSize = await this.downloadFragment(fragments[0], downloadId);
+        const firstFragmentSize = await this.downloadFragment(
+          fragments[0],
+          downloadId,
+        );
         sessionBytesDownloaded += firstFragmentSize;
         downloadedFragments++;
         this.bytesDownloaded += firstFragmentSize;
-        
+
         // Estimate total based on first fragment size
         estimatedTotalBytes = firstFragmentSize * totalFragments;
         // Add to existing total if we already have bytes from previous calls
         if (this.totalBytes > 0) {
-          estimatedTotalBytes += this.totalBytes - this.bytesDownloaded + firstFragmentSize;
+          estimatedTotalBytes +=
+            this.totalBytes - this.bytesDownloaded + firstFragmentSize;
         }
         this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
-        
+
         await this.updateProgress(
           stateId,
           this.bytesDownloaded,
@@ -265,7 +281,10 @@ export class HlsDownloadHandler {
           `Downloading fragments...`,
         );
       } catch (error) {
-        logger.error(`Failed to download first fragment for size estimation:`, error);
+        logger.error(
+          `Failed to download first fragment for size estimation:`,
+          error,
+        );
         // Fallback: use a default estimate or fragment count
         estimatedTotalBytes = 0;
       }
@@ -281,21 +300,25 @@ export class HlsDownloadHandler {
         const fragment = fragments[fragmentIndex];
 
         try {
-          const fragmentSize = await this.downloadFragment(fragment, downloadId);
+          const fragmentSize = await this.downloadFragment(
+            fragment,
+            downloadId,
+          );
           sessionBytesDownloaded += fragmentSize;
           downloadedFragments++;
           this.bytesDownloaded += fragmentSize;
-          
+
           // Update estimated total if we have better data
           if (estimatedTotalBytes === 0 || downloadedFragments > 0) {
-            const averageFragmentSize = sessionBytesDownloaded / downloadedFragments;
+            const averageFragmentSize =
+              sessionBytesDownloaded / downloadedFragments;
             const sessionEstimatedTotal = averageFragmentSize * totalFragments;
             // Update total estimate, preserving bytes from previous sessions
             const previousBytes = this.bytesDownloaded - sessionBytesDownloaded;
             estimatedTotalBytes = previousBytes + sessionEstimatedTotal;
             this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
           }
-          
+
           await this.updateProgress(
             stateId,
             this.bytesDownloaded,
@@ -312,7 +335,11 @@ export class HlsDownloadHandler {
     };
 
     // Start concurrent downloads
-    for (let i = 0; i < Math.min(this.maxConcurrent, totalFragments - downloadedFragments); i++) {
+    for (
+      let i = 0;
+      i < Math.min(this.maxConcurrent, totalFragments - downloadedFragments);
+      i++
+    ) {
       downloadQueue.push(downloadNext());
     }
 
@@ -334,7 +361,9 @@ export class HlsDownloadHandler {
     }
 
     if (downloadedFragments < totalFragments) {
-      logger.warn(`Downloaded ${downloadedFragments}/${totalFragments} fragments. Some fragments failed.`);
+      logger.warn(
+        `Downloaded ${downloadedFragments}/${totalFragments} fragments. Some fragments failed.`,
+      );
     }
   }
 
@@ -358,7 +387,13 @@ export class HlsDownloadHandler {
           message.type === MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE &&
           message.payload?.downloadId === this.downloadId
         ) {
-          const { type, blobUrl, error, progress, message: progressMessage } = message.payload;
+          const {
+            type,
+            blobUrl,
+            error,
+            progress,
+            message: progressMessage,
+          } = message.payload;
 
           if (type === "success") {
             chrome.runtime.onMessage.removeListener(messageListener);
@@ -376,23 +411,30 @@ export class HlsDownloadHandler {
       chrome.runtime.onMessage.addListener(messageListener);
 
       // Send processing request
-      chrome.runtime.sendMessage({
-        type: MessageType.OFFSCREEN_PROCESS_HLS,
-        payload: {
-          downloadId: this.downloadId,
-          videoLength: this.videoLength,
-          audioLength: this.audioLength,
-          filename: fileName,
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.OFFSCREEN_PROCESS_HLS,
+          payload: {
+            downloadId: this.downloadId,
+            videoLength: this.videoLength,
+            audioLength: this.audioLength,
+            filename: fileName,
+          },
         },
-      }, (response) => {
-        // Check for errors to prevent "unchecked runtime.lastError" warning
-        if (chrome.runtime.lastError) {
-          chrome.runtime.onMessage.removeListener(messageListener);
-          reject(new Error(`Failed to send processing request: ${chrome.runtime.lastError.message}`));
-          return;
-        }
-        // Response is handled by messageListener
-      });
+        (response) => {
+          // Check for errors to prevent "unchecked runtime.lastError" warning
+          if (chrome.runtime.lastError) {
+            chrome.runtime.onMessage.removeListener(messageListener);
+            reject(
+              new Error(
+                `Failed to send processing request: ${chrome.runtime.lastError.message}`,
+              ),
+            );
+            return;
+          }
+          // Response is handled by messageListener
+        },
+      );
 
       // Set timeout to prevent hanging
       setTimeout(() => {
@@ -440,12 +482,12 @@ export class HlsDownloadHandler {
 
                   if (item.state === "complete") {
                     // Clean up blob URL after successful download
-                    if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+                    if (typeof URL !== "undefined" && URL.revokeObjectURL) {
                       URL.revokeObjectURL(blobUrl);
                     }
                     resolve(item.filename);
                   } else if (item.state === "interrupted") {
-                    if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+                    if (typeof URL !== "undefined" && URL.revokeObjectURL) {
                       URL.revokeObjectURL(blobUrl);
                     }
                     reject(new Error(item.error || "Download interrupted"));
@@ -463,7 +505,7 @@ export class HlsDownloadHandler {
       });
     } catch (error) {
       // Clean up blob URL on error
-      if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+      if (typeof URL !== "undefined" && URL.revokeObjectURL) {
         URL.revokeObjectURL(blobUrl);
       }
       throw error;
@@ -474,7 +516,10 @@ export class HlsDownloadHandler {
    * Select best video and audio levels from master playlist
    * @private
    */
-  private selectLevels(levels: Level[]): { video: string | null; audio: string | null } {
+  private selectLevels(levels: Level[]): {
+    video: string | null;
+    audio: string | null;
+  } {
     // Separate video and audio levels
     const videoLevels = levels.filter((level) => level.type === "stream");
     const audioLevels = levels.filter((level) => level.type === "audio");
@@ -496,7 +541,8 @@ export class HlsDownloadHandler {
     }
 
     // Select first audio level (or best if we want to add selection logic)
-    const audioUri = audioLevels.length > 0 ? audioLevels[0]?.uri || null : null;
+    const audioUri =
+      audioLevels.length > 0 ? audioLevels[0]?.uri || null : null;
 
     return { video: videoUri, audio: audioUri };
   }
@@ -537,11 +583,18 @@ export class HlsDownloadHandler {
       if (hlsQuality) {
         videoPlaylistUrl = hlsQuality.videoPlaylistUrl || null;
         audioPlaylistUrl = hlsQuality.audioPlaylistUrl || null;
-        logger.info(`Using provided quality preferences - video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
+        logger.info(
+          `Using provided quality preferences - video: ${
+            videoPlaylistUrl || "none"
+          }, audio: ${audioPlaylistUrl || "none"}`,
+        );
       } else {
         // Otherwise, fetch and parse master playlist to auto-select
         const masterPlaylistText = await fetchText(masterPlaylistUrl, 3);
-        const levels = parseMasterPlaylist(masterPlaylistText, masterPlaylistUrl);
+        const levels = parseMasterPlaylist(
+          masterPlaylistText,
+          masterPlaylistUrl,
+        );
 
         if (levels.length === 0) {
           throw new Error("No levels found in master playlist");
@@ -551,7 +604,11 @@ export class HlsDownloadHandler {
         const selected = this.selectLevels(levels);
         videoPlaylistUrl = selected.video;
         audioPlaylistUrl = selected.audio;
-        logger.info(`Auto-selected video: ${videoPlaylistUrl || "none"}, audio: ${audioPlaylistUrl || "none"}`);
+        logger.info(
+          `Auto-selected video: ${videoPlaylistUrl || "none"}, audio: ${
+            audioPlaylistUrl || "none"
+          }`,
+        );
       }
 
       if (!videoPlaylistUrl && !audioPlaylistUrl) {
@@ -567,7 +624,10 @@ export class HlsDownloadHandler {
       // Download video fragments
       if (videoPlaylistUrl) {
         const videoPlaylistText = await fetchText(videoPlaylistUrl, 3);
-        const videoFragments = parseLevelsPlaylist(videoPlaylistText, videoPlaylistUrl);
+        const videoFragments = parseLevelsPlaylist(
+          videoPlaylistText,
+          videoPlaylistUrl,
+        );
 
         if (videoFragments.length === 0) {
           throw new Error("No video fragments found in level playlist");
@@ -584,13 +644,20 @@ export class HlsDownloadHandler {
         this.videoLength = indexedVideoFragments.length;
 
         // Download video fragments (downloadAllFragments handles progress internally)
-        await this.downloadAllFragments(indexedVideoFragments, this.downloadId, stateId);
+        await this.downloadAllFragments(
+          indexedVideoFragments,
+          this.downloadId,
+          stateId,
+        );
       }
 
       // Download audio fragments
       if (audioPlaylistUrl) {
         const audioPlaylistText = await fetchText(audioPlaylistUrl, 3);
-        const audioFragments = parseLevelsPlaylist(audioPlaylistText, audioPlaylistUrl);
+        const audioFragments = parseLevelsPlaylist(
+          audioPlaylistText,
+          audioPlaylistUrl,
+        );
 
         if (audioFragments.length === 0) {
           throw new Error("No audio fragments found in level playlist");
@@ -608,7 +675,11 @@ export class HlsDownloadHandler {
 
         // Continue downloading audio fragments (bytes accumulate from video)
         // Note: downloadAllFragments will continue from where video left off
-        await this.downloadAllFragments(indexedAudioFragments, this.downloadId, stateId);
+        await this.downloadAllFragments(
+          indexedAudioFragments,
+          this.downloadId,
+          stateId,
+        );
       }
 
       // Update progress: merging with FFmpeg
@@ -653,7 +724,11 @@ export class HlsDownloadHandler {
       }
 
       // Save to file using blob URL
-      const filePath = await this.saveBlobUrlToFile(blobUrl, `${baseFileName}.mp4`, stateId);
+      const filePath = await this.saveBlobUrlToFile(
+        blobUrl,
+        `${baseFileName}.mp4`,
+        stateId,
+      );
 
       // Clean up IndexedDB chunks
       await deleteChunks(this.downloadId);
@@ -666,11 +741,12 @@ export class HlsDownloadHandler {
         finalState.progress.message = "Download completed";
         finalState.progress.percentage = 100;
         // Ensure downloaded equals total for completed state
-        finalState.progress.downloaded = finalState.progress.total || this.bytesDownloaded || 0;
+        finalState.progress.downloaded =
+          finalState.progress.total || this.bytesDownloaded || 0;
         finalState.updatedAt = Date.now();
         await DownloadStateManager.saveDownload(finalState);
         this.notifyProgress(finalState);
-        
+
         // Ensure state is persisted by reading it back and verifying
         const verifyState = await DownloadStateManager.getDownload(stateId);
         if (verifyState && verifyState.progress.stage !== "completed") {
@@ -682,7 +758,9 @@ export class HlsDownloadHandler {
           this.notifyProgress(verifyState);
         }
       } else {
-        logger.error(`Could not find download state ${stateId} to mark as completed`);
+        logger.error(
+          `Could not find download state ${stateId} to mark as completed`,
+        );
       }
 
       logger.info(`HLS download completed: ${filePath}`);
@@ -703,7 +781,11 @@ export class HlsDownloadHandler {
 
       throw error instanceof DownloadError
         ? error
-        : new DownloadError(`HLS download failed: ${error instanceof Error ? error.message : String(error)}`);
+        : new DownloadError(
+            `HLS download failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
     }
   }
 
@@ -717,4 +799,3 @@ export class HlsDownloadHandler {
     }
   }
 }
-

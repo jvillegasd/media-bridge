@@ -2,13 +2,21 @@
  * Popup UI for displaying detected videos and managing downloads
  */
 
-import { DownloadState, VideoMetadata, VideoFormat, Level } from '../core/types';
-import { DownloadStateManager } from '../core/storage/download-state';
-import { MessageType } from '../shared/messages';
-import { normalizeUrl, detectFormatFromUrl } from '../core/utils/url-utils';
-import { parseMasterPlaylist, isMasterPlaylist, isMediaPlaylist } from '../core/utils/m3u8-parser';
-import { ChromeStorage } from '../core/storage/chrome-storage';
-
+import {
+  DownloadState,
+  VideoMetadata,
+  VideoFormat,
+  Level,
+} from "../core/types";
+import { DownloadStateManager } from "../core/storage/download-state";
+import { MessageType } from "../shared/messages";
+import { normalizeUrl, detectFormatFromUrl } from "../core/utils/url-utils";
+import {
+  parseMasterPlaylist,
+  isMasterPlaylist,
+  isMediaPlaylist,
+} from "../core/utils/m3u8-parser";
+import { ChromeStorage } from "../core/storage/chrome-storage";
 
 // DOM elements
 let noVideoBtn: HTMLButtonElement | null = null;
@@ -36,7 +44,9 @@ let themeToggle: HTMLButtonElement | null = null;
 let themeIcon: SVGElement | null = null;
 
 // List containers
-const detectedVideosList = document.getElementById('detectedVideosList') as HTMLDivElement;
+const detectedVideosList = document.getElementById(
+  "detectedVideosList",
+) as HTMLDivElement;
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let downloadStates: DownloadState[] = [];
@@ -46,99 +56,129 @@ let downloadStates: DownloadState[] = [];
  */
 async function init() {
   // Initialize DOM elements
-  noVideoBtn = document.getElementById('noVideoBtn') as HTMLButtonElement;
-  forceDetectionBtn = document.getElementById('forceDetectionBtn') as HTMLButtonElement;
-  closeNoVideoNoticeBtn = document.getElementById('closeNoVideoNotice') as HTMLButtonElement;
-  noVideoNotice = document.getElementById('noVideoNotice') as HTMLDivElement;
-  settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
-  downloadsBtn = document.getElementById('downloadsBtn') as HTMLButtonElement;
-  clearCompletedBtn = document.getElementById('clearCompletedBtn') as HTMLButtonElement;
-  autoDetectTab = document.getElementById('autoDetectTab') as HTMLButtonElement;
-  manualHlsTab = document.getElementById('manualHlsTab') as HTMLButtonElement;
-  autoDetectContent = document.getElementById('autoDetectContent') as HTMLDivElement;
-  manualHlsContent = document.getElementById('manualHlsContent') as HTMLDivElement;
-  startHlsDownloadBtn = document.getElementById('startHlsDownloadBtn') as HTMLButtonElement;
-  loadHlsPlaylistBtn = document.getElementById('loadHlsPlaylistBtn') as HTMLButtonElement;
-  videoQualitySelect = document.getElementById('videoQualitySelect') as HTMLSelectElement;
-  audioQualitySelect = document.getElementById('audioQualitySelect') as HTMLSelectElement;
-  hlsUrlInput = document.getElementById('hlsUrlInput') as HTMLInputElement;
-  hlsMediaPlaylistWarning = document.getElementById('hlsMediaPlaylistWarning') as HTMLDivElement;
-  hlsQualitySelection = document.getElementById('hlsQualitySelection') as HTMLDivElement;
-  manualHlsProgress = document.getElementById('manualHlsProgress') as HTMLDivElement;
-  themeToggle = document.getElementById('themeToggle') as HTMLButtonElement;
-  themeIcon = document.getElementById('themeIcon') as SVGElement;
+  noVideoBtn = document.getElementById("noVideoBtn") as HTMLButtonElement;
+  forceDetectionBtn = document.getElementById(
+    "forceDetectionBtn",
+  ) as HTMLButtonElement;
+  closeNoVideoNoticeBtn = document.getElementById(
+    "closeNoVideoNotice",
+  ) as HTMLButtonElement;
+  noVideoNotice = document.getElementById("noVideoNotice") as HTMLDivElement;
+  settingsBtn = document.getElementById("settingsBtn") as HTMLButtonElement;
+  downloadsBtn = document.getElementById("downloadsBtn") as HTMLButtonElement;
+  clearCompletedBtn = document.getElementById(
+    "clearCompletedBtn",
+  ) as HTMLButtonElement;
+  autoDetectTab = document.getElementById("autoDetectTab") as HTMLButtonElement;
+  manualHlsTab = document.getElementById("manualHlsTab") as HTMLButtonElement;
+  autoDetectContent = document.getElementById(
+    "autoDetectContent",
+  ) as HTMLDivElement;
+  manualHlsContent = document.getElementById(
+    "manualHlsContent",
+  ) as HTMLDivElement;
+  startHlsDownloadBtn = document.getElementById(
+    "startHlsDownloadBtn",
+  ) as HTMLButtonElement;
+  loadHlsPlaylistBtn = document.getElementById(
+    "loadHlsPlaylistBtn",
+  ) as HTMLButtonElement;
+  videoQualitySelect = document.getElementById(
+    "videoQualitySelect",
+  ) as HTMLSelectElement;
+  audioQualitySelect = document.getElementById(
+    "audioQualitySelect",
+  ) as HTMLSelectElement;
+  hlsUrlInput = document.getElementById("hlsUrlInput") as HTMLInputElement;
+  hlsMediaPlaylistWarning = document.getElementById(
+    "hlsMediaPlaylistWarning",
+  ) as HTMLDivElement;
+  hlsQualitySelection = document.getElementById(
+    "hlsQualitySelection",
+  ) as HTMLDivElement;
+  manualHlsProgress = document.getElementById(
+    "manualHlsProgress",
+  ) as HTMLDivElement;
+  themeToggle = document.getElementById("themeToggle") as HTMLButtonElement;
+  themeIcon = document.getElementById("themeIcon") as SVGElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
-    noVideoNotice.classList.remove('show');
-    noVideoNotice.classList.remove('visible');
+    noVideoNotice.classList.remove("show");
+    noVideoNotice.classList.remove("visible");
   }
 
   // Load and apply theme
   await loadTheme();
-  
+
   // Setup theme toggle
   if (themeToggle) {
-    themeToggle.addEventListener('click', toggleTheme);
+    themeToggle.addEventListener("click", toggleTheme);
   }
 
   // Setup event listeners
   if (noVideoBtn) {
-    noVideoBtn.addEventListener('click', toggleNoVideoNotice);
+    noVideoBtn.addEventListener("click", toggleNoVideoNotice);
   }
   if (closeNoVideoNoticeBtn) {
-    closeNoVideoNoticeBtn.addEventListener('click', hideNoVideoNotice);
+    closeNoVideoNoticeBtn.addEventListener("click", hideNoVideoNotice);
   }
   if (forceDetectionBtn) {
-    forceDetectionBtn.addEventListener('click', handleForceDetection);
+    forceDetectionBtn.addEventListener("click", handleForceDetection);
   }
   if (settingsBtn) {
-    settingsBtn.addEventListener('click', () => {
+    settingsBtn.addEventListener("click", () => {
       chrome.runtime.openOptionsPage();
     });
   }
   if (downloadsBtn) {
-    downloadsBtn.addEventListener('click', handleOpenDownloads);
+    downloadsBtn.addEventListener("click", handleOpenDownloads);
   }
   if (clearCompletedBtn) {
-    clearCompletedBtn.addEventListener('click', handleClearCompleted);
+    clearCompletedBtn.addEventListener("click", handleClearCompleted);
   }
   if (autoDetectTab) {
-    autoDetectTab.addEventListener('click', () => switchTab('auto'));
+    autoDetectTab.addEventListener("click", () => switchTab("auto"));
   }
   if (manualHlsTab) {
-    manualHlsTab.addEventListener('click', () => switchTab('manual'));
+    manualHlsTab.addEventListener("click", () => switchTab("manual"));
   }
   if (startHlsDownloadBtn) {
-    startHlsDownloadBtn.addEventListener('click', handleStartHlsDownload);
+    startHlsDownloadBtn.addEventListener("click", handleStartHlsDownload);
   }
   if (loadHlsPlaylistBtn) {
-    loadHlsPlaylistBtn.addEventListener('click', handleLoadHlsPlaylist);
+    loadHlsPlaylistBtn.addEventListener("click", handleLoadHlsPlaylist);
   }
   if (hlsUrlInput) {
-    hlsUrlInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
+    hlsUrlInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
         handleLoadHlsPlaylist();
       }
     });
   }
   if (videoQualitySelect) {
-    videoQualitySelect.addEventListener('change', updateDownloadButtonState);
+    videoQualitySelect.addEventListener("change", updateDownloadButtonState);
   }
   if (audioQualitySelect) {
-    audioQualitySelect.addEventListener('change', updateDownloadButtonState);
+    audioQualitySelect.addEventListener("change", updateDownloadButtonState);
   }
 
   // Listen for messages
   chrome.runtime.onMessage.addListener(async (message) => {
     // Check if extension context is still valid
     if (chrome.runtime.lastError && chrome.runtime.lastError.message) {
-      if (chrome.runtime.lastError.message.includes('Extension context invalidated')) {
-        console.debug('Extension context invalidated, reloading popup may be needed');
+      if (
+        chrome.runtime.lastError.message.includes(
+          "Extension context invalidated",
+        )
+      ) {
+        console.debug(
+          "Extension context invalidated, reloading popup may be needed",
+        );
         return;
       }
     }
-    
+
     try {
       if (message.type === MessageType.DOWNLOAD_PROGRESS) {
         await loadDownloadStates();
@@ -169,11 +209,11 @@ async function init() {
         updateManualHlsFormState();
         // Log error for debugging
         if (message.payload && message.payload.error) {
-          console.warn('Download failed:', message.payload.error);
+          console.warn("Download failed:", message.payload.error);
         }
       }
     } catch (error) {
-      console.debug('Error handling message:', error);
+      console.debug("Error handling message:", error);
     }
   });
 
@@ -186,7 +226,7 @@ async function init() {
 
   // Refresh state when popup regains focus (e.g., after being closed by download)
   // This ensures the UI shows current download progress when reopened
-  document.addEventListener('visibilitychange', async () => {
+  document.addEventListener("visibilitychange", async () => {
     if (!document.hidden) {
       // Popup became visible - refresh download states
       await loadDownloadStates();
@@ -195,7 +235,7 @@ async function init() {
   });
 
   // Also refresh on window focus (for better compatibility)
-  window.addEventListener('focus', async () => {
+  window.addEventListener("focus", async () => {
     await loadDownloadStates();
     renderDetectedVideos();
   });
@@ -214,18 +254,18 @@ async function init() {
 
 function showNoVideoNotice() {
   if (!noVideoNotice) return;
-  noVideoNotice.classList.add('show');
-  noVideoNotice.classList.remove('visible'); // Remove old class if exists
+  noVideoNotice.classList.add("show");
+  noVideoNotice.classList.remove("visible"); // Remove old class if exists
   // Force inline style as backup
-  noVideoNotice.style.display = 'block';
+  noVideoNotice.style.display = "block";
 }
 
 function hideNoVideoNotice() {
   if (!noVideoNotice) return;
-  noVideoNotice.classList.remove('show');
-  noVideoNotice.classList.remove('visible'); // Remove old class if exists
+  noVideoNotice.classList.remove("show");
+  noVideoNotice.classList.remove("visible"); // Remove old class if exists
   // Force inline style as backup
-  noVideoNotice.style.display = 'none';
+  noVideoNotice.style.display = "none";
 }
 
 function toggleNoVideoNotice() {
@@ -237,14 +277,14 @@ async function handleForceDetection() {
   if (!forceDetectionBtn) return;
   const originalText = forceDetectionBtn.textContent;
   forceDetectionBtn.disabled = true;
-  forceDetectionBtn.textContent = 'Refreshing...';
+  forceDetectionBtn.textContent = "Refreshing...";
 
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const activeTab = tabs[0];
 
     if (!activeTab || activeTab.id === undefined) {
-      throw new Error('Active tab not found');
+      throw new Error("Active tab not found");
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -261,54 +301,57 @@ async function handleForceDetection() {
     hideNoVideoNotice();
     window.close();
   } catch (error) {
-    console.error('Failed to refresh tab for force detection:', error);
-    alert('Failed to refresh the page. Please try again.');
+    console.error("Failed to refresh tab for force detection:", error);
+    alert("Failed to refresh the page. Please try again.");
   } finally {
     forceDetectionBtn.disabled = false;
-    forceDetectionBtn.textContent = originalText || 'Force detection';
+    forceDetectionBtn.textContent = originalText || "Force detection";
   }
 }
 
 async function handleOpenDownloads() {
   if (!downloadsBtn) return;
-  
+
   try {
     // Open the default downloads folder
     await chrome.downloads.showDefaultFolder();
   } catch (error) {
-    console.error('Failed to open downloads folder:', error);
-    alert('Failed to open downloads folder. Please check your browser settings.');
+    console.error("Failed to open downloads folder:", error);
+    alert(
+      "Failed to open downloads folder. Please check your browser settings.",
+    );
   }
 }
 
 async function handleClearCompleted() {
   if (!clearCompletedBtn) return;
-  
-  const originalText = clearCompletedBtn.querySelector('span')?.textContent;
-  
+
+  const originalText = clearCompletedBtn.querySelector("span")?.textContent;
+
   try {
     // Disable button and show loading state
     clearCompletedBtn.disabled = true;
-    if (clearCompletedBtn.querySelector('span')) {
-      clearCompletedBtn.querySelector('span')!.textContent = 'Clearing...';
+    if (clearCompletedBtn.querySelector("span")) {
+      clearCompletedBtn.querySelector("span")!.textContent = "Clearing...";
     }
-    
+
     // Get all downloads
     const allDownloads = await DownloadStateManager.getAllDownloads();
-    
+
     // Filter completed downloads
     const completedDownloads = allDownloads.filter(
-      download => download.progress.stage === 'completed'
+      (download) => download.progress.stage === "completed",
     );
-    
+
     if (completedDownloads.length === 0) {
       // No completed downloads to clear
-      if (clearCompletedBtn.querySelector('span')) {
-        clearCompletedBtn.querySelector('span')!.textContent = 'No completed';
+      if (clearCompletedBtn.querySelector("span")) {
+        clearCompletedBtn.querySelector("span")!.textContent = "No completed";
         setTimeout(() => {
           if (clearCompletedBtn) {
-            if (clearCompletedBtn.querySelector('span') && originalText) {
-              clearCompletedBtn.querySelector('span')!.textContent = originalText;
+            if (clearCompletedBtn.querySelector("span") && originalText) {
+              clearCompletedBtn.querySelector("span")!.textContent =
+                originalText;
             }
             clearCompletedBtn.disabled = false;
           }
@@ -316,33 +359,37 @@ async function handleClearCompleted() {
       }
       return;
     }
-    
+
     // Remove all completed downloads
     for (const download of completedDownloads) {
       await DownloadStateManager.removeDownload(download.id);
     }
-    
+
     // Reload states and refresh UI
     await loadDownloadStates();
     renderDetectedVideos();
-    
+
     // Show success feedback
-    if (clearCompletedBtn.querySelector('span')) {
-      clearCompletedBtn.querySelector('span')!.textContent = 'Cleared!';
+    if (clearCompletedBtn.querySelector("span")) {
+      clearCompletedBtn.querySelector("span")!.textContent = "Cleared!";
       setTimeout(() => {
         if (clearCompletedBtn) {
-          if (clearCompletedBtn.querySelector('span') && originalText) {
-            clearCompletedBtn.querySelector('span')!.textContent = originalText;
+          if (clearCompletedBtn.querySelector("span") && originalText) {
+            clearCompletedBtn.querySelector("span")!.textContent = originalText;
           }
           clearCompletedBtn.disabled = false;
         }
       }, 1000);
     }
   } catch (error) {
-    console.error('Failed to clear completed downloads:', error);
-    alert('Failed to clear completed downloads. Please try again.');
-    if (clearCompletedBtn && clearCompletedBtn.querySelector('span') && originalText) {
-      clearCompletedBtn.querySelector('span')!.textContent = originalText;
+    console.error("Failed to clear completed downloads:", error);
+    alert("Failed to clear completed downloads. Please try again.");
+    if (
+      clearCompletedBtn &&
+      clearCompletedBtn.querySelector("span") &&
+      originalText
+    ) {
+      clearCompletedBtn.querySelector("span")!.textContent = originalText;
     }
     clearCompletedBtn.disabled = false;
   }
@@ -355,47 +402,62 @@ async function requestDetectedVideos() {
   try {
     // Check if runtime is available
     if (!chrome?.runtime || !chrome?.tabs) {
-      console.debug('Chrome runtime or tabs API not available');
+      console.debug("Chrome runtime or tabs API not available");
       return;
     }
-    
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
     if (tab.id) {
       let response;
       try {
         response = await new Promise<any>((resolve, reject) => {
-          chrome.tabs.sendMessage(tab.id!, {
-            type: MessageType.GET_DETECTED_VIDEOS,
-          }, (response) => {
-            // Check for extension context invalidation after API call
-            if (chrome.runtime.lastError) {
-              const errorMessage = chrome.runtime.lastError.message || '';
-              if (errorMessage.includes('Extension context invalidated')) {
-                console.debug('Extension context invalidated, cannot communicate with content script');
-                reject(new Error('Extension context invalidated'));
+          chrome.tabs.sendMessage(
+            tab.id!,
+            {
+              type: MessageType.GET_DETECTED_VIDEOS,
+            },
+            (response) => {
+              // Check for extension context invalidation after API call
+              if (chrome.runtime.lastError) {
+                const errorMessage = chrome.runtime.lastError.message || "";
+                if (errorMessage.includes("Extension context invalidated")) {
+                  console.debug(
+                    "Extension context invalidated, cannot communicate with content script",
+                  );
+                  reject(new Error("Extension context invalidated"));
+                  return;
+                }
+                // Other errors (content script not available, etc.) - ignore silently
+                reject(
+                  new Error(
+                    chrome.runtime.lastError.message || "Unknown error",
+                  ),
+                );
                 return;
               }
-              // Other errors (content script not available, etc.) - ignore silently
-              reject(new Error(chrome.runtime.lastError.message || 'Unknown error'));
-              return;
-            }
-            resolve(response);
-          });
+              resolve(response);
+            },
+          );
         });
       } catch (error: any) {
         // Handle extension context invalidated or content script not available
-        if (error?.message?.includes('Extension context invalidated')) {
-          console.debug('Extension context invalidated, cannot communicate with content script');
+        if (error?.message?.includes("Extension context invalidated")) {
+          console.debug(
+            "Extension context invalidated, cannot communicate with content script",
+          );
           return;
         }
         // Content script might not be available, ignore
-        console.debug('Could not send message to content script:', error);
+        console.debug("Could not send message to content script:", error);
         return;
       }
-      
+
       // Merge received videos with existing ones
       if (response && response.videos && Array.isArray(response.videos)) {
-        const currentUrl = tab.url || '';
+        const currentUrl = tab.url || "";
         const filteredVideos: Record<string, VideoMetadata> = {};
         for (const [url, video] of Object.entries(detectedVideos)) {
           if (!video.pageUrl || !video.pageUrl.includes(currentUrl)) {
@@ -403,11 +465,11 @@ async function requestDetectedVideos() {
           }
         }
         detectedVideos = filteredVideos;
-        
+
         response.videos.forEach((video: VideoMetadata) => {
           const normalizedVideoUrl = normalizeUrl(video.url);
           const existing = detectedVideos[normalizedVideoUrl];
-          
+
           if (!existing) {
             detectedVideos[normalizedVideoUrl] = video;
           } else {
@@ -437,7 +499,7 @@ async function requestDetectedVideos() {
     }
   } catch (error) {
     // Tab might not have content script, ignore
-    console.debug('Could not get detected videos:', error);
+    console.debug("Could not get detected videos:", error);
   }
 }
 
@@ -446,9 +508,9 @@ async function requestDetectedVideos() {
  */
 function removeDetectedVideo(url: string | undefined) {
   if (!url) return;
-  
+
   const normalizedUrl = normalizeUrl(url);
-  
+
   if (detectedVideos[normalizedUrl]) {
     delete detectedVideos[normalizedUrl];
     renderDetectedVideos();
@@ -460,7 +522,7 @@ function removeDetectedVideo(url: string | undefined) {
  */
 function addDetectedVideo(video: VideoMetadata) {
   // Reject unknown formats - don't show them in UI
-  if (video.format === 'unknown') {
+  if (video.format === "unknown") {
     // If it already exists, remove it
     const normalizedUrl = normalizeUrl(video.url);
     if (detectedVideos[normalizedUrl]) {
@@ -469,16 +531,16 @@ function addDetectedVideo(video: VideoMetadata) {
     }
     return;
   }
-  
+
   const normalizedUrl = normalizeUrl(video.url);
-  
+
   if (!detectedVideos[normalizedUrl]) {
     detectedVideos[normalizedUrl] = video;
     renderDetectedVideos();
   } else {
     const existing = detectedVideos[normalizedUrl];
     let updated = false;
-    
+
     if (video.title && !existing.title) {
       existing.title = video.title;
       updated = true;
@@ -503,7 +565,7 @@ function addDetectedVideo(video: VideoMetadata) {
       existing.duration = video.duration;
       updated = true;
     }
-    
+
     if (updated) {
       renderDetectedVideos();
     }
@@ -527,9 +589,11 @@ async function loadDownloadStates() {
 /**
  * Find download state for a video by matching normalized URLs
  */
-function getDownloadStateForVideo(video: VideoMetadata): DownloadState | undefined {
+function getDownloadStateForVideo(
+  video: VideoMetadata,
+): DownloadState | undefined {
   const normalizedUrl = normalizeUrl(video.url);
-  return downloadStates.find(d => {
+  return downloadStates.find((d) => {
     if (!d.metadata) return false;
     return normalizeUrl(d.metadata.url) === normalizedUrl;
   });
@@ -551,113 +615,144 @@ function renderDetectedVideos() {
     return;
   }
 
-  detectedVideosList.innerHTML = uniqueVideos.map(video => {
-    const normalizedUrl = normalizeUrl(video.url);
-    const downloadState = getDownloadStateForVideo(video);
-    const isDownloading = downloadState && downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
-    const isCompleted = downloadState && downloadState.progress.stage === 'completed';
-    const isFailed = downloadState && downloadState.progress.stage === 'failed';
-    const actualFormat = getActualFileFormat(video, downloadState);
+  detectedVideosList.innerHTML = uniqueVideos
+    .map((video) => {
+      const normalizedUrl = normalizeUrl(video.url);
+      const downloadState = getDownloadStateForVideo(video);
+      const isDownloading =
+        downloadState &&
+        downloadState.progress.stage !== "completed" &&
+        downloadState.progress.stage !== "failed";
+      const isCompleted =
+        downloadState && downloadState.progress.stage === "completed";
+      const isFailed =
+        downloadState && downloadState.progress.stage === "failed";
+      const actualFormat = getActualFileFormat(video, downloadState);
 
-    const displayResolution = (video.resolution || '').trim();
-    const displayWidth = video.width;
-    const displayHeight = video.height;
-    const displayDimensions = (!displayResolution && displayWidth && displayHeight) ? `${displayWidth}x${displayHeight}` : '';
-    
-    let statusBadge = '';
-    let progressBar = '';
-    let buttonText = 'Download';
-    let buttonDisabled = false;
-    
-    if (isDownloading) {
-      const stage = downloadState.progress.stage;
-      statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
-      
-      // Check if this is an HLS or M3U8 download (format is 'hls' or 'm3u8')
-      // HLS/M3U8 downloads have speed tracking and show progress bar with real file size
-      // Show detailed progress during downloading and merging stages
-      const isHlsDownload = (video.format === 'hls' || video.format === 'm3u8') && (stage === 'downloading' || stage === 'merging');
-      
-      if (isHlsDownload) {
-        const percentage = downloadState.progress.percentage || 0;
-        
-        if (stage === 'downloading') {
-          // HLS downloading progress: progress bar, real file size, and speed
-          const downloaded = downloadState.progress.downloaded || 0;
-          const total = downloadState.progress.total || 0;
-          const speed = downloadState.progress.speed || 0;
-          
-          const downloadedText = formatFileSize(downloaded);
-          const totalText = total > 0 ? formatFileSize(total) : '?';
-          const speedText = formatSpeed(speed);
-          
-          progressBar = `
+      const displayResolution = (video.resolution || "").trim();
+      const displayWidth = video.width;
+      const displayHeight = video.height;
+      const displayDimensions =
+        !displayResolution && displayWidth && displayHeight
+          ? `${displayWidth}x${displayHeight}`
+          : "";
+
+      let statusBadge = "";
+      let progressBar = "";
+      let buttonText = "Download";
+      let buttonDisabled = false;
+
+      if (isDownloading) {
+        const stage = downloadState.progress.stage;
+        statusBadge = `<span class="video-status status-${stage}">${getStatusText(
+          stage,
+        )}</span>`;
+
+        // Check if this is an HLS or M3U8 download (format is 'hls' or 'm3u8')
+        // HLS/M3U8 downloads have speed tracking and show progress bar with real file size
+        // Show detailed progress during downloading and merging stages
+        const isHlsDownload =
+          (video.format === "hls" || video.format === "m3u8") &&
+          (stage === "downloading" || stage === "merging");
+
+        if (isHlsDownload) {
+          const percentage = downloadState.progress.percentage || 0;
+
+          if (stage === "downloading") {
+            // HLS downloading progress: progress bar, real file size, and speed
+            const downloaded = downloadState.progress.downloaded || 0;
+            const total = downloadState.progress.total || 0;
+            const speed = downloadState.progress.speed || 0;
+
+            const downloadedText = formatFileSize(downloaded);
+            const totalText = total > 0 ? formatFileSize(total) : "?";
+            const speedText = formatSpeed(speed);
+
+            progressBar = `
             <div class="hls-progress-container">
               <div class="hls-progress-bar-wrapper">
-                <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+                <div class="hls-progress-bar" style="width: ${Math.min(
+                  percentage,
+                  100,
+                )}%"></div>
               </div>
               <div class="hls-progress-info">
                 <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
-                ${speed > 0 ? `<span class="hls-progress-speed">${speedText}</span>` : ''}
+                ${
+                  speed > 0
+                    ? `<span class="hls-progress-speed">${speedText}</span>`
+                    : ""
+                }
               </div>
             </div>
           `;
-        } else if (stage === 'merging') {
-          // HLS merging progress: progress bar restarts at 0% and goes to 100%
-          const message = downloadState.progress.message || 'Merging streams...';
-          // Progress bar starts fresh at 0% for merging phase
-          const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
-          
-          progressBar = `
+          } else if (stage === "merging") {
+            // HLS merging progress: progress bar restarts at 0% and goes to 100%
+            const message =
+              downloadState.progress.message || "Merging streams...";
+            // Progress bar starts fresh at 0% for merging phase
+            const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
+
+            progressBar = `
             <div class="hls-progress-container">
               <div class="hls-progress-bar-wrapper">
                 <div class="hls-progress-bar" style="width: ${mergingPercentage}%"></div>
               </div>
               <div class="hls-progress-info">
                 <span class="hls-progress-size">${message}</span>
-                <span class="hls-progress-speed">${Math.round(mergingPercentage)}%</span>
+                <span class="hls-progress-speed">${Math.round(
+                  mergingPercentage,
+                )}%</span>
               </div>
             </div>
           `;
-        }
-      } else {
-        // Direct download: show animated dots and file size (existing behavior)
-        const fileSize = downloadState.progress.total;
-        const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
-        
-        progressBar = `
+          }
+        } else {
+          // Direct download: show animated dots and file size (existing behavior)
+          const fileSize = downloadState.progress.total;
+          const fileSizeText = fileSize ? formatFileSize(fileSize) : "";
+
+          progressBar = `
           <div class="downloading-label">
             <span class="downloading-dots">
               <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
             </span>
-            ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ''}
+            ${
+              fileSizeText
+                ? `<span class="file-size">${fileSizeText}</span>`
+                : ""
+            }
           </div>
         `;
-      }
-      
-      // Hide button while downloading
-      buttonText = '';
-      buttonDisabled = true;
-    } else if (isCompleted) {
-      statusBadge = `<span class="video-status status-completed">Completed</span>`;
-      buttonText = 'Redownload';
-      buttonDisabled = false; // Allow redownloading
-    } else if (isFailed) {
-      statusBadge = `<span class="video-status status-failed">Failed</span>`;
-      buttonText = 'Retry';
-    }
+        }
 
-    return `
+        // Hide button while downloading
+        buttonText = "";
+        buttonDisabled = true;
+      } else if (isCompleted) {
+        statusBadge = `<span class="video-status status-completed">Completed</span>`;
+        buttonText = "Redownload";
+        buttonDisabled = false; // Allow redownloading
+      } else if (isFailed) {
+        statusBadge = `<span class="video-status status-failed">Failed</span>`;
+        buttonText = "Retry";
+      }
+
+      return `
     <div class="video-item">
       <div class="video-item-preview">
-        ${video.thumbnail ? `
+        ${
+          video.thumbnail
+            ? `
           <img src="${escapeHtml(video.thumbnail)}" 
                alt="Video preview" 
                onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>🎬</div>'"
                loading="lazy">
-        ` : `
+        `
+            : `
           <div class="no-thumbnail">🎬</div>
-        `}
+        `
+        }
       </div>
       <div class="video-item-content">
         <div class="video-item-header">
@@ -667,41 +762,74 @@ function renderDetectedVideos() {
           ${statusBadge}
         </div>
         <div class="video-meta">
-          ${displayResolution ? `<span class="video-resolution">${escapeHtml(displayResolution)}</span>` : ''}
-          ${displayDimensions ? `<span class="video-resolution">${displayDimensions}</span>` : ''}
-          <span class="video-link-type">${escapeHtml(getLinkTypeDisplayName(video.format))}</span>
-          <span class="video-format">${escapeHtml(getFormatDisplayName(video.format, actualFormat))}</span>
-          ${video.duration ? `<span style="color: #999; margin-left: 4px;">⏱ ${formatDuration(video.duration)}</span>` : ''}
+          ${
+            displayResolution
+              ? `<span class="video-resolution">${escapeHtml(
+                  displayResolution,
+                )}</span>`
+              : ""
+          }
+          ${
+            displayDimensions
+              ? `<span class="video-resolution">${displayDimensions}</span>`
+              : ""
+          }
+          <span class="video-link-type">${escapeHtml(
+            getLinkTypeDisplayName(video.format),
+          )}</span>
+          <span class="video-format">${escapeHtml(
+            getFormatDisplayName(video.format, actualFormat),
+          )}</span>
+          ${
+            video.duration
+              ? `<span style="color: #999; margin-left: 4px;">⏱ ${formatDuration(
+                  video.duration,
+                )}</span>`
+              : ""
+          }
         </div>
-        ${video.pageUrl ? `
+        ${
+          video.pageUrl
+            ? `
           <div style="font-size: 11px; color: #b0b0b0; margin-top: 4px;">
             From: ${escapeHtml(new URL(video.pageUrl).hostname)}
           </div>
-        ` : ''}
+        `
+            : ""
+        }
         ${progressBar}
-        ${isFailed && downloadState.progress.error ? `
+        ${
+          isFailed && downloadState.progress.error
+            ? `
           <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
             ${escapeHtml(downloadState.progress.error)}
           </div>
-        ` : ''}
-        ${!isDownloading ? `
-          <button class="video-btn ${buttonDisabled ? 'disabled' : ''}" 
+        `
+            : ""
+        }
+        ${
+          !isDownloading
+            ? `
+          <button class="video-btn ${buttonDisabled ? "disabled" : ""}" 
                   data-url="${escapeHtml(video.url)}" 
-                  ${buttonDisabled ? 'disabled' : ''}>
+                  ${buttonDisabled ? "disabled" : ""}>
             ${buttonText}
           </button>
-        ` : ''}
+        `
+            : ""
+        }
       </div>
     </div>
   `;
-  }).join('');
+    })
+    .join("");
 
   // Add click handlers for download buttons
-  detectedVideosList.querySelectorAll('.video-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+  detectedVideosList.querySelectorAll(".video-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
       const button = e.target as HTMLButtonElement;
       if (button.disabled) return;
-      const url = button.getAttribute('data-url')!;
+      const url = button.getAttribute("data-url")!;
       const normalizedUrl = normalizeUrl(url);
       const videoMetadata = detectedVideos[normalizedUrl];
       startDownload(url, videoMetadata, { triggerButton: button });
@@ -714,14 +842,14 @@ function renderDetectedVideos() {
 async function startDownload(
   url: string,
   videoMetadata?: VideoMetadata,
-  options: { triggerButton?: HTMLButtonElement } = {}
+  options: { triggerButton?: HTMLButtonElement } = {},
 ) {
   const triggerButton = options.triggerButton;
   const originalText = triggerButton?.textContent;
   if (triggerButton) {
     triggerButton.disabled = true;
-    triggerButton.classList.add('disabled');
-    triggerButton.textContent = 'Starting...';
+    triggerButton.classList.add("disabled");
+    triggerButton.textContent = "Starting...";
   }
 
   let shouldResetButton = false;
@@ -729,24 +857,33 @@ async function startDownload(
   try {
     // Check if extension context is still valid before sending
     if (chrome.runtime.lastError) {
-      if (chrome.runtime.lastError.message?.includes('Extension context invalidated')) {
-        alert('Extension was reloaded. Please refresh this page and try again.');
+      if (
+        chrome.runtime.lastError.message?.includes(
+          "Extension context invalidated",
+        )
+      ) {
+        alert(
+          "Extension was reloaded. Please refresh this page and try again.",
+        );
         shouldResetButton = true;
         return;
       }
     }
-    
+
     // Get current tab information for filename
     let tabTitle: string | undefined;
     let website: string | undefined;
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (tab) {
         tabTitle = tab.title || undefined;
         if (tab.url) {
           try {
             const urlObj = new URL(tab.url);
-            website = urlObj.hostname.replace(/^www\./, ''); // Remove www. prefix
+            website = urlObj.hostname.replace(/^www\./, ""); // Remove www. prefix
           } catch {
             // Ignore URL parsing errors
           }
@@ -754,33 +891,44 @@ async function startDownload(
       }
     } catch (error) {
       // Ignore errors getting tab info, will use fallback
-      console.debug('Could not get tab information:', error);
+      console.debug("Could not get tab information:", error);
     }
-    
+
     const response = await new Promise<any>((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        type: MessageType.DOWNLOAD_REQUEST,
-        payload: {
-          url,
-          metadata: videoMetadata,
-          tabTitle,
-          website,
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.DOWNLOAD_REQUEST,
+          payload: {
+            url,
+            metadata: videoMetadata,
+            tabTitle,
+            website,
+          },
         },
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message || '';
-          if (errorMessage.includes('Extension context invalidated')) {
-            reject(new Error('Extension context invalidated. Please reload the extension and try again.'));
+        (response) => {
+          if (chrome.runtime.lastError) {
+            const errorMessage = chrome.runtime.lastError.message || "";
+            if (errorMessage.includes("Extension context invalidated")) {
+              reject(
+                new Error(
+                  "Extension context invalidated. Please reload the extension and try again.",
+                ),
+              );
+              return;
+            }
+            reject(
+              new Error(chrome.runtime.lastError.message || "Unknown error"),
+            );
             return;
           }
-          reject(new Error(chrome.runtime.lastError.message || 'Unknown error'));
-          return;
-        }
-        resolve(response);
-      });
+          resolve(response);
+        },
+      );
     }).catch((error: any) => {
-      if (error?.message?.includes('Extension context invalidated')) {
-        throw new Error('Extension context invalidated. Please reload the extension and try again.');
+      if (error?.message?.includes("Extension context invalidated")) {
+        throw new Error(
+          "Extension context invalidated. Please reload the extension and try again.",
+        );
       }
       throw error;
     });
@@ -790,7 +938,10 @@ async function startDownload(
       renderDetectedVideos();
     } else if (response && response.error) {
       const errorMessage = response.error;
-      if (!errorMessage.includes('already') && !errorMessage.includes('in progress')) {
+      if (
+        !errorMessage.includes("already") &&
+        !errorMessage.includes("in progress")
+      ) {
         alert(response.error);
       }
       await loadDownloadStates();
@@ -798,20 +949,26 @@ async function startDownload(
       shouldResetButton = true;
     }
   } catch (error: any) {
-    console.error('Download request failed:', error);
+    console.error("Download request failed:", error);
     // Check if error is due to invalidated context
-    if (error?.message?.includes('Extension context invalidated') ||
-        chrome.runtime.lastError?.message?.includes('Extension context invalidated')) {
-      alert('Extension was reloaded. Please close and reopen this popup, then try again.');
+    if (
+      error?.message?.includes("Extension context invalidated") ||
+      chrome.runtime.lastError?.message?.includes(
+        "Extension context invalidated",
+      )
+    ) {
+      alert(
+        "Extension was reloaded. Please close and reopen this popup, then try again.",
+      );
     } else {
-      alert('Failed to start download: ' + (error?.message || 'Unknown error'));
+      alert("Failed to start download: " + (error?.message || "Unknown error"));
     }
     shouldResetButton = true;
   } finally {
     if (shouldResetButton && triggerButton && triggerButton.isConnected) {
       triggerButton.disabled = false;
-      triggerButton.classList.remove('disabled');
-      triggerButton.textContent = originalText || 'Download';
+      triggerButton.classList.remove("disabled");
+      triggerButton.textContent = originalText || "Download";
     }
   }
 }
@@ -823,14 +980,14 @@ function getDownloadTitle(download: DownloadState): string {
   if (download.metadata?.title) {
     return download.metadata.title;
   }
-  
+
   try {
     const url = new URL(download.url);
     const pathname = url.pathname;
-    const filename = pathname.split('/').pop();
-    return filename || download.url.substring(0, 50) + '...';
+    const filename = pathname.split("/").pop();
+    return filename || download.url.substring(0, 50) + "...";
   } catch {
-    return download.url.substring(0, 50) + '...';
+    return download.url.substring(0, 50) + "...";
   }
 }
 
@@ -841,10 +998,10 @@ function getVideoTitleFromUrl(url: string): string {
   try {
     const urlObj = new URL(url);
     const pathname = urlObj.pathname;
-    const filename = pathname.split('/').pop();
-    return filename || url.substring(0, 50) + '...';
+    const filename = pathname.split("/").pop();
+    return filename || url.substring(0, 50) + "...";
   } catch {
-    return url.substring(0, 50) + '...';
+    return url.substring(0, 50) + "...";
   }
 }
 
@@ -853,65 +1010,78 @@ function getVideoTitleFromUrl(url: string): string {
  */
 function getStatusText(stage: string): string {
   const statusMap: Record<string, string> = {
-    detecting: 'Detecting',
-    downloading: 'Downloading',
-    merging: 'Merging',
-    saving: 'Saving',
-    uploading: 'Uploading',
-    completed: 'Completed',
-    failed: 'Failed',
+    detecting: "Detecting",
+    downloading: "Downloading",
+    merging: "Merging",
+    saving: "Saving",
+    uploading: "Uploading",
+    completed: "Completed",
+    failed: "Failed",
   };
-  
+
   return statusMap[stage] || stage;
 }
 
 /**
  * Get actual file format from video URL or download state
  */
-function getActualFileFormat(video: VideoMetadata, downloadState?: DownloadState): string | null {
+function getActualFileFormat(
+  video: VideoMetadata,
+  downloadState?: DownloadState,
+): string | null {
   // First, check if download is completed and we have the local path
   if (downloadState?.localPath) {
-    const ext = downloadState.localPath.split('.').pop()?.toUpperCase();
-    if (ext && ['MP4', 'WEBM', 'MOV', 'AVI', 'MKV', 'FLV', 'WMV', 'OGG'].includes(ext)) {
+    const ext = downloadState.localPath.split(".").pop()?.toUpperCase();
+    if (
+      ext &&
+      ["MP4", "WEBM", "MOV", "AVI", "MKV", "FLV", "WMV", "OGG"].includes(ext)
+    ) {
       return ext;
     }
   }
-  
+
   // Check video URL for file extension
   try {
     const url = new URL(video.url);
     const pathname = url.pathname.toLowerCase();
-    const extensionMatch = pathname.match(/\.(mp4|webm|mov|avi|mkv|flv|wmv|ogg)(\?|$|#)/);
+    const extensionMatch = pathname.match(
+      /\.(mp4|webm|mov|avi|mkv|flv|wmv|ogg)(\?|$|#)/,
+    );
     if (extensionMatch && extensionMatch[1]) {
       return extensionMatch[1].toUpperCase();
     }
   } catch {
     // URL parsing failed, try simple string match
     const urlLower = video.url.toLowerCase();
-    const extensionMatch = urlLower.match(/\.(mp4|webm|mov|avi|mkv|flv|wmv|ogg)(\?|$|#)/);
+    const extensionMatch = urlLower.match(
+      /\.(mp4|webm|mov|avi|mkv|flv|wmv|ogg)(\?|$|#)/,
+    );
     if (extensionMatch && extensionMatch[1]) {
       return extensionMatch[1].toUpperCase();
     }
   }
-  
+
   return null;
 }
 
 /**
  * Get format display name - show actual file format instead of delivery method
  */
-function getFormatDisplayName(format: VideoFormat, actualFormat?: string | null): string {
+function getFormatDisplayName(
+  format: VideoFormat,
+  actualFormat?: string | null,
+): string {
   // If we have the actual file format, use it
   if (actualFormat) {
     return actualFormat;
   }
-  
+
   // When format is "direct", it means it's a direct video file download
   // Default to MP4 if we can't determine the actual format
-  if (format === 'direct') {
-    return 'MP4';
+  if (format === "direct") {
+    return "MP4";
   }
-  
+
   return format.toUpperCase();
 }
 
@@ -920,8 +1090,8 @@ function getFormatDisplayName(format: VideoFormat, actualFormat?: string | null)
  */
 function getLinkTypeDisplayName(format: VideoFormat): string {
   switch (format) {
-    case 'direct':
-      return 'Direct';
+    case "direct":
+      return "Direct";
     default:
       return format.charAt(0).toUpperCase() + format.slice(1);
   }
@@ -934,11 +1104,13 @@ function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-  
+
   if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
   }
-  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
 /**
@@ -984,7 +1156,7 @@ function formatDateTime(timestamp: number): string {
 
   // Show relative time for recent errors
   if (diffMins < 1) {
-    return 'Just now';
+    return "Just now";
   } else if (diffMins < 60) {
     return `${diffMins}m ago`;
   } else if (diffHours < 24) {
@@ -995,21 +1167,21 @@ function formatDateTime(timestamp: number): string {
 
   // Show full date for older errors
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
   const isToday = date.toDateString() === now.toDateString();
   if (isToday) {
     return `Today ${hours}:${minutes}`;
   }
-  
+
   const isThisYear = year === now.getFullYear();
   if (isThisYear) {
     return `${month}/${day} ${hours}:${minutes}`;
   }
-  
+
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
@@ -1018,14 +1190,14 @@ function formatDateTime(timestamp: number): string {
  */
 function calculateEstimatedSize(bandwidth: number, duration?: number): string {
   if (!bandwidth || bandwidth === 0 || !duration) {
-    return '';
+    return "";
   }
-  
+
   // bandwidth is in bits per second, convert to bytes per second
   const bytesPerSecond = bandwidth / 8;
   // Estimate total size
   const estimatedBytes = bytesPerSecond * duration;
-  
+
   // Format size
   if (estimatedBytes < 1024) {
     return `${estimatedBytes.toFixed(0)} B`;
@@ -1042,7 +1214,7 @@ function calculateEstimatedSize(bandwidth: number, duration?: number): string {
  * Escape HTML
  */
 function escapeHtml(text: string): string {
-  const div = document.createElement('div');
+  const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
 }
@@ -1058,7 +1230,7 @@ async function fetchTextViaBackground(url: string): Promise<string> {
         payload: {
           input: url,
           init: {
-            method: 'GET',
+            method: "GET",
           },
         },
       },
@@ -1068,7 +1240,7 @@ async function fetchTextViaBackground(url: string): Promise<string> {
           return;
         }
         if (!response) {
-          reject(new Error('No response from background script'));
+          reject(new Error("No response from background script"));
           return;
         }
         const [res, error] = response;
@@ -1082,9 +1254,11 @@ async function fetchTextViaBackground(url: string): Promise<string> {
           const text = new TextDecoder().decode(bytes);
           resolve(text);
         } else {
-          reject(new Error(`Failed to fetch: ${res?.status || 'unknown status'}`));
+          reject(
+            new Error(`Failed to fetch: ${res?.status || "unknown status"}`),
+          );
         }
-      }
+      },
     );
   });
 }
@@ -1094,40 +1268,40 @@ async function fetchTextViaBackground(url: string): Promise<string> {
  */
 function formatQualityLabel(level: Level): string {
   const parts: string[] = [];
-  
+
   if (level.height) {
     parts.push(`${level.height}p`);
   } else if (level.width && level.height) {
     parts.push(`${level.width}x${level.height}`);
   }
-  
+
   if (level.bitrate) {
     const bitrateMbps = (level.bitrate / 1000000).toFixed(2);
     parts.push(`${bitrateMbps} Mbps`);
   }
-  
+
   if (level.fps) {
     parts.push(`${level.fps} fps`);
   }
-  
-  return parts.length > 0 ? parts.join(' • ') : 'Unknown';
+
+  return parts.length > 0 ? parts.join(" • ") : "Unknown";
 }
 
 /**
  * Switch between tabs
  */
-function switchTab(tabName: 'auto' | 'manual') {
-  if (tabName === 'auto') {
-    if (autoDetectTab) autoDetectTab.classList.add('active');
-    if (manualHlsTab) manualHlsTab.classList.remove('active');
-    if (autoDetectContent) autoDetectContent.classList.add('active');
-    if (manualHlsContent) manualHlsContent.classList.remove('active');
+function switchTab(tabName: "auto" | "manual") {
+  if (tabName === "auto") {
+    if (autoDetectTab) autoDetectTab.classList.add("active");
+    if (manualHlsTab) manualHlsTab.classList.remove("active");
+    if (autoDetectContent) autoDetectContent.classList.add("active");
+    if (manualHlsContent) manualHlsContent.classList.remove("active");
   } else {
-    if (autoDetectTab) autoDetectTab.classList.remove('active');
-    if (manualHlsTab) manualHlsTab.classList.add('active');
-    if (autoDetectContent) autoDetectContent.classList.remove('active');
-    if (manualHlsContent) manualHlsContent.classList.add('active');
-    
+    if (autoDetectTab) autoDetectTab.classList.remove("active");
+    if (manualHlsTab) manualHlsTab.classList.add("active");
+    if (autoDetectContent) autoDetectContent.classList.remove("active");
+    if (manualHlsContent) manualHlsContent.classList.add("active");
+
     // Render progress if there's an active download
     renderManualHlsProgress();
     updateManualHlsFormState();
@@ -1141,32 +1315,34 @@ function resetManualHlsForm() {
   isMediaPlaylistMode = false;
   currentManualHlsUrl = null;
   if (hlsUrlInput) {
-    hlsUrlInput.value = '';
+    hlsUrlInput.value = "";
   }
   if (videoQualitySelect) {
-    videoQualitySelect.innerHTML = '<option value="">Select video quality...</option>';
+    videoQualitySelect.innerHTML =
+      '<option value="">Select video quality...</option>';
     videoQualitySelect.disabled = true;
   }
   if (audioQualitySelect) {
-    audioQualitySelect.innerHTML = '<option value="">Select audio quality...</option>';
+    audioQualitySelect.innerHTML =
+      '<option value="">Select audio quality...</option>';
     audioQualitySelect.disabled = true;
   }
   if (startHlsDownloadBtn) {
     startHlsDownloadBtn.disabled = true;
   }
   if (hlsMediaPlaylistWarning) {
-    hlsMediaPlaylistWarning.style.display = 'none';
+    hlsMediaPlaylistWarning.style.display = "none";
   }
   if (hlsQualitySelection) {
-    hlsQualitySelection.style.display = 'none';
+    hlsQualitySelection.style.display = "none";
   }
   if (loadHlsPlaylistBtn) {
     loadHlsPlaylistBtn.disabled = false;
-    loadHlsPlaylistBtn.textContent = 'Load';
+    loadHlsPlaylistBtn.textContent = "Load";
   }
   if (manualHlsProgress) {
-    manualHlsProgress.style.display = 'none';
-    manualHlsProgress.innerHTML = '';
+    manualHlsProgress.style.display = "none";
+    manualHlsProgress.innerHTML = "";
   }
   // Update form state after reset
   updateManualHlsFormState();
@@ -1177,54 +1353,58 @@ function resetManualHlsForm() {
  */
 function updateManualHlsFormState() {
   let isDownloading = false;
-  
+
   // Check if there's an active download
   if (currentManualHlsUrl) {
     const normalizedUrl = normalizeUrl(currentManualHlsUrl);
-    const downloadState = downloadStates.find(d => {
+    const downloadState = downloadStates.find((d) => {
       if (!d.metadata) return false;
       return normalizeUrl(d.metadata.url) === normalizedUrl;
     });
-    
+
     if (downloadState) {
-      isDownloading = downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
+      isDownloading =
+        downloadState.progress.stage !== "completed" &&
+        downloadState.progress.stage !== "failed";
     }
   }
-  
+
   // Update form elements based on download status
   if (hlsUrlInput) hlsUrlInput.disabled = isDownloading;
   if (loadHlsPlaylistBtn) loadHlsPlaylistBtn.disabled = isDownloading;
   if (videoQualitySelect) {
-    videoQualitySelect.disabled = isDownloading || videoQualitySelect.options.length <= 1;
+    videoQualitySelect.disabled =
+      isDownloading || videoQualitySelect.options.length <= 1;
   }
   if (audioQualitySelect) {
-    audioQualitySelect.disabled = isDownloading || audioQualitySelect.options.length <= 1;
+    audioQualitySelect.disabled =
+      isDownloading || audioQualitySelect.options.length <= 1;
   }
-  
+
   // Update download button state
   if (!startHlsDownloadBtn) return;
-  
+
   // Disable button while downloading
   if (isDownloading) {
     startHlsDownloadBtn.disabled = true;
     return;
   }
-  
+
   // If it's a media playlist, button is enabled after loading
   if (isMediaPlaylistMode) {
     startHlsDownloadBtn.disabled = false;
     return;
   }
-  
+
   // For master playlists, check if at least one quality is selected
   if (!videoQualitySelect || !audioQualitySelect) {
     startHlsDownloadBtn.disabled = true;
     return;
   }
-  
-  const videoSelected = videoQualitySelect.value !== '';
-  const audioSelected = audioQualitySelect.value !== '';
-  
+
+  const videoSelected = videoQualitySelect.value !== "";
+  const audioSelected = audioQualitySelect.value !== "";
+
   // Enable button if at least one quality is selected
   startHlsDownloadBtn.disabled = !(videoSelected || audioSelected);
 }
@@ -1239,70 +1419,84 @@ function renderManualHlsProgress() {
   }
 
   const normalizedUrl = normalizeUrl(currentManualHlsUrl);
-  const downloadState = downloadStates.find(d => {
+  const downloadState = downloadStates.find((d) => {
     if (!d.metadata) return false;
     return normalizeUrl(d.metadata.url) === normalizedUrl;
   });
 
   if (!downloadState) {
     if (manualHlsProgress) {
-      manualHlsProgress.style.display = 'none';
+      manualHlsProgress.style.display = "none";
     }
     updateManualHlsFormState();
     return;
   }
 
-  const isDownloading = downloadState.progress.stage !== 'completed' && downloadState.progress.stage !== 'failed';
-  const isCompleted = downloadState.progress.stage === 'completed';
-  const isFailed = downloadState.progress.stage === 'failed';
+  const isDownloading =
+    downloadState.progress.stage !== "completed" &&
+    downloadState.progress.stage !== "failed";
+  const isCompleted = downloadState.progress.stage === "completed";
+  const isFailed = downloadState.progress.stage === "failed";
 
   if (!isDownloading && !isCompleted && !isFailed) {
     if (manualHlsProgress) {
-      manualHlsProgress.style.display = 'none';
+      manualHlsProgress.style.display = "none";
     }
     updateManualHlsFormState();
     return;
   }
 
   if (!manualHlsProgress) return;
-  manualHlsProgress.style.display = 'block';
-  
+  manualHlsProgress.style.display = "block";
+
   // Update form state based on download status
   updateManualHlsFormState();
 
   const stage = downloadState.progress.stage;
-  const statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
-  
-  let progressBar = '';
-  const isHlsDownload = (downloadState.metadata.format === 'hls' || downloadState.metadata.format === 'm3u8') && (stage === 'downloading' || stage === 'merging');
-  
+  const statusBadge = `<span class="video-status status-${stage}">${getStatusText(
+    stage,
+  )}</span>`;
+
+  let progressBar = "";
+  const isHlsDownload =
+    (downloadState.metadata.format === "hls" ||
+      downloadState.metadata.format === "m3u8") &&
+    (stage === "downloading" || stage === "merging");
+
   if (isDownloading && isHlsDownload) {
     const percentage = downloadState.progress.percentage || 0;
-    
-    if (stage === 'downloading') {
+
+    if (stage === "downloading") {
       const downloaded = downloadState.progress.downloaded || 0;
       const total = downloadState.progress.total || 0;
       const speed = downloadState.progress.speed || 0;
-      
+
       const downloadedText = formatFileSize(downloaded);
-      const totalText = total > 0 ? formatFileSize(total) : '?';
+      const totalText = total > 0 ? formatFileSize(total) : "?";
       const speedText = formatSpeed(speed);
-      
+
       progressBar = `
         <div class="hls-progress-container">
           <div class="hls-progress-bar-wrapper">
-            <div class="hls-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
+            <div class="hls-progress-bar" style="width: ${Math.min(
+              percentage,
+              100,
+            )}%"></div>
           </div>
           <div class="hls-progress-info">
             <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
-            ${speed > 0 ? `<span class="hls-progress-speed">${speedText}</span>` : ''}
+            ${
+              speed > 0
+                ? `<span class="hls-progress-speed">${speedText}</span>`
+                : ""
+            }
           </div>
         </div>
       `;
-    } else if (stage === 'merging') {
-      const message = downloadState.progress.message || 'Merging streams...';
+    } else if (stage === "merging") {
+      const message = downloadState.progress.message || "Merging streams...";
       const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
-      
+
       progressBar = `
         <div class="hls-progress-container">
           <div class="hls-progress-bar-wrapper">
@@ -1310,42 +1504,51 @@ function renderManualHlsProgress() {
           </div>
           <div class="hls-progress-info">
             <span class="hls-progress-size">${message}</span>
-            <span class="hls-progress-speed">${Math.round(mergingPercentage)}%</span>
+            <span class="hls-progress-speed">${Math.round(
+              mergingPercentage,
+            )}%</span>
           </div>
         </div>
       `;
     }
   } else if (isDownloading) {
     const fileSize = downloadState.progress.total;
-    const fileSizeText = fileSize ? formatFileSize(fileSize) : '';
-    
+    const fileSizeText = fileSize ? formatFileSize(fileSize) : "";
+
     progressBar = `
       <div class="downloading-label">
         <span class="downloading-dots">
           <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
         </span>
-        ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ''}
+        ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ""}
       </div>
     `;
   }
 
-  const title = downloadState.metadata.title || getVideoTitleFromUrl(currentManualHlsUrl);
-  
+  const title =
+    downloadState.metadata.title || getVideoTitleFromUrl(currentManualHlsUrl);
+
   manualHlsProgress.innerHTML = `
     <div class="video-item" style="margin: 0;">
       <div class="video-item-content">
         <div class="video-item-header">
-          <div class="video-item-title" title="${escapeHtml(currentManualHlsUrl)}">
+          <div class="video-item-title" title="${escapeHtml(
+            currentManualHlsUrl,
+          )}">
             ${escapeHtml(title)}
           </div>
           ${statusBadge}
         </div>
         ${progressBar}
-        ${isFailed && downloadState.progress.error ? `
+        ${
+          isFailed && downloadState.progress.error
+            ? `
           <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
             ${escapeHtml(downloadState.progress.error)}
           </div>
-        ` : ''}
+        `
+            : ""
+        }
       </div>
     </div>
   `;
@@ -1356,126 +1559,136 @@ function renderManualHlsProgress() {
  */
 async function handleLoadHlsPlaylist() {
   if (!hlsUrlInput || !loadHlsPlaylistBtn) return;
-  
+
   const rawUrl = hlsUrlInput.value.trim();
-  
+
   if (!rawUrl) {
-    alert('Please enter an HLS playlist URL');
+    alert("Please enter an HLS playlist URL");
     return;
   }
-  
+
   // Normalize URL first
   const normalizedUrl = normalizeUrl(rawUrl);
-  
+
   // Use format detector to check if it's an HLS URL (same as detection uses)
   const format = detectFormatFromUrl(normalizedUrl);
-  if (format !== 'hls') {
-    alert('Please enter a valid HLS playlist URL (.m3u8)');
+  if (format !== "hls") {
+    alert("Please enter a valid HLS playlist URL (.m3u8)");
     return;
   }
-  
+
   // Update input with normalized URL
   hlsUrlInput.value = normalizedUrl;
-  
+
   // Show loading state
   loadHlsPlaylistBtn.disabled = true;
-  loadHlsPlaylistBtn.textContent = 'Loading...';
-  
+  loadHlsPlaylistBtn.textContent = "Loading...";
+
   // Hide previous states
   if (hlsMediaPlaylistWarning) {
-    hlsMediaPlaylistWarning.style.display = 'none';
+    hlsMediaPlaylistWarning.style.display = "none";
   }
   if (hlsQualitySelection) {
-    hlsQualitySelection.style.display = 'none';
+    hlsQualitySelection.style.display = "none";
   }
-  
+
   try {
     // Fetch playlist using normalized URL
     const playlistText = await fetchTextViaBackground(normalizedUrl);
-    
+
     // Check if it's a media playlist or master playlist
     if (isMediaPlaylist(playlistText)) {
       // It's a media playlist - show warning and enable download
       isMediaPlaylistMode = true;
       if (hlsMediaPlaylistWarning) {
-        hlsMediaPlaylistWarning.style.display = 'block';
+        hlsMediaPlaylistWarning.style.display = "block";
       }
       if (hlsQualitySelection) {
-        hlsQualitySelection.style.display = 'none';
+        hlsQualitySelection.style.display = "none";
       }
     } else if (isMasterPlaylist(playlistText)) {
       // It's a master playlist - show quality selection
       isMediaPlaylistMode = false;
       if (hlsMediaPlaylistWarning) {
-        hlsMediaPlaylistWarning.style.display = 'none';
+        hlsMediaPlaylistWarning.style.display = "none";
       }
       if (hlsQualitySelection && videoQualitySelect && audioQualitySelect) {
-        hlsQualitySelection.style.display = 'block';
-        
+        hlsQualitySelection.style.display = "block";
+
         // Parse master playlist using normalized URL
         const levels = parseMasterPlaylist(playlistText, normalizedUrl);
-        
+
         // Separate video and audio levels
-        const videoLevels = levels.filter(level => level.type === 'stream');
-        const audioLevels = levels.filter(level => level.type === 'audio');
-        
+        const videoLevels = levels.filter((level) => level.type === "stream");
+        const audioLevels = levels.filter((level) => level.type === "audio");
+
         // Populate video quality select (we've already checked it's not null)
         if (videoQualitySelect) {
-          videoQualitySelect.innerHTML = '<option value="">None (audio only)</option>';
+          videoQualitySelect.innerHTML =
+            '<option value="">None (audio only)</option>';
           videoLevels.forEach((level, index) => {
-            const option = document.createElement('option');
+            const option = document.createElement("option");
             option.value = level.uri;
             option.textContent = formatQualityLabel(level);
-            option.setAttribute('data-level-index', index.toString());
+            option.setAttribute("data-level-index", index.toString());
             videoQualitySelect!.appendChild(option);
           });
           videoQualitySelect.disabled = false;
         }
-        
+
         // Populate audio quality select (we've already checked it's not null)
         if (audioQualitySelect) {
-          audioQualitySelect.innerHTML = '<option value="">None (video only)</option>';
+          audioQualitySelect.innerHTML =
+            '<option value="">None (video only)</option>';
           audioLevels.forEach((level, index) => {
-            const option = document.createElement('option');
+            const option = document.createElement("option");
             option.value = level.uri;
             option.textContent = level.id;
-            option.setAttribute('data-level-index', index.toString());
+            option.setAttribute("data-level-index", index.toString());
             audioQualitySelect!.appendChild(option);
           });
           audioQualitySelect.disabled = false;
         }
-        
+
         // Auto-select first options if available
-        if (videoLevels.length > 0 && videoQualitySelect && videoQualitySelect.options.length > 1) {
+        if (
+          videoLevels.length > 0 &&
+          videoQualitySelect &&
+          videoQualitySelect.options.length > 1
+        ) {
           videoQualitySelect.selectedIndex = 1;
         }
-        if (audioLevels.length > 0 && audioQualitySelect && audioQualitySelect.options.length > 1) {
+        if (
+          audioLevels.length > 0 &&
+          audioQualitySelect &&
+          audioQualitySelect.options.length > 1
+        ) {
           audioQualitySelect.selectedIndex = 1;
         }
-        
+
         updateDownloadButtonState();
       }
     } else {
-      throw new Error('Invalid playlist format');
+      throw new Error("Invalid playlist format");
     }
-    
+
     // Update form state after loading playlist
     updateManualHlsFormState();
   } catch (error) {
-    console.error('Failed to load HLS playlist:', error);
-    alert('Failed to load HLS playlist. Please check the URL and try again.');
+    console.error("Failed to load HLS playlist:", error);
+    alert("Failed to load HLS playlist. Please check the URL and try again.");
     if (hlsMediaPlaylistWarning) {
-      hlsMediaPlaylistWarning.style.display = 'none';
+      hlsMediaPlaylistWarning.style.display = "none";
     }
     if (hlsQualitySelection) {
-      hlsQualitySelection.style.display = 'none';
+      hlsQualitySelection.style.display = "none";
     }
     // Update form state on error
     updateManualHlsFormState();
   } finally {
     if (loadHlsPlaylistBtn) {
       loadHlsPlaylistBtn.disabled = false;
-      loadHlsPlaylistBtn.textContent = 'Load';
+      loadHlsPlaylistBtn.textContent = "Load";
     }
   }
 }
@@ -1493,44 +1706,44 @@ function updateDownloadButtonState() {
  */
 async function handleStartHlsDownload() {
   if (!hlsUrlInput || !startHlsDownloadBtn) return;
-  
+
   const rawPlaylistUrl = hlsUrlInput.value.trim();
-  
+
   if (!rawPlaylistUrl) {
-    alert('Please enter an HLS playlist URL');
+    alert("Please enter an HLS playlist URL");
     return;
   }
-  
+
   // Normalize URL first
   const playlistUrl = normalizeUrl(rawPlaylistUrl);
-  
+
   // For media playlists, download directly without quality selection
   // For master playlists, use selected qualities
   let videoPlaylistUrl: string | null = null;
   let audioPlaylistUrl: string | null = null;
-  
+
   if (!isMediaPlaylistMode) {
     // Master playlist - use selected qualities
     if (!videoQualitySelect || !audioQualitySelect) return;
-    
+
     const rawVideoUrl = videoQualitySelect.value || null;
     const rawAudioUrl = audioQualitySelect.value || null;
-    
+
     // Normalize selected quality URLs
     videoPlaylistUrl = rawVideoUrl ? normalizeUrl(rawVideoUrl) : null;
     audioPlaylistUrl = rawAudioUrl ? normalizeUrl(rawAudioUrl) : null;
-    
+
     if (!videoPlaylistUrl && !audioPlaylistUrl) {
-      alert('Please select at least one quality (video or audio)');
+      alert("Please select at least one quality (video or audio)");
       return;
     }
   }
   // For media playlists, we don't set videoPlaylistUrl or audioPlaylistUrl
   // The URL will be passed directly and handled by the m3u8 download handler
-  
+
   // Update button text and disable form elements
-  startHlsDownloadBtn.textContent = 'Starting...';
-  
+  startHlsDownloadBtn.textContent = "Starting...";
+
   // Disable form inputs during download (will be managed by updateManualHlsFormState after setting currentManualHlsUrl)
   // But we need to disable immediately before the download starts
   if (hlsUrlInput) hlsUrlInput.disabled = true;
@@ -1538,19 +1751,22 @@ async function handleStartHlsDownload() {
   if (videoQualitySelect) videoQualitySelect.disabled = true;
   if (audioQualitySelect) audioQualitySelect.disabled = true;
   startHlsDownloadBtn.disabled = true;
-  
+
   try {
     // Get current tab information for filename
     let tabTitle: string | undefined;
     let website: string | undefined;
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (tab) {
         tabTitle = tab.title || undefined;
         if (tab.url) {
           try {
             const urlObj = new URL(tab.url);
-            website = urlObj.hostname.replace(/^www\./, '');
+            website = urlObj.hostname.replace(/^www\./, "");
           } catch {
             // Ignore URL parsing errors
           }
@@ -1558,16 +1774,16 @@ async function handleStartHlsDownload() {
       }
     } catch (error) {
       // Ignore errors getting tab info
-      console.debug('Could not get tab information:', error);
+      console.debug("Could not get tab information:", error);
     }
-    
+
     // Create video metadata
     const metadata: VideoMetadata = {
       url: playlistUrl,
-      format: isMediaPlaylistMode ? 'm3u8' : 'hls',
-      title: tabTitle || 'HLS Video',
+      format: isMediaPlaylistMode ? "m3u8" : "hls",
+      title: tabTitle || "HLS Video",
     };
-    
+
     // Send download request with quality preferences
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage(
@@ -1578,10 +1794,12 @@ async function handleStartHlsDownload() {
             metadata,
             tabTitle,
             website,
-            hlsQuality: isMediaPlaylistMode ? undefined : {
-              videoPlaylistUrl,
-              audioPlaylistUrl,
-            },
+            hlsQuality: isMediaPlaylistMode
+              ? undefined
+              : {
+                  videoPlaylistUrl,
+                  audioPlaylistUrl,
+                },
           },
         },
         (response) => {
@@ -1590,10 +1808,10 @@ async function handleStartHlsDownload() {
             return;
           }
           resolve(response);
-        }
+        },
       );
     });
-    
+
     if (response && response.success) {
       // Store the URL to track progress
       currentManualHlsUrl = playlistUrl;
@@ -1603,14 +1821,14 @@ async function handleStartHlsDownload() {
       renderManualHlsProgress();
     } else if (response && response.error) {
       alert(response.error);
-      startHlsDownloadBtn.textContent = 'Download';
+      startHlsDownloadBtn.textContent = "Download";
       // Re-enable form elements on error
       updateManualHlsFormState();
     }
   } catch (error: any) {
-    console.error('Download request failed:', error);
-    alert('Failed to start download: ' + (error?.message || 'Unknown error'));
-    startHlsDownloadBtn.textContent = 'Download';
+    console.error("Download request failed:", error);
+    alert("Failed to start download: " + (error?.message || "Unknown error"));
+    startHlsDownloadBtn.textContent = "Download";
     // Re-enable form elements on error
     updateManualHlsFormState();
   }
@@ -1620,8 +1838,8 @@ async function handleStartHlsDownload() {
  * Load theme from storage and apply it
  */
 async function loadTheme() {
-  const theme = await ChromeStorage.get<string>('theme');
-  const isLightMode = theme === 'light';
+  const theme = await ChromeStorage.get<string>("theme");
+  const isLightMode = theme === "light";
   applyTheme(isLightMode);
 }
 
@@ -1631,9 +1849,9 @@ async function loadTheme() {
 function applyTheme(isLightMode: boolean) {
   const root = document.documentElement;
   if (isLightMode) {
-    root.classList.add('light-mode');
+    root.classList.add("light-mode");
   } else {
-    root.classList.remove('light-mode');
+    root.classList.remove("light-mode");
   }
   updateThemeIcon(isLightMode);
 }
@@ -1643,7 +1861,7 @@ function applyTheme(isLightMode: boolean) {
  */
 function updateThemeIcon(isLightMode: boolean) {
   if (!themeIcon) return;
-  
+
   if (isLightMode) {
     // Moon icon for light mode (to switch to dark)
     themeIcon.innerHTML = `
@@ -1670,16 +1888,16 @@ function updateThemeIcon(isLightMode: boolean) {
  */
 async function toggleTheme() {
   const root = document.documentElement;
-  const isLightMode = root.classList.contains('light-mode');
-  const newTheme = isLightMode ? 'dark' : 'light';
-  
-  await ChromeStorage.set('theme', newTheme);
+  const isLightMode = root.classList.contains("light-mode");
+  const newTheme = isLightMode ? "dark" : "light";
+
+  await ChromeStorage.set("theme", newTheme);
   applyTheme(!isLightMode);
 }
 
 // Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
 } else {
   init();
 }

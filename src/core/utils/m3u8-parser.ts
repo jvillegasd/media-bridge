@@ -2,19 +2,19 @@
  * M3U8 playlist parser utility
  */
 
-import { Parser } from 'm3u8-parser';
-import { buildAbsoluteURL } from 'url-toolkit';
-import { v4 as uuidv4 } from 'uuid';
-import { Fragment, Level, LevelType } from '../types';
-import { normalizeUrl } from './url-utils';
-import { logger } from './logger';
+import { Parser } from "m3u8-parser";
+import { buildAbsoluteURL } from "url-toolkit";
+import { v4 as uuidv4 } from "uuid";
+import { Fragment, Level, LevelType } from "../types";
+import { normalizeUrl } from "./url-utils";
+import { logger } from "./logger";
 
 /**
  * Parse a level playlist into fragments
  */
 export function parseLevelsPlaylist(
   playlistText: string,
-  baseUrl: string
+  baseUrl: string,
 ): Fragment[] {
   const parser = new Parser();
   parser.push(playlistText);
@@ -44,8 +44,8 @@ export function parseLevelsPlaylist(
               ? {
                   iv: segment.key.iv
                     ? Array.from(segment.key.iv)
-                        .map((b) => b.toString(16).padStart(2, '0'))
-                        .join('')
+                        .map((b) => b.toString(16).padStart(2, "0"))
+                        .join("")
                     : null,
                   uri: buildAbsoluteURL(baseUrl, segment.key.uri),
                 }
@@ -66,8 +66,8 @@ export function parseLevelsPlaylist(
           ? {
               iv: segment.key.iv
                 ? Array.from(segment.key.iv)
-                    .map((b) => b.toString(16).padStart(2, '0'))
-                    .join('')
+                    .map((b) => b.toString(16).padStart(2, "0"))
+                    .join("")
                 : null,
               uri: buildAbsoluteURL(baseUrl, segment.key.uri),
             }
@@ -85,7 +85,7 @@ export function parseLevelsPlaylist(
  */
 export function parseMasterPlaylist(
   playlistText: string,
-  baseUrl: string
+  baseUrl: string,
 ): Level[] {
   const parser = new Parser();
   parser.push(playlistText);
@@ -96,12 +96,12 @@ export function parseMasterPlaylist(
 
   // Parse video stream playlists
   const streamLevels: Level[] = playlists.map((playlist) => ({
-    type: 'stream' as LevelType,
+    type: "stream" as LevelType,
     id: uuidv4(),
     playlistID: baseUrl,
     uri: buildAbsoluteURL(baseUrl, playlist.uri),
     bitrate: playlist.attributes.BANDWIDTH,
-    fps: playlist.attributes['FRAME-RATE'],
+    fps: playlist.attributes["FRAME-RATE"],
     height: playlist.attributes.RESOLUTION?.height,
     width: playlist.attributes.RESOLUTION?.width,
   }));
@@ -111,7 +111,7 @@ export function parseMasterPlaylist(
     ([key, entries]) => {
       return Object.entries(entries).map(([label, entry]: [string, any]) => {
         return {
-          type: 'audio' as LevelType,
+          type: "audio" as LevelType,
           id: `${label}-${key}`,
           playlistID: baseUrl,
           uri: buildAbsoluteURL(baseUrl, entry.uri),
@@ -121,7 +121,7 @@ export function parseMasterPlaylist(
           height: undefined,
         };
       });
-    }
+    },
   );
 
   return [...streamLevels, ...audioLevels];
@@ -154,22 +154,26 @@ export function isMediaPlaylist(playlistText: string): boolean {
 
   // Media playlists have segments array with actual segment URIs
   // They don't have playlists or mediaGroups (those are master playlists)
-  const hasSegments = parser.manifest.segments && parser.manifest.segments.length > 0;
-  const hasNoPlaylists = !parser.manifest.playlists || parser.manifest.playlists.length === 0;
-  const hasNoMediaGroups = !parser.manifest.mediaGroups || Object.keys(parser.manifest.mediaGroups).length === 0;
+  const hasSegments =
+    parser.manifest.segments && parser.manifest.segments.length > 0;
+  const hasNoPlaylists =
+    !parser.manifest.playlists || parser.manifest.playlists.length === 0;
+  const hasNoMediaGroups =
+    !parser.manifest.mediaGroups ||
+    Object.keys(parser.manifest.mediaGroups).length === 0;
 
   return hasSegments && hasNoPlaylists && hasNoMediaGroups;
 }
 
 /**
  * Check if a media playlist belongs to a specific master playlist
- * 
+ *
  * This function determines membership by comparing URLs:
  * 1. Parses the master playlist to extract all variant URIs
  * 2. Resolves variant URIs into full URLs (relative to master playlist base URL)
  * 3. Compares the media playlist URL against all variant URLs
  * 4. Returns true if there's a match
- * 
+ *
  * @param masterPlaylistText - The master playlist content as text
  * @param masterPlaylistBaseUrl - The base URL of the master playlist (used to resolve relative URIs)
  * @param mediaPlaylistUrl - The URL of the media playlist to check
@@ -178,14 +182,14 @@ export function isMediaPlaylist(playlistText: string): boolean {
 export function belongsToMasterPlaylist(
   masterPlaylistText: string,
   masterPlaylistBaseUrl: string,
-  mediaPlaylistUrl: string
+  mediaPlaylistUrl: string,
 ): boolean {
   // Parse the master playlist to get all variant levels
   const levels = parseMasterPlaylist(masterPlaylistText, masterPlaylistBaseUrl);
-  
+
   // Normalize the media playlist URL for comparison
   const normalizedMediaUrl = normalizeUrl(mediaPlaylistUrl);
-  
+
   logger.debug("Normalized media URL", { normalizedMediaUrl });
   logger.debug("levels", { levels });
 
@@ -203,4 +207,3 @@ export const M3u8Parser = {
   isMediaPlaylist,
   belongsToMasterPlaylist,
 };
-
