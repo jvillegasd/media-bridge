@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/jvillegasd/media-bridge/compare/v1.1.0...v1.1.1) (2025-11-22)
+
+
+### Bug Fixes
+
+* build: Build conditionally in release-please workflow ([#9](https://github.com/jvillegasd/media-bridge/issues/9)) ([390c7e0](https://github.com/jvillegasd/media-bridge/commit/390c7e092f10146b874fbeadf4bc24e589e401f2))
+
 ## [1.1.0](https://github.com/jvillegasd/media-bridge/compare/v1.0.1...v1.1.0) (2025-11-22)
 
 
