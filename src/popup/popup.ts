@@ -218,8 +218,8 @@ async function init() {
   });
 
   // Load data
-  await loadDetectedVideos();
   await loadDownloadStates();
+  renderDetectedVideos();
 
   // Get detected videos from current tab
   await requestDetectedVideos();
@@ -574,13 +574,6 @@ function addDetectedVideo(video: VideoMetadata) {
       renderDetectedVideos();
     }
   }
-}
-
-/**
- * Load detected videos from memory and render
- */
-async function loadDetectedVideos() {
-  renderDetectedVideos();
 }
 
 /**
@@ -1000,24 +993,6 @@ async function startDownload(
 }
 
 /**
- * Get download title
- */
-function getDownloadTitle(download: DownloadState): string {
-  if (download.metadata?.title) {
-    return download.metadata.title;
-  }
-
-  try {
-    const url = new URL(download.url);
-    const pathname = url.pathname;
-    const filename = pathname.split("/").pop();
-    return filename || download.url.substring(0, 50) + "...";
-  } catch {
-    return download.url.substring(0, 50) + "...";
-  }
-}
-
-/**
  * Get video title from URL
  */
 function getVideoTitleFromUrl(url: string): string {
@@ -1170,73 +1145,6 @@ function formatSpeed(bytesPerSecond: number): string {
 }
 
 /**
- * Format timestamp to readable datetime
- */
-function formatDateTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  // Show relative time for recent errors
-  if (diffMins < 1) {
-    return "Just now";
-  } else if (diffMins < 60) {
-    return `${diffMins}m ago`;
-  } else if (diffHours < 24) {
-    return `${diffHours}h ago`;
-  } else if (diffDays < 7) {
-    return `${diffDays}d ago`;
-  }
-
-  // Show full date for older errors
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-
-  const isToday = date.toDateString() === now.toDateString();
-  if (isToday) {
-    return `Today ${hours}:${minutes}`;
-  }
-
-  const isThisYear = year === now.getFullYear();
-  if (isThisYear) {
-    return `${month}/${day} ${hours}:${minutes}`;
-  }
-
-  return `${year}-${month}-${day} ${hours}:${minutes}`;
-}
-
-/**
- * Calculate estimated video size from bandwidth and duration
- */
-function calculateEstimatedSize(bandwidth: number, duration?: number): string {
-  if (!bandwidth || bandwidth === 0 || !duration) {
-    return "";
-  }
-
-  // bandwidth is in bits per second, convert to bytes per second
-  const bytesPerSecond = bandwidth / 8;
-  // Estimate total size
-  const estimatedBytes = bytesPerSecond * duration;
-
-  // Format size
-  if (estimatedBytes < 1024) {
-    return `${estimatedBytes.toFixed(0)} B`;
-  } else if (estimatedBytes < 1024 * 1024) {
-    return `${(estimatedBytes / 1024).toFixed(1)} KB`;
-  } else if (estimatedBytes < 1024 * 1024 * 1024) {
-    return `${(estimatedBytes / (1024 * 1024)).toFixed(1)} MB`;
-  } else {
-    return `${(estimatedBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  }
-}
-
-/**
  * Escape HTML
  */
 function escapeHtml(text: string): string {
@@ -1334,46 +1242,6 @@ async function switchTab(tabName: "auto" | "manual") {
     renderManualManifestProgress();
     updateManualManifestFormState();
   }
-}
-
-/**
- * Reset manual manifest form
- */
-function resetManualManifestForm() {
-  isMediaPlaylistMode = false;
-  currentManualManifestUrl = null;
-  if (manifestUrlInput) {
-    manifestUrlInput.value = "";
-  }
-  if (videoQualitySelect) {
-    videoQualitySelect.innerHTML =
-      '<option value="">Select video quality...</option>';
-    videoQualitySelect.disabled = true;
-  }
-  if (audioQualitySelect) {
-    audioQualitySelect.innerHTML =
-      '<option value="">Select audio quality...</option>';
-    audioQualitySelect.disabled = true;
-  }
-  if (startManifestDownloadBtn) {
-    startManifestDownloadBtn.disabled = true;
-  }
-  if (manifestMediaPlaylistWarning) {
-    manifestMediaPlaylistWarning.style.display = "none";
-  }
-  if (manifestQualitySelection) {
-    manifestQualitySelection.style.display = "none";
-  }
-  if (loadManifestPlaylistBtn) {
-    loadManifestPlaylistBtn.disabled = false;
-    loadManifestPlaylistBtn.textContent = "Load";
-  }
-  if (manifestProgress) {
-    manifestProgress.style.display = "none";
-    manifestProgress.innerHTML = "";
-  }
-  // Update form state after reset
-  updateManualManifestFormState();
 }
 
 /**
