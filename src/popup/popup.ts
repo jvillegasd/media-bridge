@@ -30,16 +30,16 @@ let autoDetectTab: HTMLButtonElement | null = null;
 let manifestTab: HTMLButtonElement | null = null;
 let autoDetectContent: HTMLDivElement | null = null;
 let manifestContent: HTMLDivElement | null = null;
-let startHlsDownloadBtn: HTMLButtonElement | null = null;
-let loadHlsPlaylistBtn: HTMLButtonElement | null = null;
+let startManifestDownloadBtn: HTMLButtonElement | null = null;
+let loadManifestPlaylistBtn: HTMLButtonElement | null = null;
 let videoQualitySelect: HTMLSelectElement | null = null;
 let audioQualitySelect: HTMLSelectElement | null = null;
 let manifestUrlInput: HTMLInputElement | null = null;
-let hlsMediaPlaylistWarning: HTMLDivElement | null = null;
-let hlsQualitySelection: HTMLDivElement | null = null;
+let manifestMediaPlaylistWarning: HTMLDivElement | null = null;
+let manifestQualitySelection: HTMLDivElement | null = null;
 let manifestProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
-let currentManualHlsUrl: string | null = null;
+let currentManualManifestUrl: string | null = null;
 let themeToggle: HTMLButtonElement | null = null;
 let themeIcon: SVGElement | null = null;
 
@@ -77,10 +77,10 @@ async function init() {
   manifestContent = document.getElementById(
     "manifestContent",
   ) as HTMLDivElement;
-  startHlsDownloadBtn = document.getElementById(
+  startManifestDownloadBtn = document.getElementById(
     "startHlsDownloadBtn",
   ) as HTMLButtonElement;
-  loadHlsPlaylistBtn = document.getElementById(
+  loadManifestPlaylistBtn = document.getElementById(
     "loadHlsPlaylistBtn",
   ) as HTMLButtonElement;
   videoQualitySelect = document.getElementById(
@@ -90,17 +90,17 @@ async function init() {
     "audioQualitySelect",
   ) as HTMLSelectElement;
   manifestUrlInput = document.getElementById("manifestUrlInput") as HTMLInputElement;
-  hlsMediaPlaylistWarning = document.getElementById(
+  manifestMediaPlaylistWarning = document.getElementById(
     "hlsMediaPlaylistWarning",
   ) as HTMLDivElement;
-  hlsQualitySelection = document.getElementById(
+  manifestQualitySelection = document.getElementById(
     "hlsQualitySelection",
   ) as HTMLDivElement;
   manifestProgress = document.getElementById(
     "manifestProgress",
   ) as HTMLDivElement;
   themeToggle = document.getElementById("themeToggle") as HTMLButtonElement;
-  themeIcon = document.getElementById("themeIcon") as SVGElement;
+  themeIcon = document.getElementById("themeIcon") as unknown as SVGElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
@@ -143,16 +143,16 @@ async function init() {
   if (manifestTab) {
     manifestTab.addEventListener("click", async () => await switchTab("manual"));
   }
-  if (startHlsDownloadBtn) {
-    startHlsDownloadBtn.addEventListener("click", handleStartHlsDownload);
+  if (startManifestDownloadBtn) {
+    startManifestDownloadBtn.addEventListener("click", handleStartManifestDownload);
   }
-  if (loadHlsPlaylistBtn) {
-    loadHlsPlaylistBtn.addEventListener("click", handleLoadHlsPlaylist);
+  if (loadManifestPlaylistBtn) {
+    loadManifestPlaylistBtn.addEventListener("click", handleLoadManifestPlaylist);
   }
   if (manifestUrlInput) {
     manifestUrlInput.addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
-        handleLoadHlsPlaylist();
+        handleLoadManifestPlaylist();
       }
     });
   }
@@ -183,14 +183,14 @@ async function init() {
       if (message.type === MessageType.DOWNLOAD_PROGRESS) {
         await loadDownloadStates();
         renderDetectedVideos();
-        renderManualHlsProgress();
-        updateManualHlsFormState();
+        renderManualManifestProgress();
+        updateManualManifestFormState();
       }
       if (message.type === MessageType.DOWNLOAD_COMPLETE) {
         await loadDownloadStates();
         renderDetectedVideos();
-        renderManualHlsProgress();
-        updateManualHlsFormState();
+        renderManualManifestProgress();
+        updateManualManifestFormState();
       }
       if (message.type === MessageType.VIDEO_DETECTED) {
         addDetectedVideo(message.payload);
@@ -205,8 +205,8 @@ async function init() {
       if (message.type === MessageType.DOWNLOAD_FAILED) {
         await loadDownloadStates();
         renderDetectedVideos();
-        renderManualHlsProgress();
-        updateManualHlsFormState();
+        renderManualManifestProgress();
+        updateManualManifestFormState();
         // Log error for debugging
         if (message.payload && message.payload.error) {
           console.warn("Download failed:", message.payload.error);
@@ -232,7 +232,7 @@ async function init() {
       await loadDownloadStates();
       await restoreManualDownloadState();
       renderDetectedVideos();
-      renderManualHlsProgress();
+      renderManualManifestProgress();
     }
   });
 
@@ -241,7 +241,7 @@ async function init() {
     await loadDownloadStates();
     await restoreManualDownloadState();
     renderDetectedVideos();
-    renderManualHlsProgress();
+    renderManualManifestProgress();
   });
 
   // Periodic refresh while popup is open (every 2 seconds)
@@ -250,8 +250,8 @@ async function init() {
     if (!document.hidden) {
       await loadDownloadStates();
       renderDetectedVideos();
-      renderManualHlsProgress();
-      updateManualHlsFormState();
+      renderManualManifestProgress();
+      updateManualManifestFormState();
     }
   }, 2000);
 }
@@ -652,18 +652,18 @@ function renderDetectedVideos() {
           stage,
         )}</span>`;
 
-        // Check if this is an HLS or M3U8 download (format is 'hls' or 'm3u8')
-        // HLS/M3U8 downloads have speed tracking and show progress bar with real file size
+        // Check if this is a manifest or M3U8 download (format is 'hls' or 'm3u8')
+        // Manifest/M3U8 downloads have speed tracking and show progress bar with real file size
         // Show detailed progress during downloading and merging stages
-        const isHlsDownload =
+        const isManifestDownload =
           (video.format === "hls" || video.format === "m3u8") &&
           (stage === "downloading" || stage === "merging");
 
-        if (isHlsDownload) {
+        if (isManifestDownload) {
           const percentage = downloadState.progress.percentage || 0;
 
           if (stage === "downloading") {
-            // HLS downloading progress: progress bar, real file size, and speed
+            // Manifest downloading progress: progress bar, real file size, and speed
             const downloaded = downloadState.progress.downloaded || 0;
             const total = downloadState.progress.total || 0;
             const speed = downloadState.progress.speed || 0;
@@ -673,38 +673,38 @@ function renderDetectedVideos() {
             const speedText = formatSpeed(speed);
 
             progressBar = `
-            <div class="hls-progress-container">
-              <div class="hls-progress-bar-wrapper">
-                <div class="hls-progress-bar" style="width: ${Math.min(
+            <div class="manifest-progress-container">
+              <div class="manifest-progress-bar-wrapper">
+                <div class="manifest-progress-bar" style="width: ${Math.min(
                   percentage,
                   100,
                 )}%"></div>
               </div>
-              <div class="hls-progress-info">
-                <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
+              <div class="manifest-progress-info">
+                <span class="manifest-progress-size">${downloadedText} / ${totalText}</span>
                 ${
                   speed > 0
-                    ? `<span class="hls-progress-speed">${speedText}</span>`
+                    ? `<span class="manifest-progress-speed">${speedText}</span>`
                     : ""
                 }
               </div>
             </div>
           `;
           } else if (stage === "merging") {
-            // HLS merging progress: progress bar restarts at 0% and goes to 100%
+            // Manifest merging progress: progress bar restarts at 0% and goes to 100%
             const message =
               downloadState.progress.message || "Merging streams...";
             // Progress bar starts fresh at 0% for merging phase
             const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
 
             progressBar = `
-            <div class="hls-progress-container">
-              <div class="hls-progress-bar-wrapper">
-                <div class="hls-progress-bar" style="width: ${mergingPercentage}%"></div>
+            <div class="manifest-progress-container">
+              <div class="manifest-progress-bar-wrapper">
+                <div class="manifest-progress-bar" style="width: ${mergingPercentage}%"></div>
               </div>
-              <div class="hls-progress-info">
-                <span class="hls-progress-size">${message}</span>
-                <span class="hls-progress-speed">${Math.round(
+              <div class="manifest-progress-info">
+                <span class="manifest-progress-size">${message}</span>
+                <span class="manifest-progress-speed">${Math.round(
                   mergingPercentage,
                 )}%</span>
               </div>
@@ -823,7 +823,7 @@ function renderDetectedVideos() {
             ${
               (video.format === "hls" || video.format === "m3u8")
                 ? `
-              <button class="video-btn-hls" 
+              <button class="video-btn-manifest" 
                       data-url="${escapeHtml(video.url)}" 
                       title="Select quality">
                 Select Quality
@@ -853,12 +853,12 @@ function renderDetectedVideos() {
     });
   });
 
-  // Add click handlers for HLS quality selection buttons
-  detectedVideosList.querySelectorAll(".video-btn-hls").forEach((btn) => {
+  // Add click handlers for manifest quality selection buttons
+  detectedVideosList.querySelectorAll(".video-btn-manifest").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       const button = e.target as HTMLButtonElement;
       const url = button.getAttribute("data-url")!;
-      handleSendToHlsTab(url);
+      handleSendToManifestTab(url);
     });
   });
 }
@@ -1331,17 +1331,17 @@ async function switchTab(tabName: "auto" | "manual") {
     // Render progress if there's an active download
     // Restore manual download state when switching to manual tab
     await restoreManualDownloadState();
-    renderManualHlsProgress();
-    updateManualHlsFormState();
+    renderManualManifestProgress();
+    updateManualManifestFormState();
   }
 }
 
 /**
- * Reset manual HLS form
+ * Reset manual manifest form
  */
-function resetManualHlsForm() {
+function resetManualManifestForm() {
   isMediaPlaylistMode = false;
-  currentManualHlsUrl = null;
+  currentManualManifestUrl = null;
   if (manifestUrlInput) {
     manifestUrlInput.value = "";
   }
@@ -1355,36 +1355,36 @@ function resetManualHlsForm() {
       '<option value="">Select audio quality...</option>';
     audioQualitySelect.disabled = true;
   }
-  if (startHlsDownloadBtn) {
-    startHlsDownloadBtn.disabled = true;
+  if (startManifestDownloadBtn) {
+    startManifestDownloadBtn.disabled = true;
   }
-  if (hlsMediaPlaylistWarning) {
-    hlsMediaPlaylistWarning.style.display = "none";
+  if (manifestMediaPlaylistWarning) {
+    manifestMediaPlaylistWarning.style.display = "none";
   }
-  if (hlsQualitySelection) {
-    hlsQualitySelection.style.display = "none";
+  if (manifestQualitySelection) {
+    manifestQualitySelection.style.display = "none";
   }
-  if (loadHlsPlaylistBtn) {
-    loadHlsPlaylistBtn.disabled = false;
-    loadHlsPlaylistBtn.textContent = "Load";
+  if (loadManifestPlaylistBtn) {
+    loadManifestPlaylistBtn.disabled = false;
+    loadManifestPlaylistBtn.textContent = "Load";
   }
   if (manifestProgress) {
     manifestProgress.style.display = "none";
     manifestProgress.innerHTML = "";
   }
   // Update form state after reset
-  updateManualHlsFormState();
+  updateManualManifestFormState();
 }
 
 /**
- * Update manual HLS form state based on download status and selections
+ * Update manual manifest form state based on download status and selections
  */
-function updateManualHlsFormState() {
+function updateManualManifestFormState() {
   let isDownloading = false;
 
   // Check if there's an active download
-  if (currentManualHlsUrl) {
-    const normalizedUrl = normalizeUrl(currentManualHlsUrl);
+  if (currentManualManifestUrl) {
+    const normalizedUrl = normalizeUrl(currentManualManifestUrl);
     const downloadState = downloadStates.find((d) => {
       if (!d.metadata) return false;
       return normalizeUrl(d.metadata.url) === normalizedUrl;
@@ -1399,7 +1399,7 @@ function updateManualHlsFormState() {
 
   // Update form elements based on download status
   if (manifestUrlInput) manifestUrlInput.disabled = isDownloading;
-  if (loadHlsPlaylistBtn) loadHlsPlaylistBtn.disabled = isDownloading;
+  if (loadManifestPlaylistBtn) loadManifestPlaylistBtn.disabled = isDownloading;
   if (videoQualitySelect) {
     videoQualitySelect.disabled =
       isDownloading || videoQualitySelect.options.length <= 1;
@@ -1410,23 +1410,23 @@ function updateManualHlsFormState() {
   }
 
   // Update download button state
-  if (!startHlsDownloadBtn) return;
+  if (!startManifestDownloadBtn) return;
 
   // Disable button while downloading
   if (isDownloading) {
-    startHlsDownloadBtn.disabled = true;
+    startManifestDownloadBtn.disabled = true;
     return;
   }
 
   // If it's a media playlist, button is enabled after loading
   if (isMediaPlaylistMode) {
-    startHlsDownloadBtn.disabled = false;
+    startManifestDownloadBtn.disabled = false;
     return;
   }
 
   // For master playlists, check if at least one quality is selected
   if (!videoQualitySelect || !audioQualitySelect) {
-    startHlsDownloadBtn.disabled = true;
+    startManifestDownloadBtn.disabled = true;
     return;
   }
 
@@ -1434,19 +1434,19 @@ function updateManualHlsFormState() {
   const audioSelected = audioQualitySelect.value !== "";
 
   // Enable button if at least one quality is selected
-  startHlsDownloadBtn.disabled = !(videoSelected || audioSelected);
+  startManifestDownloadBtn.disabled = !(videoSelected || audioSelected);
 }
 
 /**
- * Render manual HLS download progress
+ * Render manual manifest download progress
  */
-function renderManualHlsProgress() {
-  if (!manifestProgress || !currentManualHlsUrl) {
-    updateManualHlsFormState();
+function renderManualManifestProgress() {
+  if (!manifestProgress || !currentManualManifestUrl) {
+    updateManualManifestFormState();
     return;
   }
 
-  const normalizedUrl = normalizeUrl(currentManualHlsUrl);
+  const normalizedUrl = normalizeUrl(currentManualManifestUrl);
   const downloadState = downloadStates.find((d) => {
     if (!d.metadata) return false;
     return normalizeUrl(d.metadata.url) === normalizedUrl;
@@ -1456,7 +1456,7 @@ function renderManualHlsProgress() {
     if (manifestProgress) {
       manifestProgress.style.display = "none";
     }
-    updateManualHlsFormState();
+    updateManualManifestFormState();
     return;
   }
 
@@ -1470,7 +1470,7 @@ function renderManualHlsProgress() {
     if (manifestProgress) {
       manifestProgress.style.display = "none";
     }
-    updateManualHlsFormState();
+    updateManualManifestFormState();
     return;
   }
 
@@ -1478,7 +1478,7 @@ function renderManualHlsProgress() {
   manifestProgress.style.display = "block";
 
   // Update form state based on download status
-  updateManualHlsFormState();
+  updateManualManifestFormState();
 
   const stage = downloadState.progress.stage;
   const statusBadge = `<span class="video-status status-${stage}">${getStatusText(
@@ -1486,12 +1486,12 @@ function renderManualHlsProgress() {
   )}</span>`;
 
   let progressBar = "";
-  const isHlsDownload =
+  const isManifestDownload =
     (downloadState.metadata.format === "hls" ||
       downloadState.metadata.format === "m3u8") &&
     (stage === "downloading" || stage === "merging");
 
-  if (isDownloading && isHlsDownload) {
+  if (isDownloading && isManifestDownload) {
     const percentage = downloadState.progress.percentage || 0;
 
     if (stage === "downloading") {
@@ -1504,18 +1504,18 @@ function renderManualHlsProgress() {
       const speedText = formatSpeed(speed);
 
       progressBar = `
-        <div class="hls-progress-container">
-          <div class="hls-progress-bar-wrapper">
-            <div class="hls-progress-bar" style="width: ${Math.min(
+        <div class="manifest-progress-container">
+          <div class="manifest-progress-bar-wrapper">
+            <div class="manifest-progress-bar" style="width: ${Math.min(
               percentage,
               100,
             )}%"></div>
           </div>
-          <div class="hls-progress-info">
-            <span class="hls-progress-size">${downloadedText} / ${totalText}</span>
+          <div class="manifest-progress-info">
+            <span class="manifest-progress-size">${downloadedText} / ${totalText}</span>
             ${
               speed > 0
-                ? `<span class="hls-progress-speed">${speedText}</span>`
+                ? `<span class="manifest-progress-speed">${speedText}</span>`
                 : ""
             }
           </div>
@@ -1526,13 +1526,13 @@ function renderManualHlsProgress() {
       const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
 
       progressBar = `
-        <div class="hls-progress-container">
-          <div class="hls-progress-bar-wrapper">
-            <div class="hls-progress-bar" style="width: ${mergingPercentage}%"></div>
+        <div class="manifest-progress-container">
+          <div class="manifest-progress-bar-wrapper">
+            <div class="manifest-progress-bar" style="width: ${mergingPercentage}%"></div>
           </div>
-          <div class="hls-progress-info">
-            <span class="hls-progress-size">${message}</span>
-            <span class="hls-progress-speed">${Math.round(
+          <div class="manifest-progress-info">
+            <span class="manifest-progress-size">${message}</span>
+            <span class="manifest-progress-speed">${Math.round(
               mergingPercentage,
             )}%</span>
           </div>
@@ -1554,14 +1554,14 @@ function renderManualHlsProgress() {
   }
 
   const title =
-    downloadState.metadata.title || getVideoTitleFromUrl(currentManualHlsUrl);
+    downloadState.metadata.title || getVideoTitleFromUrl(currentManualManifestUrl);
 
   manifestProgress.innerHTML = `
     <div class="video-item" style="margin: 0;">
       <div class="video-item-content">
         <div class="video-item-header">
           <div class="video-item-title" title="${escapeHtml(
-            currentManualHlsUrl,
+            currentManualManifestUrl,
           )}">
             ${escapeHtml(title)}
           </div>
@@ -1585,8 +1585,8 @@ function renderManualHlsProgress() {
 /**
  * Handle Load manifest button click
  */
-async function handleLoadHlsPlaylist() {
-  if (!manifestUrlInput || !loadHlsPlaylistBtn) return;
+async function handleLoadManifestPlaylist() {
+  if (!manifestUrlInput || !loadManifestPlaylistBtn) return;
 
   const rawUrl = manifestUrlInput.value.trim();
 
@@ -1598,10 +1598,10 @@ async function handleLoadHlsPlaylist() {
   // Normalize URL first
   const normalizedUrl = normalizeUrl(rawUrl);
 
-  // Use format detector to check if it's an HLS URL (same as detection uses)
+  // Use format detector to check if it's a manifest URL (same as detection uses)
   const format = detectFormatFromUrl(normalizedUrl);
   if (format !== "hls") {
-    alert("Please enter a valid manifest URL (HLS .m3u8 or DASH .mpd)");
+    alert("Please enter a valid manifest URL (.m3u8 or .mpd)");
     return;
   }
 
@@ -1609,15 +1609,15 @@ async function handleLoadHlsPlaylist() {
   manifestUrlInput.value = normalizedUrl;
 
   // Show loading state
-  loadHlsPlaylistBtn.disabled = true;
-  loadHlsPlaylistBtn.textContent = "Loading...";
+  loadManifestPlaylistBtn.disabled = true;
+  loadManifestPlaylistBtn.textContent = "Loading...";
 
   // Hide previous states
-  if (hlsMediaPlaylistWarning) {
-    hlsMediaPlaylistWarning.style.display = "none";
+  if (manifestMediaPlaylistWarning) {
+    manifestMediaPlaylistWarning.style.display = "none";
   }
-  if (hlsQualitySelection) {
-    hlsQualitySelection.style.display = "none";
+  if (manifestQualitySelection) {
+    manifestQualitySelection.style.display = "none";
   }
 
   try {
@@ -1628,20 +1628,20 @@ async function handleLoadHlsPlaylist() {
     if (isMediaPlaylist(playlistText)) {
       // It's a media playlist - show warning and enable download
       isMediaPlaylistMode = true;
-      if (hlsMediaPlaylistWarning) {
-        hlsMediaPlaylistWarning.style.display = "block";
+      if (manifestMediaPlaylistWarning) {
+        manifestMediaPlaylistWarning.style.display = "block";
       }
-      if (hlsQualitySelection) {
-        hlsQualitySelection.style.display = "none";
+      if (manifestQualitySelection) {
+        manifestQualitySelection.style.display = "none";
       }
     } else if (isMasterPlaylist(playlistText)) {
       // It's a master playlist - show quality selection
       isMediaPlaylistMode = false;
-      if (hlsMediaPlaylistWarning) {
-        hlsMediaPlaylistWarning.style.display = "none";
+      if (manifestMediaPlaylistWarning) {
+        manifestMediaPlaylistWarning.style.display = "none";
       }
-      if (hlsQualitySelection && videoQualitySelect && audioQualitySelect) {
-        hlsQualitySelection.style.display = "block";
+      if (manifestQualitySelection && videoQualitySelect && audioQualitySelect) {
+        manifestQualitySelection.style.display = "block";
 
         // Parse master playlist using normalized URL
         const levels = parseMasterPlaylist(playlistText, normalizedUrl);
@@ -1701,38 +1701,38 @@ async function handleLoadHlsPlaylist() {
     }
 
     // Update form state after loading playlist
-    updateManualHlsFormState();
+    updateManualManifestFormState();
   } catch (error) {
     console.error("Failed to load manifest:", error);
     alert("Failed to load manifest. Please check the URL and try again.");
-    if (hlsMediaPlaylistWarning) {
-      hlsMediaPlaylistWarning.style.display = "none";
+    if (manifestMediaPlaylistWarning) {
+      manifestMediaPlaylistWarning.style.display = "none";
     }
-    if (hlsQualitySelection) {
-      hlsQualitySelection.style.display = "none";
+    if (manifestQualitySelection) {
+      manifestQualitySelection.style.display = "none";
     }
     // Update form state on error
-    updateManualHlsFormState();
+    updateManualManifestFormState();
   } finally {
-    if (loadHlsPlaylistBtn) {
-      loadHlsPlaylistBtn.disabled = false;
-      loadHlsPlaylistBtn.textContent = "Load";
+    if (loadManifestPlaylistBtn) {
+      loadManifestPlaylistBtn.disabled = false;
+      loadManifestPlaylistBtn.textContent = "Load";
     }
   }
 }
 
 /**
  * Update download button state based on selections
- * This is now a wrapper that calls updateManualHlsFormState for consistency
+ * This is now a wrapper that calls updateManualManifestFormState for consistency
  */
 function updateDownloadButtonState() {
-  updateManualHlsFormState();
+  updateManualManifestFormState();
 }
 
 /**
- * Handle sending video from autodetect to HLS tab for quality selection
+ * Handle sending video from autodetect to manifest tab for quality selection
  */
-async function handleSendToHlsTab(url: string) {
+async function handleSendToManifestTab(url: string) {
   // Switch to manifest tab
   await switchTab("manual");
 
@@ -1745,14 +1745,14 @@ async function handleSendToHlsTab(url: string) {
   }
 
   // Automatically load the playlist
-  await handleLoadHlsPlaylist();
+  await handleLoadManifestPlaylist();
 }
 
 /**
- * Handle start HLS download
+ * Handle start manifest download
  */
-async function handleStartHlsDownload() {
-  if (!manifestUrlInput || !startHlsDownloadBtn) return;
+async function handleStartManifestDownload() {
+  if (!manifestUrlInput || !startManifestDownloadBtn) return;
 
   const rawPlaylistUrl = manifestUrlInput.value.trim();
 
@@ -1789,15 +1789,15 @@ async function handleStartHlsDownload() {
   // The URL will be passed directly and handled by the m3u8 download handler
 
   // Update button text and disable form elements
-  startHlsDownloadBtn.textContent = "Starting...";
+  startManifestDownloadBtn.textContent = "Starting...";
 
-  // Disable form inputs during download (will be managed by updateManualHlsFormState after setting currentManualHlsUrl)
+  // Disable form inputs during download (will be managed by updateManualManifestFormState after setting currentManualManifestUrl)
   // But we need to disable immediately before the download starts
   if (manifestUrlInput) manifestUrlInput.disabled = true;
-  if (loadHlsPlaylistBtn) loadHlsPlaylistBtn.disabled = true;
+  if (loadManifestPlaylistBtn) loadManifestPlaylistBtn.disabled = true;
   if (videoQualitySelect) videoQualitySelect.disabled = true;
   if (audioQualitySelect) audioQualitySelect.disabled = true;
-  startHlsDownloadBtn.disabled = true;
+  startManifestDownloadBtn.disabled = true;
 
   try {
     // Get current tab information for filename
@@ -1828,7 +1828,7 @@ async function handleStartHlsDownload() {
     const metadata: VideoMetadata = {
       url: playlistUrl,
       format: isMediaPlaylistMode ? "m3u8" : "hls",
-      title: tabTitle || "HLS Video",
+      title: tabTitle || "Manifest Video",
     };
 
     // Send download request with quality preferences
@@ -1841,7 +1841,7 @@ async function handleStartHlsDownload() {
             metadata,
             tabTitle,
             website,
-            hlsQuality: isMediaPlaylistMode
+            manifestQuality: isMediaPlaylistMode
               ? undefined
               : {
                   videoPlaylistUrl,
@@ -1862,23 +1862,23 @@ async function handleStartHlsDownload() {
 
     if (response && response.success) {
       // Store the URL to track progress
-      currentManualHlsUrl = playlistUrl;
+      currentManualManifestUrl = playlistUrl;
       // Don't reset form, show progress instead
-      // Don't switch tabs, keep user in manual HLS tab
+      // Don't switch tabs, keep user in manual manifest tab
       await loadDownloadStates();
-      renderManualHlsProgress();
+      renderManualManifestProgress();
     } else if (response && response.error) {
       alert(response.error);
-      startHlsDownloadBtn.textContent = "Download";
+      startManifestDownloadBtn.textContent = "Download";
       // Re-enable form elements on error
-      updateManualHlsFormState();
+      updateManualManifestFormState();
     }
   } catch (error: any) {
     console.error("Download request failed:", error);
     alert("Failed to start download: " + (error?.message || "Unknown error"));
-    startHlsDownloadBtn.textContent = "Download";
+    startManifestDownloadBtn.textContent = "Download";
     // Re-enable form elements on error
-    updateManualHlsFormState();
+    updateManualManifestFormState();
   }
 }
 
@@ -1946,7 +1946,7 @@ function findActiveManualDownload(): DownloadState | undefined {
 
 /**
  * Restore manual download state if there's an active manual download
- * Reuses existing loadDownloadStates() and renderManualHlsProgress() functions
+ * Reuses existing loadDownloadStates() and renderManualManifestProgress() functions
  */
 async function restoreManualDownloadState() {
   try {
@@ -1960,12 +1960,12 @@ async function restoreManualDownloadState() {
     // Restore state - download was started from manual/manifest tab and is still active
       const downloadUrl = activeManualDownload.metadata.url;
       if (downloadUrl && manifestUrlInput) {
-        currentManualHlsUrl = downloadUrl;
+        currentManualManifestUrl = downloadUrl;
         manifestUrlInput.value = downloadUrl;
       
       // Restore playlist UI state using existing function
       try {
-        await handleLoadHlsPlaylist();
+        await handleLoadManifestPlaylist();
       } catch (error) {
         console.debug("Failed to restore playlist:", error);
       }

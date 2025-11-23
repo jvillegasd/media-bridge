@@ -47,7 +47,7 @@ async function handleDownloadRequestMessage(payload: {
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
-  hlsQuality?: {
+  manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
   };
@@ -319,7 +319,7 @@ async function handleDownloadRequest(payload: {
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
-  hlsQuality?: {
+  manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
   };
@@ -332,7 +332,7 @@ async function handleDownloadRequest(payload: {
     metadata,
     tabTitle,
     website,
-    hlsQuality,
+    manifestQuality,
     isManual,
   } = payload;
   const normalizedUrl = normalizeUrl(url);
@@ -394,7 +394,7 @@ async function handleDownloadRequest(payload: {
     metadata,
     tabTitle,
     website,
-    hlsQuality,
+    manifestQuality,
     isManual,
   );
   activeDownloads.set(normalizedUrl, downloadPromise);
@@ -471,7 +471,7 @@ async function startDownload(
   metadata: VideoMetadata,
   tabTitle?: string,
   website?: string,
-  hlsQuality?: {
+  manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
   },
@@ -498,7 +498,7 @@ async function startDownload(
       url,
       finalFilename,
       metadata,
-      hlsQuality,
+      manifestQuality,
       isManual,
     );
 

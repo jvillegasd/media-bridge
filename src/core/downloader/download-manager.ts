@@ -71,7 +71,7 @@ export class DownloadManager {
    * @param url - Original URL where video was detected
    * @param filename - Desired filename for downloaded video
    * @param metadata - Video metadata with format and URL
-   * @param hlsQuality - Optional HLS quality selection (for HLS format)
+   * @param manifestQuality - Optional manifest quality selection (for HLS format)
    * @returns Promise resolving to final DownloadState
    * @throws {Error} If format is unknown/unsupported or download fails
    */
@@ -79,7 +79,7 @@ export class DownloadManager {
     url: string,
     filename: string,
     metadata: VideoMetadata,
-    hlsQuality?: {
+    manifestQuality?: {
       videoPlaylistUrl?: string | null;
       audioPlaylistUrl?: string | null;
     },
@@ -131,7 +131,7 @@ export class DownloadManager {
           actualVideoUrl,
           filename,
           state.id,
-          hlsQuality,
+          manifestQuality,
         );
       } else if (format === "m3u8") {
         // Use M3U8 download handler

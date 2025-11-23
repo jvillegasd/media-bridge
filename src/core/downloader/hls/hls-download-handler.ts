@@ -552,7 +552,7 @@ export class HlsDownloadHandler {
    * @param masterPlaylistUrl - URL of HLS master playlist
    * @param filename - Target filename
    * @param stateId - Download state ID for progress tracking
-   * @param hlsQuality - Optional quality preferences (bypasses auto-selection)
+   * @param manifestQuality - Optional quality preferences (bypasses auto-selection)
    * @returns Promise resolving to file path and extension
    * @throws {DownloadError} If download fails
    */
@@ -560,7 +560,7 @@ export class HlsDownloadHandler {
     masterPlaylistUrl: string,
     filename: string,
     stateId: string,
-    hlsQuality?: {
+    manifestQuality?: {
       videoPlaylistUrl?: string | null;
       audioPlaylistUrl?: string | null;
     },
@@ -580,9 +580,9 @@ export class HlsDownloadHandler {
       let audioPlaylistUrl: string | null = null;
 
       // If quality preferences are provided, use them directly
-      if (hlsQuality) {
-        videoPlaylistUrl = hlsQuality.videoPlaylistUrl || null;
-        audioPlaylistUrl = hlsQuality.audioPlaylistUrl || null;
+      if (manifestQuality) {
+        videoPlaylistUrl = manifestQuality.videoPlaylistUrl || null;
+        audioPlaylistUrl = manifestQuality.audioPlaylistUrl || null;
         logger.info(
           `Using provided quality preferences - video: ${
             videoPlaylistUrl || "none"
