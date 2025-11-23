@@ -323,6 +323,7 @@ async function handleDownloadRequest(payload: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
   };
+  isManual?: boolean;
 }): Promise<{ error?: string } | void> {
   const {
     url,
@@ -332,6 +333,7 @@ async function handleDownloadRequest(payload: {
     tabTitle,
     website,
     hlsQuality,
+    isManual,
   } = payload;
   const normalizedUrl = normalizeUrl(url);
   const existing = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
@@ -393,6 +395,7 @@ async function handleDownloadRequest(payload: {
     tabTitle,
     website,
     hlsQuality,
+    isManual,
   );
   activeDownloads.set(normalizedUrl, downloadPromise);
 
@@ -472,6 +475,7 @@ async function startDownload(
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
   },
+  isManual?: boolean,
 ): Promise<void> {
   try {
     // Generate filename if not provided
@@ -495,6 +499,7 @@ async function startDownload(
       finalFilename,
       metadata,
       hlsQuality,
+      isManual,
     );
 
     // Handle failed downloads (e.g., unknown format)

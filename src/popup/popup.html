@@ -138,7 +138,7 @@
       min-height: 0;
     }
 
-    #manualHlsContent {
+    #manifestContent {
       flex: 1;
       overflow-y: auto;
       padding: 20px;
@@ -706,7 +706,7 @@
   <!-- Tabs -->
   <div class="tabs">
     <button id="autoDetectTab" class="tab active" data-tab="auto">Auto Detect</button>
-    <button id="manualHlsTab" class="tab" data-tab="manual">HLS</button>
+    <button id="manifestTab" class="tab" data-tab="manual" title="This tab is intended to download from manifest links of HLS or DASH streaming protocols">Manifest</button>
     <button id="themeToggle" class="theme-toggle" title="Toggle theme">
       <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="5"></circle>
@@ -775,13 +775,13 @@
   </div>
   </div>
 
-  <!-- Manual HLS Tab Content -->
-  <div id="manualHlsContent" class="tab-content">
+  <!-- Manifest Tab Content -->
+  <div id="manifestContent" class="tab-content">
     <div style="display: flex; flex-direction: column; height: 100%;">
       <div style="flex: 1; overflow-y: auto; padding: 20px;">
         <div class="hls-quality-form-group">
           <div style="display: flex; gap: 8px;">
-            <input type="text" id="hlsUrlInput" class="hls-quality-input" placeholder="Enter HLS playlist URL (.m3u8)" style="flex: 1;">
+            <input type="text" id="manifestUrlInput" class="hls-quality-input" placeholder="Enter manifest URL (HLS .m3u8 or DASH .mpd)" style="flex: 1;">
             <button id="loadHlsPlaylistBtn" class="primary-btn">Load</button>
           </div>
         </div>
@@ -805,7 +805,7 @@
         </div>
       </div>
       <!-- Download Progress Display -->
-      <div id="manualHlsProgress" style="display: none; padding: 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);"></div>
+      <div id="manifestProgress" style="display: none; padding: 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);"></div>
       <div style="padding: 16px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); flex-shrink: 0;">
         <button id="startHlsDownloadBtn" class="primary-btn" style="width: 100%;" disabled>Download</button>
       </div>

@@ -83,6 +83,7 @@ export class DownloadManager {
       videoPlaylistUrl?: string | null;
       audioPlaylistUrl?: string | null;
     },
+    isManual?: boolean,
   ): Promise<DownloadState> {
     const downloadId = this.generateDownloadId(url);
 
@@ -92,6 +93,7 @@ export class DownloadManager {
         downloadId,
         url,
         metadata,
+        isManual,
       );
 
       // Validate format from metadata (should already be set by detection)
@@ -166,6 +168,7 @@ export class DownloadManager {
     downloadId: string,
     url: string,
     metadata: VideoMetadata,
+    isManual?: boolean,
   ): Promise<DownloadState> {
     const state: DownloadState = {
       id: downloadId,
@@ -176,6 +179,7 @@ export class DownloadManager {
         stage: "detecting",
         percentage: 0,
       },
+      isManual,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

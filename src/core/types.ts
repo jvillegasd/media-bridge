@@ -56,6 +56,7 @@ export interface DownloadState {
   progress: DownloadProgress;
   localPath?: string;
   cloudId?: string;
+  isManual?: boolean; // Indicates if download was started from manual/manifest tab
   createdAt: number;
   updatedAt: number;
 }
