@@ -810,15 +810,6 @@ function renderDetectedVideos() {
         </div>
         ${progressBar}
         ${
-          isFailed && !isCancelled && downloadState.progress.error
-            ? `
-          <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
-            ${escapeHtml(downloadState.progress.error)}
-          </div>
-        `
-            : ""
-        }
-        ${
           !isDownloading
             ? `
           <div style="display: flex; gap: 6px; margin-top: 6px;">
@@ -1173,15 +1164,6 @@ function renderDownloadItem(download: DownloadState): string {
           ${dateText}
         </div>
         ${progressBar}
-        ${
-          isFailed && !isCancelled && download.progress.error
-            ? `
-          <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
-            ${escapeHtml(download.progress.error)}
-          </div>
-        `
-            : ""
-        }
         ${actionButtons}
       </div>
     </div>
