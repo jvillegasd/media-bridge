@@ -4,7 +4,13 @@
  */
 
 import { DownloadManager } from "./core/downloader/download-manager";
-import { DownloadStateManager } from "./core/storage/download-state";
+import {
+  getAllDownloads,
+  getDownload,
+  getDownloadByUrl,
+  storeDownload,
+  deleteDownload,
+} from "./core/storage/indexeddb-downloads";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { MessageType } from "./shared/messages";
 import { DownloadState, StorageConfig, VideoMetadata } from "./core/types";
@@ -76,7 +82,7 @@ async function handleGetDownloadsMessage(): Promise<{
   error?: string;
 }> {
   try {
-    const downloads = await DownloadStateManager.getAllDownloads();
+    const downloads = await getAllDownloads();
     return { success: true, data: downloads };
   } catch (error) {
     logger.error("Get downloads error:", error);
@@ -336,11 +342,11 @@ async function handleDownloadRequest(payload: {
     isManual,
   } = payload;
   const normalizedUrl = normalizeUrl(url);
-  const existing = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
+  const existing = await getDownloadByUrl(normalizedUrl);
 
   if (existing && existing.progress.stage === "completed") {
     logger.info(`Redownloading completed video: ${normalizedUrl}`);
-    await DownloadStateManager.removeDownload(existing.id);
+    await deleteDownload(existing.id);
   }
 
   if (existing && existing.progress.stage === "cancelled") {
@@ -353,7 +359,7 @@ async function handleDownloadRequest(payload: {
 
   if (existing && existing.progress.stage === "failed") {
     logger.info(`Retrying failed download: ${normalizedUrl}`);
-    await DownloadStateManager.removeDownload(existing.id);
+    await deleteDownload(existing.id);
   }
 
   if (activeDownloads.has(normalizedUrl)) {
@@ -371,14 +377,14 @@ async function handleDownloadRequest(payload: {
     maxConcurrent,
     onProgress: async (state) => {
       // Check if download was cancelled before updating state
-      const currentState = await DownloadStateManager.getDownload(state.id);
+      const currentState = await getDownload(state.id);
       if (currentState && currentState.progress.stage === "cancelled") {
         // Download was cancelled, don't update state
         logger.info(`Download ${state.id} was cancelled, ignoring progress update`);
         return;
       }
 
-      await DownloadStateManager.saveDownload(state);
+      await storeDownload(state);
       // Send progress update - handle errors gracefully (popup might be closed)
       try {
         chrome.runtime.sendMessage(
@@ -419,7 +425,7 @@ async function handleDownloadRequest(payload: {
     .then(async () => {
       activeDownloads.delete(normalizedUrl);
       // Check if download was cancelled before marking as complete
-      const finalState = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
+      const finalState = await getDownloadByUrl(normalizedUrl);
       if (finalState && finalState.progress.stage === "cancelled") {
         logger.info(`Download ${normalizedUrl} was cancelled, not marking as complete`);
         return;
@@ -429,7 +435,7 @@ async function handleDownloadRequest(payload: {
       logger.error(`Download failed for ${url}:`, error);
       activeDownloads.delete(normalizedUrl);
       // Check if download was cancelled - if so, don't update error
-      const finalState = await DownloadStateManager.getDownloadByUrl(normalizedUrl);
+      const finalState = await getDownloadByUrl(normalizedUrl);
       if (finalState && finalState.progress.stage === "cancelled") {
         logger.info(`Download ${normalizedUrl} was cancelled, keeping cancellation status`);
         return;
@@ -554,7 +560,7 @@ async function startDownload(
  * Removes from active downloads map, cancels Chrome downloads, and marks state as failed
  */
 async function handleCancelDownload(id: string) {
-  const download = await DownloadStateManager.getDownload(id);
+  const download = await getDownload(id);
   if (!download) {
     return;
   }
@@ -626,7 +632,7 @@ async function handleCancelDownload(id: string) {
   // Mark download as cancelled
   download.progress.stage = "cancelled";
   download.progress.error = "Cancelled by user";
-  await DownloadStateManager.saveDownload(download);
+  await storeDownload(download);
 
   logger.info(`Download cancelled: ${id}`);
 }

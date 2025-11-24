@@ -8,7 +8,12 @@ import {
   VideoFormat,
   Level,
 } from "../core/types";
-import { DownloadStateManager } from "../core/storage/download-state";
+import {
+  getAllDownloads,
+  getDownload,
+  deleteDownload,
+  clearAllDownloads,
+} from "../core/storage/indexeddb-downloads";
 import { MessageType } from "../shared/messages";
 import { normalizeUrl, detectFormatFromUrl } from "../core/utils/url-utils";
 import {
@@ -350,7 +355,7 @@ async function handleClearCompleted() {
     }
 
     // Get all downloads
-    const allDownloads = await DownloadStateManager.getAllDownloads();
+    const allDownloads = await getAllDownloads();
 
     // Filter completed downloads
     const completedDownloads = allDownloads.filter(
@@ -376,7 +381,7 @@ async function handleClearCompleted() {
 
     // Remove all completed downloads
     for (const download of completedDownloads) {
-      await DownloadStateManager.removeDownload(download.id);
+      await deleteDownload(download.id);
     }
 
     // Reload states and refresh UI
@@ -590,7 +595,7 @@ function addDetectedVideo(video: VideoMetadata) {
  * Load download states
  */
 async function loadDownloadStates() {
-  downloadStates = await DownloadStateManager.getAllDownloads();
+  downloadStates = await getAllDownloads();
 }
 
 /**
@@ -1185,7 +1190,7 @@ function renderDownloadItem(download: DownloadState): string {
  */
 async function handleOpenDownload(downloadId: string) {
   try {
-    const download = await DownloadStateManager.getDownload(downloadId);
+    const download = await getDownload(downloadId);
     if (!download || !download.localPath) {
       alert("Download file not found");
       return;
@@ -1224,7 +1229,7 @@ async function handleOpenDownload(downloadId: string) {
  */
 async function handleRemoveDownload(downloadId: string) {
   try {
-    const download = await DownloadStateManager.getDownload(downloadId);
+    const download = await getDownload(downloadId);
     if (!download) {
       return;
     }
@@ -1272,7 +1277,7 @@ async function handleRemoveDownload(downloadId: string) {
         return;
       }
 
-      await DownloadStateManager.removeDownload(downloadId);
+      await deleteDownload(downloadId);
       await loadDownloadStates();
       renderDownloads();
     }
@@ -1287,7 +1292,7 @@ async function handleRemoveDownload(downloadId: string) {
  */
 async function handleRetryDownload(downloadId: string) {
   try {
-    const download = await DownloadStateManager.getDownload(downloadId);
+    const download = await getDownload(downloadId);
     if (!download) {
       alert("Download not found");
       return;
@@ -1315,7 +1320,7 @@ async function handleRetryDownload(downloadId: string) {
     const tabTitle = download.metadata.title;
 
     // Remove the failed download state
-    await DownloadStateManager.removeDownload(downloadId);
+    await deleteDownload(downloadId);
 
     // Start a new download with the same metadata
     const response = await new Promise<any>((resolve, reject) => {

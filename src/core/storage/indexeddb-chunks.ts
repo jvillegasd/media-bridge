@@ -5,9 +5,10 @@
 
 import { logger } from "../utils/logger";
 
-const DB_NAME = "media-bridge-chunks";
-const DB_VERSION = 1;
+const DB_NAME = "media-bridge";
+const DB_VERSION = 2;
 const STORE_NAME = "chunks";
+const DOWNLOADS_STORE_NAME = "downloads";
 
 interface ChunkRecord {
   downloadId: string;
@@ -32,12 +33,22 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      // Create chunks store if it doesn't exist
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME, {
           keyPath: ["downloadId", "index"],
         });
         store.createIndex("downloadId", "downloadId", { unique: false });
         store.createIndex("index", "index", { unique: false });
+      }
+      // Create downloads store if it doesn't exist
+      if (!db.objectStoreNames.contains(DOWNLOADS_STORE_NAME)) {
+        const downloadsStore = db.createObjectStore(DOWNLOADS_STORE_NAME, {
+          keyPath: "id",
+        });
+        downloadsStore.createIndex("url", "url", { unique: false });
+        downloadsStore.createIndex("updatedAt", "updatedAt", { unique: false });
+        downloadsStore.createIndex("createdAt", "createdAt", { unique: false });
       }
     };
   });

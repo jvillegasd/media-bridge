@@ -4,7 +4,11 @@
  */
 
 import { VideoFormat, VideoMetadata, DownloadState } from "../types";
-import { DownloadStateManager } from "../storage/download-state";
+import {
+  getDownload,
+  storeDownload,
+  updateDownloadProgress,
+} from "../storage/indexeddb-downloads";
 import { DownloadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";
@@ -111,7 +115,7 @@ export class DownloadManager {
       const format = metadata.format;
       state.progress.stage = "downloading";
       state.progress.message = `Format: ${format}`;
-      await DownloadStateManager.saveDownload(state);
+      await storeDownload(state);
       this.notifyProgress(state);
 
       // metadata.url is always the actual video URL
@@ -145,7 +149,7 @@ export class DownloadManager {
       }
 
       // Get final state (may have been updated by progress tracking)
-      const finalState = await DownloadStateManager.getDownload(state.id);
+      const finalState = await getDownload(state.id);
       return finalState || state;
     } catch (error) {
       logger.error("Download failed:", error);
@@ -184,7 +188,7 @@ export class DownloadManager {
       updatedAt: Date.now(),
     };
 
-    await DownloadStateManager.saveDownload(state);
+    await storeDownload(state);
     this.notifyProgress(state);
 
     return state;
@@ -216,7 +220,7 @@ export class DownloadManager {
       updatedAt: Date.now(),
     };
 
-    await DownloadStateManager.saveDownload(failedState);
+    await storeDownload(failedState);
     this.notifyProgress(failedState);
 
     return failedState;

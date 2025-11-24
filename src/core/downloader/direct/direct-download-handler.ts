@@ -16,7 +16,7 @@
  */
 
 import { DownloadError } from "../../utils/errors";
-import { DownloadStateManager } from "../../storage/download-state";
+import { getDownload, storeDownload } from "../../storage/indexeddb-downloads";
 import { DownloadState } from "../../types";
 import { logger } from "../../utils/logger";
 import {
@@ -145,7 +145,7 @@ export class DirectDownloadHandler {
       return;
     }
 
-    const currentState = await DownloadStateManager.getDownload(stateId);
+    const currentState = await getDownload(stateId);
     if (!currentState) {
       return;
     }
@@ -160,7 +160,7 @@ export class DirectDownloadHandler {
     currentState.progress.stage = "downloading";
     currentState.progress.message = "Downloading...";
 
-    await DownloadStateManager.saveDownload(currentState);
+    await storeDownload(currentState);
     this.notifyProgress(currentState);
   }
 
@@ -285,7 +285,7 @@ export class DirectDownloadHandler {
     result: DirectDownloadResult,
     fileExtension?: string,
   ): Promise<void> {
-    const currentState = await DownloadStateManager.getDownload(stateId);
+    const currentState = await getDownload(stateId);
     if (!currentState) {
       return;
     }
@@ -308,7 +308,7 @@ export class DirectDownloadHandler {
     }
 
     currentState.updatedAt = Date.now();
-    await DownloadStateManager.saveDownload(currentState);
+    await storeDownload(currentState);
     this.notifyProgress(currentState);
   }
 
