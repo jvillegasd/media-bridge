@@ -13,7 +13,7 @@ export interface VideoMetadata {
   width?: number;
   height?: number;
   resolution?: string; // e.g., "1920x1080", "1080p"
-  pageUrl?: string; // URL of the page where video was detected
+  pageUrl: string; // URL of the page where video was detected
   thumbnail?: string; // Thumbnail/preview image URL
   videoId?: string; // Unique identifier for this video instance
   fileExtension?: string; // Detected file extension (e.g., "mp4", "webm")
@@ -38,7 +38,8 @@ export interface DownloadProgress {
     | "saving"
     | "uploading"
     | "completed"
-    | "failed";
+    | "failed"
+    | "cancelled";
   downloaded?: number;
   total?: number;
   percentage?: number;

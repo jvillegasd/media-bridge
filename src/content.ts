@@ -128,7 +128,7 @@ function addDetectedVideo(video: VideoMetadata) {
       updated = true;
     }
 
-    if (video.pageUrl && video.pageUrl !== existing.pageUrl) {
+    if (video.pageUrl !== existing.pageUrl) {
       existing.pageUrl = video.pageUrl;
       updated = true;
     }

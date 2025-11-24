@@ -28,8 +28,11 @@ let downloadsBtn: HTMLButtonElement | null = null;
 let clearCompletedBtn: HTMLButtonElement | null = null;
 let autoDetectTab: HTMLButtonElement | null = null;
 let manifestTab: HTMLButtonElement | null = null;
+let downloadsTab: HTMLButtonElement | null = null;
 let autoDetectContent: HTMLDivElement | null = null;
 let manifestContent: HTMLDivElement | null = null;
+let downloadsContent: HTMLDivElement | null = null;
+let downloadsList: HTMLDivElement | null = null;
 let startManifestDownloadBtn: HTMLButtonElement | null = null;
 let loadManifestPlaylistBtn: HTMLButtonElement | null = null;
 let videoQualitySelect: HTMLSelectElement | null = null;
@@ -71,12 +74,17 @@ async function init() {
   ) as HTMLButtonElement;
   autoDetectTab = document.getElementById("autoDetectTab") as HTMLButtonElement;
   manifestTab = document.getElementById("manifestTab") as HTMLButtonElement;
+  downloadsTab = document.getElementById("downloadsTab") as HTMLButtonElement;
   autoDetectContent = document.getElementById(
     "autoDetectContent",
   ) as HTMLDivElement;
   manifestContent = document.getElementById(
     "manifestContent",
   ) as HTMLDivElement;
+  downloadsContent = document.getElementById(
+    "downloadsContent",
+  ) as HTMLDivElement;
+  downloadsList = document.getElementById("downloadsList") as HTMLDivElement;
   startManifestDownloadBtn = document.getElementById(
     "startHlsDownloadBtn",
   ) as HTMLButtonElement;
@@ -143,6 +151,9 @@ async function init() {
   if (manifestTab) {
     manifestTab.addEventListener("click", async () => await switchTab("manual"));
   }
+  if (downloadsTab) {
+    downloadsTab.addEventListener("click", async () => await switchTab("downloads"));
+  }
   if (startManifestDownloadBtn) {
     startManifestDownloadBtn.addEventListener("click", handleStartManifestDownload);
   }
@@ -183,13 +194,13 @@ async function init() {
       if (message.type === MessageType.DOWNLOAD_PROGRESS) {
         await loadDownloadStates();
         renderDetectedVideos();
-        renderManualManifestProgress();
+        renderDownloads();
         updateManualManifestFormState();
       }
       if (message.type === MessageType.DOWNLOAD_COMPLETE) {
         await loadDownloadStates();
         renderDetectedVideos();
-        renderManualManifestProgress();
+        renderDownloads();
         updateManualManifestFormState();
       }
       if (message.type === MessageType.VIDEO_DETECTED) {
@@ -205,7 +216,7 @@ async function init() {
       if (message.type === MessageType.DOWNLOAD_FAILED) {
         await loadDownloadStates();
         renderDetectedVideos();
-        renderManualManifestProgress();
+        renderDownloads();
         updateManualManifestFormState();
         // Log error for debugging
         if (message.payload && message.payload.error) {
@@ -220,6 +231,7 @@ async function init() {
   // Load data
   await loadDownloadStates();
   renderDetectedVideos();
+  renderDownloads();
 
   // Get detected videos from current tab
   await requestDetectedVideos();
@@ -228,20 +240,18 @@ async function init() {
   // This ensures the UI shows current download progress when reopened
   document.addEventListener("visibilitychange", async () => {
     if (!document.hidden) {
-      // Popup became visible - refresh download states and restore manual state
+      // Popup became visible - refresh download states
       await loadDownloadStates();
-      await restoreManualDownloadState();
       renderDetectedVideos();
-      renderManualManifestProgress();
+      renderDownloads();
     }
   });
 
   // Also refresh on window focus (for better compatibility)
   window.addEventListener("focus", async () => {
     await loadDownloadStates();
-    await restoreManualDownloadState();
     renderDetectedVideos();
-    renderManualManifestProgress();
+    renderDownloads();
   });
 
   // Periodic refresh while popup is open (every 2 seconds)
@@ -250,7 +260,7 @@ async function init() {
     if (!document.hidden) {
       await loadDownloadStates();
       renderDetectedVideos();
-      renderManualManifestProgress();
+      renderDownloads();
       updateManualManifestFormState();
     }
   }, 2000);
@@ -464,7 +474,7 @@ async function requestDetectedVideos() {
         const currentUrl = tab.url || "";
         const filteredVideos: Record<string, VideoMetadata> = {};
         for (const [url, video] of Object.entries(detectedVideos)) {
-          if (!video.pageUrl || !video.pageUrl.includes(currentUrl)) {
+          if (!video.pageUrl.includes(currentUrl)) {
             filteredVideos[url] = video;
           }
         }
@@ -619,11 +629,16 @@ function renderDetectedVideos() {
       const isDownloading =
         downloadState &&
         downloadState.progress.stage !== "completed" &&
-        downloadState.progress.stage !== "failed";
+        downloadState.progress.stage !== "failed" &&
+        downloadState.progress.stage !== "cancelled";
       const isCompleted =
         downloadState && downloadState.progress.stage === "completed";
       const isFailed =
-        downloadState && downloadState.progress.stage === "failed";
+        downloadState &&
+        (downloadState.progress.stage === "failed" ||
+          downloadState.progress.stage === "cancelled");
+      const isCancelled =
+        downloadState && downloadState.progress.stage === "cancelled";
       const actualFormat = getActualFileFormat(video, downloadState);
 
       const displayResolution = (video.resolution || "").trim();
@@ -785,18 +800,12 @@ function renderDetectedVideos() {
               : ""
           }
         </div>
-        ${
-          video.pageUrl
-            ? `
-          <div style="font-size: 11px; color: #b0b0b0; margin-top: 4px;">
-            From: ${escapeHtml(new URL(video.pageUrl).hostname)}
-          </div>
-        `
-            : ""
-        }
+        <div style="font-size: 11px; color: #b0b0b0; margin-top: 4px;">
+          From: ${escapeHtml(new URL(video.pageUrl).hostname)}
+        </div>
         ${progressBar}
         ${
-          isFailed && downloadState.progress.error
+          isFailed && !isCancelled && downloadState.progress.error
             ? `
           <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
             ${escapeHtml(downloadState.progress.error)}
@@ -854,6 +863,492 @@ function renderDetectedVideos() {
       handleSendToManifestTab(url);
     });
   });
+}
+
+/**
+ * Render downloads list (in-progress and completed)
+ */
+function renderDownloads() {
+  if (!downloadsList) return;
+
+  // Separate downloads into in-progress and completed
+  const inProgress = downloadStates.filter(
+    (d) =>
+      d.progress.stage !== "completed" &&
+      d.progress.stage !== "failed" &&
+      d.progress.stage !== "cancelled",
+  );
+  const completed = downloadStates.filter(
+    (d) => d.progress.stage === "completed",
+  );
+  const failed = downloadStates.filter(
+    (d) => d.progress.stage === "failed" || d.progress.stage === "cancelled",
+  );
+
+  // Sort by updatedAt (most recent first)
+  inProgress.sort((a, b) => b.updatedAt - a.updatedAt);
+  completed.sort((a, b) => b.updatedAt - a.updatedAt);
+  failed.sort((a, b) => b.updatedAt - a.updatedAt);
+
+  if (inProgress.length === 0 && completed.length === 0 && failed.length === 0) {
+    downloadsList.innerHTML = `
+      <div class="empty-state">
+        No downloads yet.<br>
+        Start downloading videos from the Videos tab.
+      </div>
+    `;
+    return;
+  }
+
+  let html = "";
+
+  // Render in-progress downloads
+  if (inProgress.length > 0) {
+    html += `<div style="margin-bottom: 16px;">
+      <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+        In Progress (${inProgress.length})
+      </div>`;
+
+    inProgress.forEach((download) => {
+      html += renderDownloadItem(download);
+    });
+
+    html += `</div>`;
+  }
+
+  // Render completed downloads
+  if (completed.length > 0) {
+    html += `<div style="margin-bottom: 16px;">
+      <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+        Completed (${completed.length})
+      </div>`;
+
+    completed.forEach((download) => {
+      html += renderDownloadItem(download);
+    });
+
+    html += `</div>`;
+  }
+
+  // Render failed downloads
+  if (failed.length > 0) {
+    html += `<div style="margin-bottom: 16px;">
+      <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+        Failed (${failed.length})
+      </div>`;
+
+    failed.forEach((download) => {
+      html += renderDownloadItem(download);
+    });
+
+    html += `</div>`;
+  }
+
+  downloadsList.innerHTML = html;
+
+  // Add event listeners for buttons
+  downloadsList.querySelectorAll(".download-open-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const button = e.target as HTMLButtonElement;
+      const downloadId = button.getAttribute("data-download-id")!;
+      await handleOpenDownload(downloadId);
+    });
+  });
+
+  downloadsList.querySelectorAll(".download-remove-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const button = e.target as HTMLButtonElement;
+      const downloadId = button.getAttribute("data-download-id")!;
+      await handleRemoveDownload(downloadId);
+    });
+  });
+
+  downloadsList.querySelectorAll(".download-retry-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const button = e.target as HTMLButtonElement;
+      const downloadId = button.getAttribute("data-download-id")!;
+      await handleRetryDownload(downloadId);
+    });
+  });
+}
+
+/**
+ * Render a single download item
+ */
+function renderDownloadItem(download: DownloadState): string {
+  const isInProgress =
+    download.progress.stage !== "completed" &&
+    download.progress.stage !== "failed" &&
+    download.progress.stage !== "cancelled";
+  const isCompleted = download.progress.stage === "completed";
+  const isFailed =
+    download.progress.stage === "failed" ||
+    download.progress.stage === "cancelled";
+  const isCancelled = download.progress.stage === "cancelled";
+
+  const title =
+    download.metadata.title ||
+    getVideoTitleFromUrl(download.metadata.url);
+  const stage = download.progress.stage;
+  const statusBadge = `<span class="video-status status-${stage}">${getStatusText(
+    stage,
+  )}</span>`;
+
+  let progressBar = "";
+  const isManifestDownload =
+    (download.metadata.format === "hls" ||
+      download.metadata.format === "m3u8") &&
+    (stage === "downloading" || stage === "merging");
+
+  if (isInProgress && isManifestDownload) {
+    const percentage = download.progress.percentage || 0;
+
+    if (stage === "downloading") {
+      const downloaded = download.progress.downloaded || 0;
+      const total = download.progress.total || 0;
+      const speed = download.progress.speed || 0;
+
+      const downloadedText = formatFileSize(downloaded);
+      const totalText = total > 0 ? formatFileSize(total) : "?";
+      const speedText = formatSpeed(speed);
+
+      progressBar = `
+        <div class="manifest-progress-container">
+          <div class="manifest-progress-bar-wrapper">
+            <div class="manifest-progress-bar" style="width: ${Math.min(
+              percentage,
+              100,
+            )}%"></div>
+          </div>
+          <div class="manifest-progress-info">
+            <span class="manifest-progress-size">${downloadedText} / ${totalText}</span>
+            ${
+              speed > 0
+                ? `<span class="manifest-progress-speed">${speedText}</span>`
+                : ""
+            }
+          </div>
+        </div>
+      `;
+    } else if (stage === "merging") {
+      const message = download.progress.message || "Merging streams...";
+      const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
+
+      progressBar = `
+        <div class="manifest-progress-container">
+          <div class="manifest-progress-bar-wrapper">
+            <div class="manifest-progress-bar" style="width: ${mergingPercentage}%"></div>
+          </div>
+          <div class="manifest-progress-info">
+            <span class="manifest-progress-size">${message}</span>
+            <span class="manifest-progress-speed">${Math.round(
+              mergingPercentage,
+            )}%</span>
+          </div>
+        </div>
+      `;
+    }
+  } else if (isInProgress) {
+    const fileSize = download.progress.total;
+    const fileSizeText = fileSize ? formatFileSize(fileSize) : "";
+
+    progressBar = `
+      <div class="downloading-label">
+        <span class="downloading-dots">
+          <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+        </span>
+        ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ""}
+      </div>
+    `;
+  }
+
+  const displayResolution = (download.metadata.resolution || "").trim();
+  const displayWidth = download.metadata.width;
+  const displayHeight = download.metadata.height;
+  const displayDimensions =
+    !displayResolution && displayWidth && displayHeight
+      ? `${displayWidth}x${displayHeight}`
+      : "";
+
+  const actualFormat = getActualFileFormat(download.metadata, download);
+
+  // Format date
+  const date = new Date(download.updatedAt);
+  const dateText = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  let actionButtons = "";
+  if (isCompleted && download.localPath) {
+    actionButtons = `
+      <div style="display: flex; gap: 6px; margin-top: 6px;">
+        <button class="video-btn download-open-btn" data-download-id="${download.id}">
+          Open File
+        </button>
+        <button class="video-btn-manifest download-remove-btn" data-download-id="${download.id}">
+          Remove
+        </button>
+      </div>
+    `;
+  } else if (isFailed) {
+    actionButtons = `
+      <div style="display: flex; gap: 6px; margin-top: 6px;">
+        <button class="video-btn download-retry-btn" data-download-id="${download.id}">
+          Retry
+        </button>
+        <button class="video-btn-manifest download-remove-btn" data-download-id="${download.id}">
+          Remove
+        </button>
+      </div>
+    `;
+  } else if (isInProgress) {
+    actionButtons = `
+      <div style="display: flex; gap: 6px; margin-top: 6px;">
+        <button class="video-btn-manifest download-remove-btn" data-download-id="${download.id}">
+          Cancel
+        </button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="download-item">
+      <div class="video-item-preview">
+        ${
+          download.metadata.thumbnail
+            ? `
+          <img src="${escapeHtml(download.metadata.thumbnail)}" 
+               alt="Video preview" 
+               onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>🎬</div>'"
+               loading="lazy">
+        `
+            : `
+          <div class="no-thumbnail">🎬</div>
+        `
+        }
+      </div>
+      <div class="video-item-content">
+        <div class="download-item-header">
+          <div class="download-item-title" title="${escapeHtml(
+            download.metadata.url,
+          )}">
+            ${escapeHtml(title)}
+          </div>
+          ${statusBadge}
+        </div>
+        <div class="video-meta">
+          ${
+            displayResolution
+              ? `<span class="video-resolution">${escapeHtml(
+                  displayResolution,
+                )}</span>`
+              : ""
+          }
+          ${
+            displayDimensions
+              ? `<span class="video-resolution">${displayDimensions}</span>`
+              : ""
+          }
+          <span class="video-link-type">${escapeHtml(
+            getLinkTypeDisplayName(download.metadata.format),
+          )}</span>
+          <span class="video-format">${escapeHtml(
+            getFormatDisplayName(download.metadata.format, actualFormat),
+          )}</span>
+          ${
+            download.metadata.duration
+              ? `<span style="color: #999; margin-left: 4px;">⏱ ${formatDuration(
+                  download.metadata.duration,
+                )}</span>`
+              : ""
+          }
+        </div>
+        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+          ${dateText}
+        </div>
+        ${progressBar}
+        ${
+          isFailed && !isCancelled && download.progress.error
+            ? `
+          <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
+            ${escapeHtml(download.progress.error)}
+          </div>
+        `
+            : ""
+        }
+        ${actionButtons}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Handle opening a downloaded file
+ */
+async function handleOpenDownload(downloadId: string) {
+  try {
+    const download = await DownloadStateManager.getDownload(downloadId);
+    if (!download || !download.localPath) {
+      alert("Download file not found");
+      return;
+    }
+
+    // Use chrome.downloads API to open the file
+    // First, we need to find the download item by filename
+    const filename = download.localPath.split(/[/\\]/).pop();
+    if (!filename) {
+      alert("Could not determine filename");
+      return;
+    }
+
+    // Search for the download item
+    const downloads = await new Promise<chrome.downloads.DownloadItem[]>(
+      (resolve) => {
+        chrome.downloads.search({ filenameRegex: filename }, resolve);
+      },
+    );
+
+    if (downloads.length > 0) {
+      // Open the most recent matching download
+      chrome.downloads.show(downloads[0].id);
+    } else {
+      // Fallback: try to open the folder
+      await chrome.downloads.showDefaultFolder();
+    }
+  } catch (error) {
+    console.error("Failed to open download:", error);
+    alert("Failed to open download file");
+  }
+}
+
+/**
+ * Handle removing a download
+ */
+async function handleRemoveDownload(downloadId: string) {
+  try {
+    const download = await DownloadStateManager.getDownload(downloadId);
+    if (!download) {
+      return;
+    }
+
+    const isInProgress =
+      download.progress.stage !== "completed" &&
+      download.progress.stage !== "failed";
+
+    if (isInProgress) {
+      // Cancel the download if it's in progress
+      if (!confirm("Are you sure you want to cancel this download?")) {
+        return;
+      }
+
+      try {
+        const response = await new Promise<any>((resolve, reject) => {
+          chrome.runtime.sendMessage(
+            {
+              type: MessageType.CANCEL_DOWNLOAD,
+              payload: { id: downloadId },
+            },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+              }
+              resolve(response);
+            },
+          );
+        });
+
+        if (response && response.success) {
+          await loadDownloadStates();
+          renderDownloads();
+        } else if (response && response.error) {
+          alert(response.error);
+        }
+      } catch (error: any) {
+        console.error("Failed to cancel download:", error);
+        alert("Failed to cancel download: " + (error?.message || "Unknown error"));
+      }
+    } else {
+      // Remove completed or failed download
+      if (!confirm("Are you sure you want to remove this download?")) {
+        return;
+      }
+
+      await DownloadStateManager.removeDownload(downloadId);
+      await loadDownloadStates();
+      renderDownloads();
+    }
+  } catch (error) {
+    console.error("Failed to remove download:", error);
+    alert("Failed to remove download");
+  }
+}
+
+/**
+ * Handle retrying a failed download
+ */
+async function handleRetryDownload(downloadId: string) {
+  try {
+    const download = await DownloadStateManager.getDownload(downloadId);
+    if (!download) {
+      alert("Download not found");
+      return;
+    }
+
+    // Use original download's metadata for filename generation
+    // Extract website from pageUrl, otherwise from video URL
+    let website: string | undefined;
+    try {
+      const urlObj = new URL(download.metadata.pageUrl);
+      website = urlObj.hostname.replace(/^www\./, "");
+    } catch {
+      // If pageUrl parsing fails, fall back to video URL
+      if (download.url) {
+        try {
+          const urlObj = new URL(download.url);
+          website = urlObj.hostname.replace(/^www\./, "");
+        } catch {
+          // Ignore URL parsing errors
+        }
+      }
+    }
+
+    // Use metadata title as tabTitle for filename generation
+    const tabTitle = download.metadata.title;
+
+    // Remove the failed download state
+    await DownloadStateManager.removeDownload(downloadId);
+
+    // Start a new download with the same metadata
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.DOWNLOAD_REQUEST,
+          payload: {
+            url: download.url,
+            metadata: download.metadata,
+            tabTitle,
+            website,
+          },
+        },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(response);
+        },
+      );
+    });
+
+    if (response && response.success) {
+      await loadDownloadStates();
+      renderDownloads();
+    } else if (response && response.error) {
+      alert(response.error);
+    }
+  } catch (error: any) {
+    console.error("Failed to retry download:", error);
+    alert("Failed to retry download: " + (error?.message || "Unknown error"));
+  }
 }
 /**
  * Start download for a video URL
@@ -1018,6 +1513,7 @@ function getStatusText(stage: string): string {
     uploading: "Uploading",
     completed: "Completed",
     failed: "Failed",
+    cancelled: "Cancelled",
   };
 
   return statusMap[stage] || stage;
@@ -1224,23 +1720,35 @@ function formatQualityLabel(level: Level): string {
 /**
  * Switch between tabs
  */
-async function switchTab(tabName: "auto" | "manual") {
+async function switchTab(tabName: "auto" | "manual" | "downloads") {
   if (tabName === "auto") {
     if (autoDetectTab) autoDetectTab.classList.add("active");
     if (manifestTab) manifestTab.classList.remove("active");
+    if (downloadsTab) downloadsTab.classList.remove("active");
     if (autoDetectContent) autoDetectContent.classList.add("active");
     if (manifestContent) manifestContent.classList.remove("active");
-  } else {
+    if (downloadsContent) downloadsContent.classList.remove("active");
+  } else if (tabName === "manual") {
     if (autoDetectTab) autoDetectTab.classList.remove("active");
     if (manifestTab) manifestTab.classList.add("active");
+    if (downloadsTab) downloadsTab.classList.remove("active");
     if (autoDetectContent) autoDetectContent.classList.remove("active");
     if (manifestContent) manifestContent.classList.add("active");
+    if (downloadsContent) downloadsContent.classList.remove("active");
 
-    // Render progress if there's an active download
-    // Restore manual download state when switching to manual tab
-    await restoreManualDownloadState();
-    renderManualManifestProgress();
+    // Update form state when switching to manual tab
     updateManualManifestFormState();
+  } else if (tabName === "downloads") {
+    if (autoDetectTab) autoDetectTab.classList.remove("active");
+    if (manifestTab) manifestTab.classList.remove("active");
+    if (downloadsTab) downloadsTab.classList.add("active");
+    if (autoDetectContent) autoDetectContent.classList.remove("active");
+    if (manifestContent) manifestContent.classList.remove("active");
+    if (downloadsContent) downloadsContent.classList.add("active");
+
+    // Refresh downloads when switching to downloads tab
+    await loadDownloadStates();
+    renderDownloads();
   }
 }
 
@@ -1303,151 +1811,6 @@ function updateManualManifestFormState() {
 
   // Enable button if at least one quality is selected
   startManifestDownloadBtn.disabled = !(videoSelected || audioSelected);
-}
-
-/**
- * Render manual manifest download progress
- */
-function renderManualManifestProgress() {
-  if (!manifestProgress || !currentManualManifestUrl) {
-    updateManualManifestFormState();
-    return;
-  }
-
-  const normalizedUrl = normalizeUrl(currentManualManifestUrl);
-  const downloadState = downloadStates.find((d) => {
-    if (!d.metadata) return false;
-    return normalizeUrl(d.metadata.url) === normalizedUrl;
-  });
-
-  if (!downloadState) {
-    if (manifestProgress) {
-      manifestProgress.style.display = "none";
-    }
-    updateManualManifestFormState();
-    return;
-  }
-
-  const isDownloading =
-    downloadState.progress.stage !== "completed" &&
-    downloadState.progress.stage !== "failed";
-  const isCompleted = downloadState.progress.stage === "completed";
-  const isFailed = downloadState.progress.stage === "failed";
-
-  if (!isDownloading && !isCompleted && !isFailed) {
-    if (manifestProgress) {
-      manifestProgress.style.display = "none";
-    }
-    updateManualManifestFormState();
-    return;
-  }
-
-  if (!manifestProgress) return;
-  manifestProgress.style.display = "block";
-
-  // Update form state based on download status
-  updateManualManifestFormState();
-
-  const stage = downloadState.progress.stage;
-  const statusBadge = `<span class="video-status status-${stage}">${getStatusText(
-    stage,
-  )}</span>`;
-
-  let progressBar = "";
-  const isManifestDownload =
-    (downloadState.metadata.format === "hls" ||
-      downloadState.metadata.format === "m3u8") &&
-    (stage === "downloading" || stage === "merging");
-
-  if (isDownloading && isManifestDownload) {
-    const percentage = downloadState.progress.percentage || 0;
-
-    if (stage === "downloading") {
-      const downloaded = downloadState.progress.downloaded || 0;
-      const total = downloadState.progress.total || 0;
-      const speed = downloadState.progress.speed || 0;
-
-      const downloadedText = formatFileSize(downloaded);
-      const totalText = total > 0 ? formatFileSize(total) : "?";
-      const speedText = formatSpeed(speed);
-
-      progressBar = `
-        <div class="manifest-progress-container">
-          <div class="manifest-progress-bar-wrapper">
-            <div class="manifest-progress-bar" style="width: ${Math.min(
-              percentage,
-              100,
-            )}%"></div>
-          </div>
-          <div class="manifest-progress-info">
-            <span class="manifest-progress-size">${downloadedText} / ${totalText}</span>
-            ${
-              speed > 0
-                ? `<span class="manifest-progress-speed">${speedText}</span>`
-                : ""
-            }
-          </div>
-        </div>
-      `;
-    } else if (stage === "merging") {
-      const message = downloadState.progress.message || "Merging streams...";
-      const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
-
-      progressBar = `
-        <div class="manifest-progress-container">
-          <div class="manifest-progress-bar-wrapper">
-            <div class="manifest-progress-bar" style="width: ${mergingPercentage}%"></div>
-          </div>
-          <div class="manifest-progress-info">
-            <span class="manifest-progress-size">${message}</span>
-            <span class="manifest-progress-speed">${Math.round(
-              mergingPercentage,
-            )}%</span>
-          </div>
-        </div>
-      `;
-    }
-  } else if (isDownloading) {
-    const fileSize = downloadState.progress.total;
-    const fileSizeText = fileSize ? formatFileSize(fileSize) : "";
-
-    progressBar = `
-      <div class="downloading-label">
-        <span class="downloading-dots">
-          <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-        </span>
-        ${fileSizeText ? `<span class="file-size">${fileSizeText}</span>` : ""}
-      </div>
-    `;
-  }
-
-  const title =
-    downloadState.metadata.title || getVideoTitleFromUrl(currentManualManifestUrl);
-
-  manifestProgress.innerHTML = `
-    <div class="video-item" style="margin: 0;">
-      <div class="video-item-content">
-        <div class="video-item-header">
-          <div class="video-item-title" title="${escapeHtml(
-            currentManualManifestUrl,
-          )}">
-            ${escapeHtml(title)}
-          </div>
-          ${statusBadge}
-        </div>
-        ${progressBar}
-        ${
-          isFailed && downloadState.progress.error
-            ? `
-          <div style="font-size: 11px; color: #ef5350; margin-top: 4px;">
-            ${escapeHtml(downloadState.progress.error)}
-          </div>
-        `
-            : ""
-        }
-      </div>
-    </div>
-  `;
 }
 
 /**
@@ -1671,6 +2034,7 @@ async function handleStartManifestDownload() {
     // Get current tab information for filename
     let tabTitle: string | undefined;
     let website: string | undefined;
+    let pageUrl: string = "";
     try {
       const [tab] = await chrome.tabs.query({
         active: true,
@@ -1679,6 +2043,7 @@ async function handleStartManifestDownload() {
       if (tab) {
         tabTitle = tab.title || undefined;
         if (tab.url) {
+          pageUrl = tab.url;
           try {
             const urlObj = new URL(tab.url);
             website = urlObj.hostname.replace(/^www\./, "");
@@ -1697,6 +2062,7 @@ async function handleStartManifestDownload() {
       url: playlistUrl,
       format: isMediaPlaylistMode ? "m3u8" : "hls",
       title: tabTitle || "Manifest Video",
+      pageUrl: pageUrl || window.location.href,
     };
 
     // Send download request with quality preferences
@@ -1729,12 +2095,22 @@ async function handleStartManifestDownload() {
     });
 
     if (response && response.success) {
-      // Store the URL to track progress
-      currentManualManifestUrl = playlistUrl;
-      // Don't reset form, show progress instead
-      // Don't switch tabs, keep user in manual manifest tab
+      // Clear the manual manifest URL so progress is no longer shown in manifest tab
+      currentManualManifestUrl = null;
+      // Hide progress in manifest tab
+      if (manifestProgress) {
+        manifestProgress.style.display = "none";
+      }
+      // Reset button text
+      if (startManifestDownloadBtn) {
+        startManifestDownloadBtn.textContent = "Download";
+      }
+      // Reset form state
+      updateManualManifestFormState();
+      // Load download states and switch to downloads tab
       await loadDownloadStates();
-      renderManualManifestProgress();
+      await switchTab("downloads");
+      renderDownloads();
     } else if (response && response.error) {
       alert(response.error);
       startManifestDownloadBtn.textContent = "Download";
@@ -1796,50 +2172,6 @@ function updateThemeIcon(isLightMode: boolean) {
       <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
       <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
     `;
-  }
-}
-
-/**
- * Find active manual download in progress
- */
-function findActiveManualDownload(): DownloadState | undefined {
-  return downloadStates.find((state) => {
-    const isManual = state.isManual === true;
-    const isInProgress = 
-      state.progress.stage !== "completed" && 
-      state.progress.stage !== "failed";
-    return isManual && isInProgress;
-  });
-}
-
-/**
- * Restore manual download state if there's an active manual download
- * Reuses existing loadDownloadStates() and renderManualManifestProgress() functions
- */
-async function restoreManualDownloadState() {
-  try {
-    // Check if there's an active manual download in progress
-    const activeManualDownload = findActiveManualDownload();
-
-    if (!activeManualDownload) {
-      return;
-    }
-
-    // Restore state - download was started from manual/manifest tab and is still active
-      const downloadUrl = activeManualDownload.metadata.url;
-      if (downloadUrl && manifestUrlInput) {
-        currentManualManifestUrl = downloadUrl;
-        manifestUrlInput.value = downloadUrl;
-      
-      // Restore playlist UI state using existing function
-      try {
-        await handleLoadManifestPlaylist();
-      } catch (error) {
-        console.debug("Failed to restore playlist:", error);
-      }
-    }
-  } catch (error) {
-    console.debug("Failed to restore manual download state:", error);
   }
 }
 

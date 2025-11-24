@@ -145,6 +145,12 @@
       min-height: 0;
     }
 
+    #downloadsContent {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
     .secondary-btn {
       padding: 8px 12px;
       border: 1px solid var(--border-color-light);
@@ -453,6 +459,7 @@
     .status-uploading { background: #1e3a2e; color: #66bb6a; }
     .status-completed { background: #1e3a2e; color: #66bb6a; }
     .status-failed { background: #4a1e1e; color: #ef5350; }
+    .status-cancelled { background: #4a1e1e; color: #ef5350; }
 
     /* Status badges - light mode */
     :root.light-mode .status-detecting { background: #e3f2fd; color: #1976d2; }
@@ -462,6 +469,7 @@
     :root.light-mode .status-uploading { background: #e8f5e9; color: #388e3c; }
     :root.light-mode .status-completed { background: #e8f5e9; color: #388e3c; }
     :root.light-mode .status-failed { background: #ffebee; color: #d32f2f; }
+    :root.light-mode .status-cancelled { background: #ffebee; color: #d32f2f; }
 
     .downloading-label {
       display: flex;
@@ -707,6 +715,7 @@
   <div class="tabs">
     <button id="autoDetectTab" class="tab active" data-tab="auto">Videos</button>
     <button id="manifestTab" class="tab" data-tab="manual" title="This tab is intended to download from manifest links of HLS or DASH streaming protocols">Manifest</button>
+    <button id="downloadsTab" class="tab" data-tab="downloads">Downloads</button>
     <button id="themeToggle" class="theme-toggle" title="Toggle theme">
       <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="5"></circle>
@@ -810,6 +819,11 @@
         <button id="startHlsDownloadBtn" class="primary-btn" style="width: 100%;" disabled>Download</button>
       </div>
     </div>
+  </div>
+
+  <!-- Downloads Tab Content -->
+  <div id="downloadsContent" class="tab-content">
+    <div id="downloadsList" style="flex: 1; overflow-y: auto; padding: 12px; min-height: 0;"></div>
   </div>
 
   <script type="module" src="./popup.ts"></script>

@@ -133,6 +133,15 @@ export class HlsDownloadHandler {
   }
 
   /**
+   * Check if download was cancelled
+   * @private
+   */
+  private async isCancelled(stateId: string): Promise<boolean> {
+    const state = await DownloadStateManager.getDownload(stateId);
+    return state !== null && state.progress.stage === "cancelled";
+  }
+
+  /**
    * Update download progress with bytes and speed calculation
    * @private
    */
@@ -142,6 +151,11 @@ export class HlsDownloadHandler {
     totalBytes: number,
     message?: string,
   ): Promise<void> {
+    // Check if cancelled before updating
+    if (await this.isCancelled(stateId)) {
+      throw new Error("Download was cancelled by user");
+    }
+
     const state = await DownloadStateManager.getDownload(stateId);
     if (!state) {
       return;
@@ -296,6 +310,11 @@ export class HlsDownloadHandler {
 
     const downloadNext = async (): Promise<void> => {
       while (currentIndex < totalFragments) {
+        // Check if download was cancelled
+        if (await this.isCancelled(stateId)) {
+          throw new Error("Download was cancelled by user");
+        }
+
         const fragmentIndex = currentIndex++;
         const fragment = fragments[fragmentIndex];
 
