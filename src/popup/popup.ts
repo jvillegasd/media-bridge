@@ -1221,7 +1221,8 @@ async function handleRemoveDownload(downloadId: string) {
 
     const isInProgress =
       download.progress.stage !== "completed" &&
-      download.progress.stage !== "failed";
+      download.progress.stage !== "failed" &&
+      download.progress.stage !== "cancelled";
 
     if (isInProgress) {
       // Cancel the download if it's in progress

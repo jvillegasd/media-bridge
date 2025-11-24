@@ -51,3 +51,13 @@ export class UploadError extends MediaBridgeError {
     this.name = "UploadError";
   }
 }
+
+/**
+ * Error thrown when a download is cancelled by the user
+ */
+export class CancellationError extends MediaBridgeError {
+  constructor(message: string = "Download was cancelled by user") {
+    super(message, "CANCELLATION_ERROR");
+    this.name = "CancellationError";
+  }
+}

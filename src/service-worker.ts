@@ -353,11 +353,15 @@ async function handleDownloadRequest(payload: {
     // Delete cancelled download to allow starting a new one
     logger.info(`Deleting cancelled download to allow new download: ${normalizedUrl}`);
     await deleteDownload(existing.id);
+    // Also ensure it's removed from activeDownloads map
+    activeDownloads.delete(normalizedUrl);
   }
 
   if (existing && existing.progress.stage === "failed") {
     logger.info(`Retrying failed download: ${normalizedUrl}`);
     await deleteDownload(existing.id);
+    // Also ensure it's removed from activeDownloads map
+    activeDownloads.delete(normalizedUrl);
   }
 
   if (activeDownloads.has(normalizedUrl)) {
@@ -421,7 +425,14 @@ async function handleDownloadRequest(payload: {
 
   downloadPromise
     .then(async () => {
+      // Check if this promise was already removed (cancelled)
+      if (!activeDownloads.has(normalizedUrl)) {
+        logger.info(`Download promise for ${normalizedUrl} was cancelled, skipping completion handler`);
+        return;
+      }
+      
       activeDownloads.delete(normalizedUrl);
+      
       // Check if download was cancelled before marking as complete
       const finalState = await getDownloadByUrl(normalizedUrl);
       if (finalState && finalState.progress.stage === "cancelled") {
@@ -430,13 +441,25 @@ async function handleDownloadRequest(payload: {
       }
     })
     .catch(async (error: any) => {
-      logger.error(`Download failed for ${url}:`, error);
+      // Check if this promise was already removed (cancelled)
+      if (!activeDownloads.has(normalizedUrl)) {
+        logger.info(`Download promise for ${normalizedUrl} was cancelled, skipping error handler`);
+        return;
+      }
+      
       activeDownloads.delete(normalizedUrl);
+      
       // Check if download was cancelled - if so, don't update error
       const finalState = await getDownloadByUrl(normalizedUrl);
       if (finalState && finalState.progress.stage === "cancelled") {
         logger.info(`Download ${normalizedUrl} was cancelled, keeping cancellation status`);
+        // Note: Chunks will be cleaned up by the download handlers when they detect cancellation
         return;
+      }
+      
+      // Only log error if not cancelled
+      if (!finalState || finalState.progress.stage !== "cancelled") {
+        logger.error(`Download failed for ${url}:`, error);
       }
     });
 }
@@ -563,10 +586,26 @@ async function handleCancelDownload(id: string) {
     return;
   }
 
+  // Check if already cancelled
+  if (download.progress.stage === "cancelled") {
+    logger.info(`Download ${id} is already cancelled`);
+    return;
+  }
+
   const normalizedUrl = normalizeUrl(download.url);
   
-  // Remove from active downloads map (this prevents the promise from completing)
+  // Get the promise before removing it (if it exists)
+  const downloadPromise = activeDownloads.get(normalizedUrl);
+  
+  // Remove from active downloads map
+  // Note: The promise will continue executing, but it will check for cancellation
+  // and exit early when it detects the cancelled state
   activeDownloads.delete(normalizedUrl);
+  
+  // Log that we're cancelling (the promise will handle the actual cancellation)
+  if (downloadPromise) {
+    logger.info(`Removed download promise from activeDownloads for ${normalizedUrl}. Promise will exit on next cancellation check.`);
+  }
 
   // Cancel any Chrome downloads associated with this download
   // For direct downloads, we can find and cancel the Chrome download
@@ -631,6 +670,10 @@ async function handleCancelDownload(id: string) {
   download.progress.stage = "cancelled";
   download.progress.error = "Cancelled by user";
   await storeDownload(download);
+
+  // Ensure it's removed from activeDownloads (in case it wasn't already)
+  activeDownloads.delete(normalizedUrl);
+
 
   logger.info(`Download cancelled: ${id}`);
 }

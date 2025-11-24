@@ -25,7 +25,7 @@
  * @module M3u8DownloadHandler
  */
 
-import { DownloadError } from "../../utils/errors";
+import { DownloadError, CancellationError } from "../../utils/errors";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment } from "../../types";
 import { logger } from "../../utils/logger";
@@ -148,7 +148,7 @@ export class M3u8DownloadHandler {
   ): Promise<void> {
     // Check if cancelled before updating
     if (await this.isCancelled(stateId)) {
-      throw new Error("Download was cancelled by user");
+      throw new CancellationError();
     }
 
     const state = await getDownload(stateId);
@@ -219,26 +219,21 @@ export class M3u8DownloadHandler {
     downloadId: string,
     fetchAttempts: number = 3,
   ): Promise<number> {
-    try {
-      // Fetch the fragment data
-      const data = await fetchArrayBuffer(fragment.uri, fetchAttempts);
+    // Fetch the fragment data
+    const data = await fetchArrayBuffer(fragment.uri, fetchAttempts);
 
-      // Check if encrypted and decrypt if needed
-      const decryptedData = await decryptSingleFragment(
-        fragment.key,
-        data,
-        fetchAttempts,
-      );
+    // Check if encrypted and decrypt if needed
+    const decryptedData = await decryptSingleFragment(
+      fragment.key,
+      data,
+      fetchAttempts,
+    );
 
-      // Store in IndexedDB
-      await storeChunk(downloadId, fragment.index, decryptedData);
+    // Store in IndexedDB
+    await storeChunk(downloadId, fragment.index, decryptedData);
 
-      // Return the size of the downloaded fragment
-      return decryptedData.byteLength;
-    } catch (error) {
-      logger.error(`Failed to download fragment ${fragment.index}:`, error);
-      throw error;
-    }
+    // Return the size of the downloaded fragment
+    return decryptedData.byteLength;
   }
 
   /**
@@ -359,7 +354,7 @@ export class M3u8DownloadHandler {
           );
         } catch (error) {
           // If cancellation error, propagate it immediately
-          if (error instanceof Error && error.message === "Download was cancelled by user") {
+          if (error instanceof CancellationError) {
             throw error;
           }
           
@@ -388,12 +383,11 @@ export class M3u8DownloadHandler {
     const cancelledError = results.find(
       (result) =>
         result.status === "rejected" &&
-        result.reason instanceof Error &&
-        result.reason.message === "Download was cancelled by user"
+        result.reason instanceof CancellationError
     );
     
     if (cancelledError) {
-      throw new Error("Download was cancelled by user");
+      throw new CancellationError();
     }
 
     // Check if download was cancelled before final update
@@ -715,20 +709,16 @@ export class M3u8DownloadHandler {
     } catch (error) {
       logger.error("M3U8 media playlist download failed:", error);
 
-      // Try to clean up IndexedDB on error
+      // Always clean up IndexedDB chunks on any error (cancellation, failure, etc.)
       try {
         await deleteChunks(this.downloadId || stateId);
+        logger.info(`Cleaned up chunks for M3U8 download ${this.downloadId || stateId} after error`);
       } catch (cleanupError) {
         logger.error("Failed to clean up chunks:", cleanupError);
       }
 
-      throw error instanceof DownloadError
-        ? error
-        : new DownloadError(
-            `M3U8 download failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+      // Re-throw the original error (preserve CancellationError, DownloadError, etc.)
+      throw error;
     }
   }
 
