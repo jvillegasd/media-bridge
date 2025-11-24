@@ -1,49 +1,15 @@
 /**
- * Download state management using IndexedDB
- * Uses the same database as chunks for efficiency
+ * Downloads model for IndexedDB
+ * Manages download state storage and retrieval
  */
 
-import { ChromeStorage } from "./chrome-storage";
+import { ChromeStorage } from "../storage/chrome-storage";
 import { DownloadState, DownloadProgress } from "../types";
 import { logger } from "../utils/logger";
 import { normalizeUrl } from "../utils/url-utils";
+import { openDatabase, DOWNLOADS_STORE_NAME } from "./connection";
 
-const DB_NAME = "media-bridge";
-const DB_VERSION = 2;
-const STORE_NAME = "downloads";
 const STORAGE_KEY_DOWNLOAD_QUEUE = "download_queue";
-
-/**
- * Open IndexedDB database (shared with chunks)
- */
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onerror = () => {
-      reject(new Error(`Failed to open IndexedDB: ${request.error}`));
-    };
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      // Create downloads store if it doesn't exist
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, {
-          keyPath: "id",
-        });
-        // Create indexes for efficient queries
-        store.createIndex("url", "url", { unique: false });
-        store.createIndex("updatedAt", "updatedAt", { unique: false });
-        store.createIndex("createdAt", "createdAt", { unique: false });
-        // Note: videoId and stage are nested, so we'll query and filter instead
-      }
-    };
-  });
-}
 
 /**
  * Get all download states
@@ -51,8 +17,8 @@ function openDatabase(): Promise<IDBDatabase> {
 export async function getAllDownloads(): Promise<DownloadState[]> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
 
     const downloads = await new Promise<DownloadState[]>((resolve, reject) => {
       const request = store.getAll();
@@ -78,8 +44,8 @@ export async function getAllDownloads(): Promise<DownloadState[]> {
 export async function getDownload(id: string): Promise<DownloadState | null> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
 
     const download = await new Promise<DownloadState | null>(
       (resolve, reject) => {
@@ -142,8 +108,8 @@ export async function getDownloadByVideoId(
 export async function storeDownload(state: DownloadState): Promise<void> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
 
     const updatedState: DownloadState = {
       ...state,
@@ -194,8 +160,8 @@ export async function updateDownloadProgress(
 export async function deleteDownload(id: string): Promise<void> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
 
     await new Promise<void>((resolve, reject) => {
       const request = store.delete(id);
@@ -221,8 +187,8 @@ export async function deleteDownload(id: string): Promise<void> {
 export async function clearAllDownloads(): Promise<void> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
 
     await new Promise<void>((resolve, reject) => {
       const request = store.clear();

@@ -8,7 +8,7 @@ import {
   getDownload,
   storeDownload,
   updateDownloadProgress,
-} from "../storage/indexeddb-downloads";
+} from "../database/downloads";
 import { DownloadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";

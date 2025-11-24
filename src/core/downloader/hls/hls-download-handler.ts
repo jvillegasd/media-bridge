@@ -26,7 +26,7 @@
  */
 
 import { DownloadError } from "../../utils/errors";
-import { getDownload, storeDownload } from "../../storage/indexeddb-downloads";
+import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment, Level } from "../../types";
 import { logger } from "../../utils/logger";
 import { decrypt } from "../../utils/crypto-utils";
@@ -35,7 +35,7 @@ import {
   parseMasterPlaylist,
   parseLevelsPlaylist,
 } from "../../utils/m3u8-parser";
-import { storeChunk, deleteChunks } from "../../storage/indexeddb-chunks";
+import { storeChunk, deleteChunks } from "../../database/chunks";
 import { createOffscreenDocument } from "../../utils/offscreen-manager";
 import { MessageType } from "../../../shared/messages";
 import {
@@ -269,12 +269,23 @@ export class HlsDownloadHandler {
     // Estimate total size by downloading first fragment to get average size
     // This is a rough estimate, but better than showing fragment count
     let estimatedTotalBytes = 0;
-    if (fragments.length > 0) {
+    if (fragments.length > 0 && fragments[0]) {
+      // Check if cancelled before downloading first fragment
+      if (await this.isCancelled(stateId)) {
+        throw new Error("Download was cancelled by user");
+      }
+      
       try {
         const firstFragmentSize = await this.downloadFragment(
           fragments[0],
           downloadId,
         );
+        
+        // Check if cancelled after first fragment
+        if (await this.isCancelled(stateId)) {
+          throw new Error("Download was cancelled by user");
+        }
+        
         sessionBytesDownloaded += firstFragmentSize;
         downloadedFragments++;
         this.bytesDownloaded += firstFragmentSize;
@@ -310,7 +321,7 @@ export class HlsDownloadHandler {
 
     const downloadNext = async (): Promise<void> => {
       while (currentIndex < totalFragments) {
-        // Check if download was cancelled
+        // Check if download was cancelled before processing next fragment
         if (await this.isCancelled(stateId)) {
           throw new Error("Download was cancelled by user");
         }
@@ -318,11 +329,28 @@ export class HlsDownloadHandler {
         const fragmentIndex = currentIndex++;
         const fragment = fragments[fragmentIndex];
 
+        // Skip if fragment is undefined (can happen with concurrent access)
+        if (!fragment) {
+          logger.warn(`Fragment at index ${fragmentIndex} is undefined, skipping`);
+          continue;
+        }
+
+        // Check again before starting download (cancellation might have happened)
+        if (await this.isCancelled(stateId)) {
+          throw new Error("Download was cancelled by user");
+        }
+
         try {
           const fragmentSize = await this.downloadFragment(
             fragment,
             downloadId,
           );
+          
+          // Check if cancelled after fragment download completes
+          if (await this.isCancelled(stateId)) {
+            throw new Error("Download was cancelled by user");
+          }
+
           sessionBytesDownloaded += fragmentSize;
           downloadedFragments++;
           this.bytesDownloaded += fragmentSize;
@@ -345,10 +373,15 @@ export class HlsDownloadHandler {
             `Downloading fragments...`,
           );
         } catch (error) {
+          // If cancellation error, propagate it immediately
+          if (error instanceof Error && error.message === "Download was cancelled by user") {
+            throw error;
+          }
+          
           const err = error instanceof Error ? error : new Error(String(error));
           errors.push(err);
-          logger.error(`Fragment ${fragment.index} failed:`, err);
-          // Continue with other fragments even if one fails
+          logger.error(`Fragment ${fragment?.index ?? fragmentIndex} failed:`, err);
+          // Continue with other fragments even if one fails (unless cancelled)
         }
       }
     };
@@ -363,7 +396,25 @@ export class HlsDownloadHandler {
     }
 
     // Wait for all downloads to complete
-    await Promise.all(downloadQueue);
+    // Use Promise.allSettled to handle cancellation errors properly
+    const results = await Promise.allSettled(downloadQueue);
+    
+    // Check if any download was cancelled
+    const cancelledError = results.find(
+      (result) =>
+        result.status === "rejected" &&
+        result.reason instanceof Error &&
+        result.reason.message === "Download was cancelled by user"
+    );
+    
+    if (cancelledError) {
+      throw new Error("Download was cancelled by user");
+    }
+
+    // Check if download was cancelled before final update
+    if (await this.isCancelled(stateId)) {
+      throw new Error("Download was cancelled by user");
+    }
 
     // Update final progress with actual total (use current bytes as total if we've downloaded everything)
     this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
@@ -640,6 +691,11 @@ export class HlsDownloadHandler {
       this.lastUpdateTime = 0;
       this.lastDownloadedBytes = 0;
 
+      // Check if cancelled before starting fragment downloads
+      if (await this.isCancelled(stateId)) {
+        throw new Error("Download was cancelled by user");
+      }
+
       // Download video fragments
       if (videoPlaylistUrl) {
         const videoPlaylistText = await fetchText(videoPlaylistUrl, 3);
@@ -668,6 +724,11 @@ export class HlsDownloadHandler {
           this.downloadId,
           stateId,
         );
+      }
+
+      // Check if cancelled before starting audio downloads
+      if (await this.isCancelled(stateId)) {
+        throw new Error("Download was cancelled by user");
       }
 
       // Download audio fragments
@@ -699,6 +760,11 @@ export class HlsDownloadHandler {
           this.downloadId,
           stateId,
         );
+      }
+
+      // Check if cancelled before merging
+      if (await this.isCancelled(stateId)) {
+        throw new Error("Download was cancelled by user");
       }
 
       // Update progress: merging with FFmpeg

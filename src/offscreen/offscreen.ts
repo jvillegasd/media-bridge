@@ -6,7 +6,7 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 import { MessageType } from "../shared/messages";
-import { readChunkByIndex } from "../core/storage/indexeddb-chunks";
+import { readChunkByIndex } from "../core/database/chunks";
 import { logger } from "../core/utils/logger";
 
 let ffmpegInstance: FFmpeg | null = null;

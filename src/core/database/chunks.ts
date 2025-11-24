@@ -1,57 +1,15 @@
 /**
- * IndexedDB utility for storing HLS video chunks
- * Stores chunks in order so they can be concatenated later
+ * Chunks model for IndexedDB
+ * Stores HLS video chunks in order so they can be concatenated later
  */
 
 import { logger } from "../utils/logger";
-
-const DB_NAME = "media-bridge";
-const DB_VERSION = 2;
-const STORE_NAME = "chunks";
-const DOWNLOADS_STORE_NAME = "downloads";
+import { openDatabase, CHUNKS_STORE_NAME } from "./connection";
 
 interface ChunkRecord {
   downloadId: string;
   index: number;
   data: ArrayBuffer;
-}
-
-/**
- * Open IndexedDB database
- */
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onerror = () => {
-      reject(new Error(`Failed to open IndexedDB: ${request.error}`));
-    };
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      // Create chunks store if it doesn't exist
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, {
-          keyPath: ["downloadId", "index"],
-        });
-        store.createIndex("downloadId", "downloadId", { unique: false });
-        store.createIndex("index", "index", { unique: false });
-      }
-      // Create downloads store if it doesn't exist
-      if (!db.objectStoreNames.contains(DOWNLOADS_STORE_NAME)) {
-        const downloadsStore = db.createObjectStore(DOWNLOADS_STORE_NAME, {
-          keyPath: "id",
-        });
-        downloadsStore.createIndex("url", "url", { unique: false });
-        downloadsStore.createIndex("updatedAt", "updatedAt", { unique: false });
-        downloadsStore.createIndex("createdAt", "createdAt", { unique: false });
-      }
-    };
-  });
 }
 
 /**
@@ -64,8 +22,8 @@ export async function storeChunk(
 ): Promise<void> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([CHUNKS_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(CHUNKS_STORE_NAME);
 
     const record: ChunkRecord = {
       downloadId,
@@ -96,8 +54,8 @@ export async function storeChunk(
 export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([CHUNKS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(CHUNKS_STORE_NAME);
     const index = store.index("downloadId");
 
     const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
@@ -127,8 +85,8 @@ export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
 export async function deleteChunks(downloadId: string): Promise<void> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([CHUNKS_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(CHUNKS_STORE_NAME);
     const index = store.index("downloadId");
 
     const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
@@ -174,8 +132,8 @@ export async function deleteChunks(downloadId: string): Promise<void> {
 export async function getChunkCount(downloadId: string): Promise<number> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([CHUNKS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(CHUNKS_STORE_NAME);
     const index = store.index("downloadId");
 
     const count = await new Promise<number>((resolve, reject) => {
@@ -202,8 +160,8 @@ export async function readChunkByIndex(
 ): Promise<Uint8Array | null> {
   try {
     const db = await openDatabase();
-    const transaction = db.transaction([STORE_NAME], "readonly");
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction([CHUNKS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(CHUNKS_STORE_NAME);
 
     const record = await new Promise<ChunkRecord | undefined>(
       (resolve, reject) => {
@@ -230,3 +188,4 @@ export async function readChunkByIndex(
     throw error;
   }
 }
+

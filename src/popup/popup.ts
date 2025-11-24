@@ -13,7 +13,7 @@ import {
   getDownload,
   deleteDownload,
   clearAllDownloads,
-} from "../core/storage/indexeddb-downloads";
+} from "../core/database/downloads";
 import { MessageType } from "../shared/messages";
 import { normalizeUrl, detectFormatFromUrl } from "../core/utils/url-utils";
 import {
@@ -962,9 +962,12 @@ function renderDownloads() {
 
   downloadsList.querySelectorAll(".download-remove-btn").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
+      e.stopPropagation(); // Prevent event from bubbling to other handlers
       const button = e.target as HTMLButtonElement;
-      const downloadId = button.getAttribute("data-download-id")!;
-      await handleRemoveDownload(downloadId);
+      const downloadId = button.getAttribute("data-download-id");
+      if (downloadId) {
+        await handleRemoveDownload(downloadId);
+      }
     });
   });
 
@@ -1088,7 +1091,7 @@ function renderDownloadItem(download: DownloadState): string {
         <button class="video-btn download-open-btn" data-download-id="${download.id}">
           Open File
         </button>
-        <button class="video-btn-manifest download-remove-btn" data-download-id="${download.id}">
+        <button class="video-btn download-remove-btn" data-download-id="${download.id}">
           Remove
         </button>
       </div>
@@ -1099,7 +1102,7 @@ function renderDownloadItem(download: DownloadState): string {
         <button class="video-btn download-retry-btn" data-download-id="${download.id}">
           Retry
         </button>
-        <button class="video-btn-manifest download-remove-btn" data-download-id="${download.id}">
+        <button class="video-btn download-remove-btn" data-download-id="${download.id}">
           Remove
         </button>
       </div>
@@ -1107,7 +1110,7 @@ function renderDownloadItem(download: DownloadState): string {
   } else if (isInProgress) {
     actionButtons = `
       <div style="display: flex; gap: 6px; margin-top: 6px;">
-        <button class="video-btn-manifest download-remove-btn" data-download-id="${download.id}">
+        <button class="video-btn download-remove-btn" data-download-id="${download.id}">
           Cancel
         </button>
       </div>

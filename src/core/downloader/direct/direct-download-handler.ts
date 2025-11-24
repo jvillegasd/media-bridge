@@ -16,7 +16,7 @@
  */
 
 import { DownloadError } from "../../utils/errors";
-import { getDownload, storeDownload } from "../../storage/indexeddb-downloads";
+import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState } from "../../types";
 import { logger } from "../../utils/logger";
 import {

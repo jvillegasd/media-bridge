@@ -10,7 +10,7 @@ import {
   getDownloadByUrl,
   storeDownload,
   deleteDownload,
-} from "./core/storage/indexeddb-downloads";
+} from "./core/database/downloads";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { MessageType } from "./shared/messages";
 import { DownloadState, StorageConfig, VideoMetadata } from "./core/types";
@@ -350,11 +350,9 @@ async function handleDownloadRequest(payload: {
   }
 
   if (existing && existing.progress.stage === "cancelled") {
-    // Don't auto-retry cancelled downloads
-    logger.info(`Download was cancelled, not retrying: ${normalizedUrl}`);
-    return {
-      error: "Download was cancelled. Please start a new download.",
-    };
+    // Delete cancelled download to allow starting a new one
+    logger.info(`Deleting cancelled download to allow new download: ${normalizedUrl}`);
+    await deleteDownload(existing.id);
   }
 
   if (existing && existing.progress.stage === "failed") {
