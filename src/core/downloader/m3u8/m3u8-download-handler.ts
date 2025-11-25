@@ -35,6 +35,7 @@ import { parseLevelsPlaylist } from "../../utils/m3u8-parser";
 import { storeChunk, deleteChunks } from "../../database/chunks";
 import { createOffscreenDocument } from "../../utils/offscreen-manager";
 import { MessageType } from "../../../shared/messages";
+import { cancelIfAborted } from "../../utils/cancellation";
 import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
@@ -62,6 +63,7 @@ async function decryptSingleFragment(
   key: Key,
   data: ArrayBuffer,
   fetchAttempts: number = 3,
+  abortSignal?: AbortSignal,
 ): Promise<ArrayBuffer> {
   // If no key URI or IV, fragment is not encrypted
   if (!key.uri || !key.iv) {
@@ -70,7 +72,7 @@ async function decryptSingleFragment(
 
   try {
     // Fetch the encryption key
-    const keyArrayBuffer = await fetchArrayBuffer(key.uri, fetchAttempts);
+    const keyArrayBuffer = await fetchArrayBuffer(key.uri, fetchAttempts, abortSignal);
 
     // Convert IV from hex string to Uint8Array
     // IV should be 16 bytes for AES-128
@@ -117,6 +119,8 @@ export class M3u8DownloadHandler {
   private lastDownloadedBytes: number = 0;
   /** Total number of fragments downloaded */
   private fragmentCount: number = 0;
+  /** AbortSignal for real-time cancellation */
+  private abortSignal?: AbortSignal;
 
   /**
    * Create a new M3U8 download handler
@@ -146,8 +150,7 @@ export class M3u8DownloadHandler {
     totalBytes: number,
     message?: string,
   ): Promise<void> {
-    // Check if cancelled before updating
-    if (await this.isCancelled(stateId)) {
+    if (this.abortSignal?.aborted) {
       throw new CancellationError();
     }
 
@@ -219,14 +222,23 @@ export class M3u8DownloadHandler {
     downloadId: string,
     fetchAttempts: number = 3,
   ): Promise<number> {
-    // Fetch the fragment data
-    const data = await fetchArrayBuffer(fragment.uri, fetchAttempts);
+    if (!this.abortSignal) {
+      throw new Error("AbortSignal is required for fragment download");
+    }
+    
+    const data = await cancelIfAborted(
+      fetchArrayBuffer(fragment.uri, fetchAttempts, this.abortSignal),
+      this.abortSignal
+    );
 
-    // Check if encrypted and decrypt if needed
-    const decryptedData = await decryptSingleFragment(
-      fragment.key,
-      data,
-      fetchAttempts,
+    const decryptedData = await cancelIfAborted(
+      decryptSingleFragment(
+        fragment.key,
+        data,
+        fetchAttempts,
+        this.abortSignal,
+      ),
+      this.abortSignal
     );
 
     // Store in IndexedDB
@@ -256,24 +268,18 @@ export class M3u8DownloadHandler {
       this.lastDownloadedBytes = 0;
     }
 
-    // Estimate total size by downloading first fragment
     let estimatedTotalBytes = 0;
-    if (fragments.length > 0 && fragments[0]) {
-      // Check if cancelled before downloading first fragment
-      if (await this.isCancelled(stateId)) {
-        throw new Error("Download was cancelled by user");
+    if (fragments.length > 0 && fragments[0] && this.abortSignal) {
+      if (this.abortSignal.aborted) {
+        throw new CancellationError();
       }
       
       try {
-        const firstFragmentSize = await this.downloadFragment(
-          fragments[0],
-          downloadId,
+        const firstFragmentSize = await cancelIfAborted(
+          this.downloadFragment(fragments[0], downloadId),
+          this.abortSignal
         );
         
-        // Check if cancelled after first fragment
-        if (await this.isCancelled(stateId)) {
-          throw new Error("Download was cancelled by user");
-        }
         sessionBytesDownloaded += firstFragmentSize;
         downloadedFragments++;
         this.bytesDownloaded += firstFragmentSize;
@@ -282,11 +288,14 @@ export class M3u8DownloadHandler {
         estimatedTotalBytes = firstFragmentSize * totalFragments;
         this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
 
-        await this.updateProgress(
-          stateId,
-          this.bytesDownloaded,
-          this.totalBytes,
-          `Downloading fragments...`,
+        await cancelIfAborted(
+          this.updateProgress(
+            stateId,
+            this.bytesDownloaded,
+            this.totalBytes,
+            `Downloading fragments...`,
+          ),
+          this.abortSignal
         );
       } catch (error) {
         logger.error(
@@ -302,42 +311,33 @@ export class M3u8DownloadHandler {
     let currentIndex = 1; // Start from index 1 since we already downloaded the first
 
     const downloadNext = async (): Promise<void> => {
+      if (!this.abortSignal) {
+        throw new Error("AbortSignal is required for fragment downloads");
+      }
+
       while (currentIndex < totalFragments) {
-        // Check if download was cancelled before processing next fragment
-        if (await this.isCancelled(stateId)) {
-          throw new Error("Download was cancelled by user");
+        if (this.abortSignal.aborted) {
+          throw new CancellationError();
         }
 
         const fragmentIndex = currentIndex++;
         const fragment = fragments[fragmentIndex];
 
-        // Skip if fragment is undefined (can happen with concurrent access)
         if (!fragment) {
           logger.warn(`Fragment at index ${fragmentIndex} is undefined, skipping`);
           continue;
         }
 
-        // Check again before starting download (cancellation might have happened)
-        if (await this.isCancelled(stateId)) {
-          throw new Error("Download was cancelled by user");
-        }
-
         try {
-          const fragmentSize = await this.downloadFragment(
-            fragment,
-            downloadId,
+          const fragmentSize = await cancelIfAborted(
+            this.downloadFragment(fragment, downloadId),
+            this.abortSignal
           );
-          
-          // Check if cancelled after fragment download completes
-          if (await this.isCancelled(stateId)) {
-            throw new Error("Download was cancelled by user");
-          }
 
           sessionBytesDownloaded += fragmentSize;
           downloadedFragments++;
           this.bytesDownloaded += fragmentSize;
 
-          // Update estimated total if we have better data
           if (estimatedTotalBytes === 0 || downloadedFragments > 0) {
             const averageFragmentSize =
               sessionBytesDownloaded / downloadedFragments;
@@ -346,11 +346,14 @@ export class M3u8DownloadHandler {
             this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
           }
 
-          await this.updateProgress(
-            stateId,
-            this.bytesDownloaded,
-            this.totalBytes,
-            `Downloading fragments...`,
+          await cancelIfAborted(
+            this.updateProgress(
+              stateId,
+              this.bytesDownloaded,
+              this.totalBytes,
+              `Downloading fragments...`,
+            ),
+            this.abortSignal
           );
         } catch (error) {
           // If cancellation error, propagate it immediately
@@ -390,19 +393,29 @@ export class M3u8DownloadHandler {
       throw new CancellationError();
     }
 
-    // Check if download was cancelled before final update
-    if (await this.isCancelled(stateId)) {
-      throw new Error("Download was cancelled by user");
+    if (this.abortSignal?.aborted) {
+      throw new CancellationError();
     }
 
-    // Update final progress with actual total
     this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
-    await this.updateProgress(
-      stateId,
-      this.bytesDownloaded,
-      this.totalBytes,
-      `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
-    );
+    if (this.abortSignal) {
+      await cancelIfAborted(
+        this.updateProgress(
+          stateId,
+          this.bytesDownloaded,
+          this.totalBytes,
+          `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
+        ),
+        this.abortSignal
+      );
+    } else {
+      await this.updateProgress(
+        stateId,
+        this.bytesDownloaded,
+        this.totalBytes,
+        `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
+      );
+    }
 
     // If there were errors, throw an error (but we still have some fragments)
     if (errors.length > 0 && downloadedFragments === 0) {
@@ -572,7 +585,9 @@ export class M3u8DownloadHandler {
     mediaPlaylistUrl: string,
     filename: string,
     stateId: string,
+    abortSignal?: AbortSignal,
   ): Promise<{ filePath: string; fileExtension?: string }> {
+    this.abortSignal = abortSignal;
     try {
       logger.info(
         `Starting M3U8 media playlist download from ${mediaPlaylistUrl}`,
@@ -585,7 +600,12 @@ export class M3u8DownloadHandler {
       await this.updateProgress(stateId, 0, 0, "Parsing playlist...");
 
       // Fetch and parse media playlist
-      const mediaPlaylistText = await fetchText(mediaPlaylistUrl, 3);
+      const mediaPlaylistText = this.abortSignal
+        ? await cancelIfAborted(
+            fetchText(mediaPlaylistUrl, 3, this.abortSignal),
+            this.abortSignal
+          )
+        : await fetchText(mediaPlaylistUrl, 3);
       const fragments = parseLevelsPlaylist(
         mediaPlaylistText,
         mediaPlaylistUrl,
@@ -605,19 +625,17 @@ export class M3u8DownloadHandler {
       this.fragmentCount = 0; // Reset fragment count
 
       // Check if cancelled before starting fragment downloads
-      if (await this.isCancelled(stateId)) {
-        throw new Error("Download was cancelled by user");
+      if (this.abortSignal?.aborted) {
+        throw new CancellationError();
       }
 
       // Download all fragments
       await this.downloadAllFragments(fragments, this.downloadId, stateId);
 
-      // Set fragment count after download completes
       this.fragmentCount = fragments.length;
 
-      // Check if cancelled before merging
-      if (await this.isCancelled(stateId)) {
-        throw new Error("Download was cancelled by user");
+      if (this.abortSignal?.aborted) {
+        throw new CancellationError();
       }
 
       // Update progress: merging with FFmpeg

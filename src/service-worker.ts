@@ -25,6 +25,8 @@ const CONFIG_KEY = "storage_config";
 const MAX_CONCURRENT_KEY = "max_concurrent";
 
 const activeDownloads = new Map<string, Promise<void>>();
+// Map to store AbortControllers for each download (keyed by normalized URL)
+const downloadAbortControllers = new Map<string, AbortController>();
 
 /**
  * Initialize service worker
@@ -411,6 +413,10 @@ async function handleDownloadRequest(payload: {
     uploadToDrive: uploadToDrive || config?.googleDrive?.enabled || false,
   });
 
+  // Create AbortController for this download to enable real-time cancellation
+  const abortController = new AbortController();
+  downloadAbortControllers.set(normalizedUrl, abortController);
+
   const downloadPromise = startDownload(
     downloadManager,
     url,
@@ -420,11 +426,15 @@ async function handleDownloadRequest(payload: {
     website,
     manifestQuality,
     isManual,
+    abortController.signal, // Pass AbortSignal for real-time cancellation
   );
   activeDownloads.set(normalizedUrl, downloadPromise);
 
   downloadPromise
     .then(async () => {
+      // Clean up AbortController
+      downloadAbortControllers.delete(normalizedUrl);
+      
       // Check if this promise was already removed (cancelled)
       if (!activeDownloads.has(normalizedUrl)) {
         logger.info(`Download promise for ${normalizedUrl} was cancelled, skipping completion handler`);
@@ -441,6 +451,9 @@ async function handleDownloadRequest(payload: {
       }
     })
     .catch(async (error: any) => {
+      // Clean up AbortController
+      downloadAbortControllers.delete(normalizedUrl);
+      
       // Check if this promise was already removed (cancelled)
       if (!activeDownloads.has(normalizedUrl)) {
         logger.info(`Download promise for ${normalizedUrl} was cancelled, skipping error handler`);
@@ -531,6 +544,7 @@ async function startDownload(
     audioPlaylistUrl?: string | null;
   },
   isManual?: boolean,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   try {
     // Generate filename if not provided
@@ -555,6 +569,7 @@ async function startDownload(
       metadata,
       manifestQuality,
       isManual,
+      abortSignal,
     );
 
     // Handle failed downloads (e.g., unknown format)
@@ -593,6 +608,14 @@ async function handleCancelDownload(id: string) {
   }
 
   const normalizedUrl = normalizeUrl(download.url);
+  
+  // Abort ongoing fetch operations immediately for real-time cancellation
+  const abortController = downloadAbortControllers.get(normalizedUrl);
+  if (abortController) {
+    abortController.abort();
+    logger.info(`Aborted fetch operations for download ${normalizedUrl}`);
+    downloadAbortControllers.delete(normalizedUrl);
+  }
   
   // Get the promise before removing it (if it exists)
   const downloadPromise = activeDownloads.get(normalizedUrl);

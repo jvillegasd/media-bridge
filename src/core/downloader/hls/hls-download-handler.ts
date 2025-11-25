@@ -26,6 +26,7 @@
  */
 
 import { DownloadError, CancellationError } from "../../utils/errors";
+import { cancelIfAborted } from "../../utils/cancellation";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment, Level } from "../../types";
 import { logger } from "../../utils/logger";
@@ -65,6 +66,7 @@ async function decryptSingleFragment(
   key: Key,
   data: ArrayBuffer,
   fetchAttempts: number = 3,
+  abortSignal?: AbortSignal,
 ): Promise<ArrayBuffer> {
   // If no key URI or IV, fragment is not encrypted
   if (!key.uri || !key.iv) {
@@ -73,7 +75,7 @@ async function decryptSingleFragment(
 
   try {
     // Fetch the encryption key
-    const keyArrayBuffer = await fetchArrayBuffer(key.uri, fetchAttempts);
+    const keyArrayBuffer = await fetchArrayBuffer(key.uri, fetchAttempts, abortSignal);
 
     // Convert IV from hex string to Uint8Array
     // IV should be 16 bytes for AES-128
@@ -122,6 +124,8 @@ export class HlsDownloadHandler {
   private lastUpdateTime: number = 0;
   /** Bytes downloaded at last update (for speed calculation) */
   private lastDownloadedBytes: number = 0;
+  /** AbortSignal for real-time cancellation */
+  private abortSignal?: AbortSignal;
 
   /**
    * Create a new HLS download handler
@@ -151,8 +155,7 @@ export class HlsDownloadHandler {
     totalBytes: number,
     message?: string,
   ): Promise<void> {
-    // Check if cancelled before updating
-    if (await this.isCancelled(stateId)) {
+    if (this.abortSignal?.aborted) {
       throw new CancellationError();
     }
 
@@ -224,14 +227,23 @@ export class HlsDownloadHandler {
     downloadId: string,
     fetchAttempts: number = 3,
   ): Promise<number> {
-    // Fetch the fragment data
-    const data = await fetchArrayBuffer(fragment.uri, fetchAttempts);
+    if (!this.abortSignal) {
+      throw new Error("AbortSignal is required for fragment download");
+    }
+    
+    const data = await cancelIfAborted(
+      fetchArrayBuffer(fragment.uri, fetchAttempts, this.abortSignal),
+      this.abortSignal
+    );
 
-    // Check if encrypted and decrypt if needed
-    const decryptedData = await decryptSingleFragment(
-      fragment.key,
-      data,
-      fetchAttempts,
+    const decryptedData = await cancelIfAborted(
+      decryptSingleFragment(
+        fragment.key,
+        data,
+        fetchAttempts,
+        this.abortSignal,
+      ),
+      this.abortSignal
     );
 
     // Store in IndexedDB
@@ -264,22 +276,16 @@ export class HlsDownloadHandler {
     // Estimate total size by downloading first fragment to get average size
     // This is a rough estimate, but better than showing fragment count
     let estimatedTotalBytes = 0;
-    if (fragments.length > 0 && fragments[0]) {
-      // Check if cancelled before downloading first fragment
-      if (await this.isCancelled(stateId)) {
-        throw new Error("Download was cancelled by user");
+    if (fragments.length > 0 && fragments[0] && this.abortSignal) {
+      if (this.abortSignal.aborted) {
+        throw new CancellationError();
       }
       
       try {
-        const firstFragmentSize = await this.downloadFragment(
-          fragments[0],
-          downloadId,
+        const firstFragmentSize = await cancelIfAborted(
+          this.downloadFragment(fragments[0], downloadId),
+          this.abortSignal
         );
-        
-        // Check if cancelled after first fragment
-        if (await this.isCancelled(stateId)) {
-          throw new Error("Download was cancelled by user");
-        }
         
         sessionBytesDownloaded += firstFragmentSize;
         downloadedFragments++;
@@ -294,12 +300,24 @@ export class HlsDownloadHandler {
         }
         this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
 
-        await this.updateProgress(
-          stateId,
-          this.bytesDownloaded,
-          this.totalBytes,
-          `Downloading fragments...`,
-        );
+        if (this.abortSignal) {
+          await cancelIfAborted(
+            this.updateProgress(
+              stateId,
+              this.bytesDownloaded,
+              this.totalBytes,
+              `Downloading fragments...`,
+            ),
+            this.abortSignal
+          );
+        } else {
+          await this.updateProgress(
+            stateId,
+            this.bytesDownloaded,
+            this.totalBytes,
+            `Downloading fragments...`,
+          );
+        }
       } catch (error) {
         logger.error(
           `Failed to download first fragment for size estimation:`,
@@ -315,57 +333,50 @@ export class HlsDownloadHandler {
     let currentIndex = 1; // Start from index 1 since we already downloaded the first
 
     const downloadNext = async (): Promise<void> => {
+      if (!this.abortSignal) {
+        throw new Error("AbortSignal is required for fragment downloads");
+      }
+
       while (currentIndex < totalFragments) {
-        // Check if download was cancelled before processing next fragment
-        if (await this.isCancelled(stateId)) {
-          throw new Error("Download was cancelled by user");
+        if (this.abortSignal.aborted) {
+          throw new CancellationError();
         }
 
         const fragmentIndex = currentIndex++;
         const fragment = fragments[fragmentIndex];
 
-        // Skip if fragment is undefined (can happen with concurrent access)
         if (!fragment) {
           logger.warn(`Fragment at index ${fragmentIndex} is undefined, skipping`);
           continue;
         }
 
-        // Check again before starting download (cancellation might have happened)
-        if (await this.isCancelled(stateId)) {
-          throw new Error("Download was cancelled by user");
-        }
-
         try {
-          const fragmentSize = await this.downloadFragment(
-            fragment,
-            downloadId,
+          const fragmentSize = await cancelIfAborted(
+            this.downloadFragment(fragment, downloadId),
+            this.abortSignal
           );
-          
-          // Check if cancelled after fragment download completes
-          if (await this.isCancelled(stateId)) {
-            throw new Error("Download was cancelled by user");
-          }
 
           sessionBytesDownloaded += fragmentSize;
           downloadedFragments++;
           this.bytesDownloaded += fragmentSize;
 
-          // Update estimated total if we have better data
           if (estimatedTotalBytes === 0 || downloadedFragments > 0) {
             const averageFragmentSize =
               sessionBytesDownloaded / downloadedFragments;
             const sessionEstimatedTotal = averageFragmentSize * totalFragments;
-            // Update total estimate, preserving bytes from previous sessions
             const previousBytes = this.bytesDownloaded - sessionBytesDownloaded;
             estimatedTotalBytes = previousBytes + sessionEstimatedTotal;
             this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
           }
 
-          await this.updateProgress(
-            stateId,
-            this.bytesDownloaded,
-            this.totalBytes,
-            `Downloading fragments...`,
+          await cancelIfAborted(
+            this.updateProgress(
+              stateId,
+              this.bytesDownloaded,
+              this.totalBytes,
+              `Downloading fragments...`,
+            ),
+            this.abortSignal
           );
         } catch (error) {
           // If cancellation error, propagate it immediately
@@ -405,19 +416,29 @@ export class HlsDownloadHandler {
       throw new CancellationError();
     }
 
-    // Check if download was cancelled before final update
-    if (await this.isCancelled(stateId)) {
-      throw new Error("Download was cancelled by user");
+    if (this.abortSignal?.aborted) {
+      throw new CancellationError();
     }
 
-    // Update final progress with actual total (use current bytes as total if we've downloaded everything)
     this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
-    await this.updateProgress(
-      stateId,
-      this.bytesDownloaded,
-      this.totalBytes,
-      `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
-    );
+    if (this.abortSignal) {
+      await cancelIfAborted(
+        this.updateProgress(
+          stateId,
+          this.bytesDownloaded,
+          this.totalBytes,
+          `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
+        ),
+        this.abortSignal
+      );
+    } else {
+      await this.updateProgress(
+        stateId,
+        this.bytesDownloaded,
+        this.totalBytes,
+        `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
+      );
+    }
 
     // If there were errors, throw an error (but we still have some fragments)
     if (errors.length > 0 && downloadedFragments === 0) {
@@ -628,7 +649,9 @@ export class HlsDownloadHandler {
       videoPlaylistUrl?: string | null;
       audioPlaylistUrl?: string | null;
     },
+    abortSignal?: AbortSignal,
   ): Promise<{ filePath: string; fileExtension?: string }> {
+    this.abortSignal = abortSignal;
     try {
       logger.info(`Starting HLS download from ${masterPlaylistUrl}`);
 
@@ -654,7 +677,12 @@ export class HlsDownloadHandler {
         );
       } else {
         // Otherwise, fetch and parse master playlist to auto-select
-        const masterPlaylistText = await fetchText(masterPlaylistUrl, 3);
+        const masterPlaylistText = this.abortSignal
+          ? await cancelIfAborted(
+              fetchText(masterPlaylistUrl, 3, this.abortSignal),
+              this.abortSignal
+            )
+          : await fetchText(masterPlaylistUrl, 3);
         const levels = parseMasterPlaylist(
           masterPlaylistText,
           masterPlaylistUrl,
@@ -685,14 +713,17 @@ export class HlsDownloadHandler {
       this.lastUpdateTime = 0;
       this.lastDownloadedBytes = 0;
 
-      // Check if cancelled before starting fragment downloads
-      if (await this.isCancelled(stateId)) {
-        throw new Error("Download was cancelled by user");
+      if (this.abortSignal?.aborted) {
+        throw new CancellationError();
       }
 
-      // Download video fragments
       if (videoPlaylistUrl) {
-        const videoPlaylistText = await fetchText(videoPlaylistUrl, 3);
+        const videoPlaylistText = this.abortSignal
+          ? await cancelIfAborted(
+              fetchText(videoPlaylistUrl, 3, this.abortSignal),
+              this.abortSignal
+            )
+          : await fetchText(videoPlaylistUrl, 3);
         const videoFragments = parseLevelsPlaylist(
           videoPlaylistText,
           videoPlaylistUrl,
@@ -712,7 +743,6 @@ export class HlsDownloadHandler {
 
         this.videoLength = indexedVideoFragments.length;
 
-        // Download video fragments (downloadAllFragments handles progress internally)
         await this.downloadAllFragments(
           indexedVideoFragments,
           this.downloadId,
@@ -720,14 +750,17 @@ export class HlsDownloadHandler {
         );
       }
 
-      // Check if cancelled before starting audio downloads
-      if (await this.isCancelled(stateId)) {
-        throw new Error("Download was cancelled by user");
+      if (this.abortSignal?.aborted) {
+        throw new CancellationError();
       }
 
-      // Download audio fragments
       if (audioPlaylistUrl) {
-        const audioPlaylistText = await fetchText(audioPlaylistUrl, 3);
+        const audioPlaylistText = this.abortSignal
+          ? await cancelIfAborted(
+              fetchText(audioPlaylistUrl, 3, this.abortSignal),
+              this.abortSignal
+            )
+          : await fetchText(audioPlaylistUrl, 3);
         const audioFragments = parseLevelsPlaylist(
           audioPlaylistText,
           audioPlaylistUrl,
@@ -756,9 +789,8 @@ export class HlsDownloadHandler {
         );
       }
 
-      // Check if cancelled before merging
-      if (await this.isCancelled(stateId)) {
-        throw new Error("Download was cancelled by user");
+      if (this.abortSignal?.aborted) {
+        throw new CancellationError();
       }
 
       // Update progress: merging with FFmpeg

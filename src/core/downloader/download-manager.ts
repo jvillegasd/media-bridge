@@ -88,6 +88,7 @@ export class DownloadManager {
       audioPlaylistUrl?: string | null;
     },
     isManual?: boolean,
+    abortSignal?: AbortSignal,
   ): Promise<DownloadState> {
     const downloadId = this.generateDownloadId(url);
 
@@ -124,6 +125,7 @@ export class DownloadManager {
       // Route to appropriate download handler based on format
       if (format === "direct") {
         // Use direct download handler with Chrome downloads API
+        // Note: Direct downloads don't need abortSignal - Chrome Downloads API handles cancellation
         await this.directDownloadHandler.download(
           actualVideoUrl,
           filename,
@@ -136,6 +138,7 @@ export class DownloadManager {
           filename,
           state.id,
           manifestQuality,
+          abortSignal,
         );
       } else if (format === "m3u8") {
         // Use M3U8 download handler
@@ -143,6 +146,7 @@ export class DownloadManager {
           actualVideoUrl,
           filename,
           state.id,
+          abortSignal,
         );
       } else {
         throw new Error(`Unsupported format: ${format}`);

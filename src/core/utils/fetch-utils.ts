@@ -33,6 +33,7 @@ export async function fetchResource(
     headers?: Record<string, string>;
     body?: ArrayBuffer | string;
     mode?: RequestMode;
+    signal?: AbortSignal;
   },
 ): Promise<Response> {
   // If we're in a service worker/background context, use native fetch
@@ -114,6 +115,10 @@ async function fetchWithRetry<Data>(
     try {
       return await fetchFn();
     } catch (e) {
+      // If aborted, don't retry - throw immediately
+      if (e instanceof Error && e.name === "AbortError") {
+        throw e;
+      }
       if (countdown > 0) {
         await new Promise((resolve) => setTimeout(resolve, retryTime));
         retryTime *= 1.15;
@@ -123,15 +128,23 @@ async function fetchWithRetry<Data>(
   throw new Error("Fetch error");
 }
 
-export async function fetchText(url: string, attempts: number = 1) {
+export async function fetchText(
+  url: string,
+  attempts: number = 1,
+  signal?: AbortSignal,
+) {
   const fetchFn: FetchFn<string> = () =>
-    fetchResource(url).then((res) => res.text());
+    fetchResource(url, { signal }).then((res) => res.text());
   return fetchWithRetry(fetchFn, attempts);
 }
 
-export async function fetchArrayBuffer(url: string, attempts: number = 1) {
+export async function fetchArrayBuffer(
+  url: string,
+  attempts: number = 1,
+  signal?: AbortSignal,
+) {
   const fetchFn: FetchFn<ArrayBuffer> = () =>
-    fetchResource(url).then((res) => res.arrayBuffer());
+    fetchResource(url, { signal }).then((res) => res.arrayBuffer());
   return fetchWithRetry(fetchFn, attempts);
 }
 
