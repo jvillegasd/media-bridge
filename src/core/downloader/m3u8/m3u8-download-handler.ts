@@ -132,15 +132,6 @@ export class M3u8DownloadHandler {
   }
 
   /**
-   * Check if download was cancelled
-   * @private
-   */
-  private async isCancelled(stateId: string): Promise<boolean> {
-    const state = await getDownload(stateId);
-    return state !== null && state.progress.stage === "cancelled";
-  }
-
-  /**
    * Update download progress with bytes and speed calculation
    * @private
    */

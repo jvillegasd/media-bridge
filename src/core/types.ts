@@ -29,17 +29,25 @@ export interface VideoQuality {
   codecs?: string;
 }
 
+/**
+ * Download stage constants for type-safe stage checking
+ */
+export const DownloadStage = {
+  DETECTING: "detecting",
+  DOWNLOADING: "downloading",
+  MERGING: "merging",
+  SAVING: "saving",
+  UPLOADING: "uploading",
+  COMPLETED: "completed",
+  FAILED: "failed",
+  CANCELLED: "cancelled",
+} as const;
+
+export type DownloadStage = typeof DownloadStage[keyof typeof DownloadStage];
+
 export interface DownloadProgress {
   url: string;
-  stage:
-    | "detecting"
-    | "downloading"
-    | "merging"
-    | "saving"
-    | "uploading"
-    | "completed"
-    | "failed"
-    | "cancelled";
+  stage: DownloadStage;
   downloaded?: number;
   total?: number;
   percentage?: number;
