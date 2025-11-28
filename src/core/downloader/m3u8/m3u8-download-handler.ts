@@ -27,7 +27,7 @@
 
 import { DownloadError, CancellationError } from "../../utils/errors";
 import { getDownload, storeDownload } from "../../database/downloads";
-import { DownloadState, Fragment } from "../../types";
+import { DownloadState, Fragment, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import { decrypt } from "../../utils/crypto-utils";
 import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
@@ -174,7 +174,7 @@ export class M3u8DownloadHandler {
     state.progress.downloaded = downloadedBytes;
     state.progress.total = totalBytes;
     state.progress.percentage = percentage;
-    state.progress.stage = "downloading";
+    state.progress.stage = DownloadStage.DOWNLOADING;
     state.progress.message =
       message ||
       `Downloaded ${this.formatFileSize(downloadedBytes)}/${this.formatFileSize(
@@ -489,10 +489,25 @@ export class M3u8DownloadHandler {
       );
 
       // Set timeout to prevent hanging
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
+        // Check if download was cancelled before rejecting with timeout
+        if (this.abortSignal?.aborted) {
+          chrome.runtime.onMessage.removeListener(messageListener);
+          reject(new CancellationError());
+          return;
+        }
         chrome.runtime.onMessage.removeListener(messageListener);
         reject(new Error("FFmpeg processing timeout"));
       }, 300000); // 5 minutes timeout
+
+      // Clear timeout if cancelled
+      if (this.abortSignal) {
+        this.abortSignal.addEventListener("abort", () => {
+          clearTimeout(timeoutId);
+          chrome.runtime.onMessage.removeListener(messageListener);
+          reject(new CancellationError());
+        });
+      }
     });
   }
 
@@ -632,7 +647,7 @@ export class M3u8DownloadHandler {
       // Update progress: merging with FFmpeg
       const mergingState = await getDownload(stateId);
       if (mergingState) {
-        mergingState.progress.stage = "merging";
+        mergingState.progress.stage = DownloadStage.MERGING;
         mergingState.progress.message = "Merging streams...";
         await storeDownload(mergingState);
         this.notifyProgress(mergingState);
@@ -653,7 +668,7 @@ export class M3u8DownloadHandler {
             // Show merging progress as 0-100% (restart progress bar for merging phase)
             state.progress.percentage = progress * 100;
             state.progress.message = message;
-            state.progress.stage = "merging";
+            state.progress.stage = DownloadStage.MERGING;
             await storeDownload(state);
             this.notifyProgress(state);
           }
@@ -663,7 +678,7 @@ export class M3u8DownloadHandler {
       // Update progress: saving
       const savingState = await getDownload(stateId);
       if (savingState) {
-        savingState.progress.stage = "saving";
+        savingState.progress.stage = DownloadStage.SAVING;
         savingState.progress.message = "Saving file...";
         savingState.progress.percentage = 95;
         await storeDownload(savingState);
@@ -684,7 +699,7 @@ export class M3u8DownloadHandler {
       const finalState = await getDownload(stateId);
       if (finalState) {
         finalState.localPath = filePath;
-        finalState.progress.stage = "completed";
+        finalState.progress.stage = DownloadStage.COMPLETED;
         finalState.progress.message = "Download completed";
         finalState.progress.percentage = 100;
         finalState.progress.downloaded =
@@ -695,9 +710,9 @@ export class M3u8DownloadHandler {
 
         // Verify state is persisted
         const verifyState = await getDownload(stateId);
-        if (verifyState && verifyState.progress.stage !== "completed") {
+        if (verifyState && verifyState.progress.stage !== DownloadStage.COMPLETED) {
           logger.warn(`State verification failed for ${stateId}, retrying...`);
-          verifyState.progress.stage = "completed";
+          verifyState.progress.stage = DownloadStage.COMPLETED;
           verifyState.progress.message = "Download completed";
           verifyState.progress.percentage = 100;
           await storeDownload(verifyState);

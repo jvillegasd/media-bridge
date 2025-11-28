@@ -21,6 +21,7 @@ import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
+import { deleteChunks } from "./core/database/chunks";
 
 const CONFIG_KEY = "storage_config";
 const MAX_CONCURRENT_KEY = "max_concurrent";
@@ -381,11 +382,26 @@ async function handleDownloadRequest(payload: {
   const downloadManager = new DownloadManager({
     maxConcurrent,
     onProgress: async (state) => {
-      // Check if download was cancelled before updating state
+      const normalizedUrlForProgress = normalizeUrl(state.url);
+      
+      // Check abort signal first (atomic check, no async operation)
+      const abortControllerForProgress = downloadAbortControllers.get(normalizedUrlForProgress);
+      if (abortControllerForProgress?.signal.aborted) {
+        logger.info(`Download ${state.id} was aborted, ignoring progress update`);
+        return;
+      }
+
+      // Double-check cancellation state in database (defensive check)
       const currentState = await getDownload(state.id);
       if (currentState && currentState.progress.stage === DownloadStage.CANCELLED) {
         // Download was cancelled, don't update state
         logger.info(`Download ${state.id} was cancelled, ignoring progress update`);
+        return;
+      }
+
+      // Re-check abort signal after async operation to catch race conditions
+      if (abortControllerForProgress?.signal.aborted) {
+        logger.info(`Download ${state.id} was aborted after state check, ignoring progress update`);
         return;
       }
 
@@ -433,26 +449,25 @@ async function handleDownloadRequest(payload: {
 
   downloadPromise
     .then(async () => {
-      const shouldContinue = await cleanupDownloadResources(normalizedUrl);
-      if (!shouldContinue) {
-        return;
-      }
+      await cleanupDownloadResources(normalizedUrl);
     })
     .catch(async (error: unknown) => {
-      const shouldContinue = await cleanupDownloadResources(normalizedUrl);
-      if (!shouldContinue) {
-        return;
-      }
-      
       // Only log error if not cancelled
       if (error instanceof CancellationError) {
         // Cancellation already handled, don't log as error
+        await cleanupDownloadResources(normalizedUrl);
         return;
       } else if (error instanceof Error) {
         logger.error(`Download failed for ${url}:`, error);
       } else {
         logger.error(`Download failed for ${url}:`, String(error));
       }
+      await cleanupDownloadResources(normalizedUrl);
+    })
+    .finally(() => {
+      // Ensure promise is removed from activeDownloads when it completes
+      // This handles both success and failure cases
+      activeDownloads.delete(normalizedUrl);
     });
 }
 
@@ -512,31 +527,12 @@ function isDownloadFailed(downloadState: DownloadState): boolean {
  */
 async function cleanupDownloadResources(
   normalizedUrl: string,
-  skipIfCancelled: boolean = true
-): Promise<boolean> {
+): Promise<void> {
   // Clean up AbortController
   downloadAbortControllers.delete(normalizedUrl);
   
-  // Check if already removed (cancelled)
-  if (!activeDownloads.has(normalizedUrl)) {
-    if (skipIfCancelled) {
-      logger.info(`Download promise for ${normalizedUrl} was cancelled, skipping cleanup`);
-      return false;
-    }
-  }
-  
-  activeDownloads.delete(normalizedUrl);
-  
-  // Check final state if needed
-  if (skipIfCancelled) {
-    const finalState = await getDownloadByUrl(normalizedUrl);
-    if (finalState && finalState.progress.stage === DownloadStage.CANCELLED) {
-      logger.info(`Download ${normalizedUrl} was cancelled, skipping final cleanup`);
-      return false;
-    }
-  }
-  
-  return true;
+  // Note: activeDownloads cleanup is handled in the promise's finally block
+  // to ensure it's removed regardless of success/failure/cancellation
 }
 
 /**
@@ -557,32 +553,57 @@ async function cancelChromeDownloads(download: DownloadState): Promise<void> {
   
   searchQueries.push({ url: download.url });
 
-  const cancelDownload = (item: chrome.downloads.DownloadItem) => {
-    if (item.state === "in_progress") {
-      chrome.downloads.cancel(item.id, () => {
+  // Convert callback-based Chrome Downloads API to Promise-based
+  const searchDownloads = (query: chrome.downloads.DownloadQuery): Promise<chrome.downloads.DownloadItem[]> => {
+    return new Promise((resolve, reject) => {
+      chrome.downloads.search(query, (results) => {
         if (chrome.runtime.lastError) {
-          logger.debug(
-            `Failed to cancel Chrome download ${item.id}:`,
-            chrome.runtime.lastError.message
-          );
+          reject(new Error(chrome.runtime.lastError.message));
         } else {
-          logger.info(`Cancelled Chrome download ${item.id}`);
+          resolve(results || []);
         }
       });
-    }
+    });
   };
 
+  const cancelDownload = (item: chrome.downloads.DownloadItem): Promise<void> => {
+    return new Promise((resolve) => {
+      if (item.state === "in_progress") {
+        chrome.downloads.cancel(item.id, () => {
+          if (chrome.runtime.lastError) {
+            logger.debug(
+              `Failed to cancel Chrome download ${item.id}:`,
+              chrome.runtime.lastError.message
+            );
+          } else {
+            logger.info(`Cancelled Chrome download ${item.id}`);
+          }
+          resolve();
+        });
+      } else {
+        resolve();
+      }
+    });
+  };
+
+  // Process all queries and wait for all cancellations to complete
+  const cancellationPromises: Promise<void>[] = [];
+  
   for (const query of searchQueries) {
     try {
-      chrome.downloads.search(query, (results) => {
-        if (results && results.length > 0) {
-          results.forEach(cancelDownload);
+      const results = await searchDownloads(query);
+      if (results && results.length > 0) {
+        for (const item of results) {
+          cancellationPromises.push(cancelDownload(item));
         }
-      });
+      }
     } catch (error) {
       logger.error("Error searching Chrome downloads:", error);
     }
   }
+
+  // Wait for all cancellation operations to complete
+  await Promise.all(cancellationPromises);
 }
 
 /**
@@ -650,7 +671,8 @@ async function startDownload(
 
 /**
  * Cancel active download
- * Removes from active downloads map, cancels Chrome downloads, and marks state as cancelled
+ * Removes from active downloads map, cancels Chrome downloads, and deletes the download
+ * This resets the UI to initial state (video card shows as just detected)
  */
 async function handleCancelDownload(id: string): Promise<void> {
   const download = await getDownload(id);
@@ -658,10 +680,16 @@ async function handleCancelDownload(id: string): Promise<void> {
     return;
   }
 
-  // Check if already cancelled
-  if (download.progress.stage === DownloadStage.CANCELLED) {
-    logger.info(`Download ${id} is already cancelled`);
-    return;
+  // Prevent cancellation during merging or saving phases
+  // Chunks are already downloaded at this point, so cancellation would waste resources
+  if (
+    download.progress.stage === DownloadStage.MERGING ||
+    download.progress.stage === DownloadStage.SAVING
+  ) {
+    const errorMessage =
+      "Cannot cancel download during merging or saving phase. Chunks are already downloaded and processing is in progress.";
+    logger.info(`Cancellation prevented for download ${id}: ${errorMessage}`);
+    throw new Error(errorMessage);
   }
 
   const normalizedUrl = normalizeUrl(download.url);
@@ -674,18 +702,37 @@ async function handleCancelDownload(id: string): Promise<void> {
     downloadAbortControllers.delete(normalizedUrl);
   }
   
-  // 2. Remove from active downloads
-  activeDownloads.delete(normalizedUrl);
-  
-  // 3. Cancel Chrome downloads
+  // 2. Cancel Chrome downloads
   await cancelChromeDownloads(download);
 
-  // 4. Mark as cancelled
-  download.progress.stage = DownloadStage.CANCELLED;
-  download.progress.error = "Cancelled by user";
-  await storeDownload(download);
+  // 3. Clean up chunks for HLS/M3U8 downloads
+  // Only cleanup if format is HLS or M3U8 (these use IndexedDB chunks)
+  if (
+    download.metadata.format === "hls" ||
+    download.metadata.format === "m3u8"
+  ) {
+    try {
+      await deleteChunks(download.id);
+      logger.info(`Cleaned up chunks for cancelled download ${download.id}`);
+    } catch (error) {
+      logger.error(
+        `Failed to clean up chunks for download ${download.id}:`,
+        error
+      );
+      // Don't throw - continue with cancellation even if cleanup fails
+    }
+  }
 
-  logger.info(`Download cancelled: ${id}`);
+  // 4. Delete the download from database to reset UI to initial state
+  // This removes the download from the downloads list and shows the video card
+  // in the detected videos list as if it was just detected
+  await deleteDownload(download.id);
+
+  // Note: activeDownloads cleanup is handled in the promise's finally block
+  // We don't remove it here to avoid race conditions - let the promise complete
+  // and clean itself up. The abort signal will cause the download to stop.
+
+  logger.info(`Download cancelled and removed: ${id}`);
 }
 
 /**

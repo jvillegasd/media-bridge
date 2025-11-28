@@ -30,20 +30,18 @@ export interface VideoQuality {
 }
 
 /**
- * Download stage constants for type-safe stage checking
+ * Download stage enum for type-safe stage checking
  */
-export const DownloadStage = {
-  DETECTING: "detecting",
-  DOWNLOADING: "downloading",
-  MERGING: "merging",
-  SAVING: "saving",
-  UPLOADING: "uploading",
-  COMPLETED: "completed",
-  FAILED: "failed",
-  CANCELLED: "cancelled",
-} as const;
-
-export type DownloadStage = typeof DownloadStage[keyof typeof DownloadStage];
+export enum DownloadStage {
+  DETECTING = "detecting",
+  DOWNLOADING = "downloading",
+  MERGING = "merging",
+  SAVING = "saving",
+  UPLOADING = "uploading",
+  COMPLETED = "completed",
+  FAILED = "failed",
+  CANCELLED = "cancelled",
+}
 
 export interface DownloadProgress {
   url: string;

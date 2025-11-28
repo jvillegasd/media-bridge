@@ -7,6 +7,7 @@ import {
   VideoMetadata,
   VideoFormat,
   Level,
+  DownloadStage,
 } from "../core/types";
 import {
   getAllDownloads,
@@ -359,7 +360,7 @@ async function handleClearCompleted() {
 
     // Filter completed downloads
     const completedDownloads = allDownloads.filter(
-      (download) => download.progress.stage === "completed",
+      (download) => download.progress.stage === DownloadStage.COMPLETED,
     );
 
     if (completedDownloads.length === 0) {
@@ -633,17 +634,17 @@ function renderDetectedVideos() {
       const downloadState = getDownloadStateForVideo(video);
       const isDownloading =
         downloadState &&
-        downloadState.progress.stage !== "completed" &&
-        downloadState.progress.stage !== "failed" &&
-        downloadState.progress.stage !== "cancelled";
+        downloadState.progress.stage !== DownloadStage.COMPLETED &&
+        downloadState.progress.stage !== DownloadStage.FAILED &&
+        downloadState.progress.stage !== DownloadStage.CANCELLED;
       const isCompleted =
-        downloadState && downloadState.progress.stage === "completed";
+        downloadState && downloadState.progress.stage === DownloadStage.COMPLETED;
       const isFailed =
         downloadState &&
-        (downloadState.progress.stage === "failed" ||
-          downloadState.progress.stage === "cancelled");
+        (downloadState.progress.stage === DownloadStage.FAILED ||
+          downloadState.progress.stage === DownloadStage.CANCELLED);
       const isCancelled =
-        downloadState && downloadState.progress.stage === "cancelled";
+        downloadState && downloadState.progress.stage === DownloadStage.CANCELLED;
       const actualFormat = getActualFileFormat(video, downloadState);
 
       const displayResolution = (video.resolution || "").trim();
@@ -670,12 +671,12 @@ function renderDetectedVideos() {
         // Show detailed progress during downloading and merging stages
         const isManifestDownload =
           (video.format === "hls" || video.format === "m3u8") &&
-          (stage === "downloading" || stage === "merging");
+          (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
         if (isManifestDownload) {
           const percentage = downloadState.progress.percentage || 0;
 
-          if (stage === "downloading") {
+          if (stage === DownloadStage.DOWNLOADING) {
             // Manifest downloading progress: progress bar, real file size, and speed
             const downloaded = downloadState.progress.downloaded || 0;
             const total = downloadState.progress.total || 0;
@@ -703,7 +704,7 @@ function renderDetectedVideos() {
               </div>
             </div>
           `;
-          } else if (stage === "merging") {
+          } else if (stage === DownloadStage.MERGING) {
             // Manifest merging progress: progress bar restarts at 0% and goes to 100%
             const message =
               downloadState.progress.message || "Merging streams...";
@@ -870,15 +871,15 @@ function renderDownloads() {
   // Separate downloads into in-progress and completed
   const inProgress = downloadStates.filter(
     (d) =>
-      d.progress.stage !== "completed" &&
-      d.progress.stage !== "failed" &&
-      d.progress.stage !== "cancelled",
+      d.progress.stage !== DownloadStage.COMPLETED &&
+      d.progress.stage !== DownloadStage.FAILED &&
+      d.progress.stage !== DownloadStage.CANCELLED,
   );
   const completed = downloadStates.filter(
-    (d) => d.progress.stage === "completed",
+    (d) => d.progress.stage === DownloadStage.COMPLETED,
   );
   const failed = downloadStates.filter(
-    (d) => d.progress.stage === "failed" || d.progress.stage === "cancelled",
+    (d) => d.progress.stage === DownloadStage.FAILED || d.progress.stage === DownloadStage.CANCELLED,
   );
 
   // Sort by updatedAt (most recent first)
@@ -976,14 +977,14 @@ function renderDownloads() {
  */
 function renderDownloadItem(download: DownloadState): string {
   const isInProgress =
-    download.progress.stage !== "completed" &&
-    download.progress.stage !== "failed" &&
-    download.progress.stage !== "cancelled";
-  const isCompleted = download.progress.stage === "completed";
+    download.progress.stage !== DownloadStage.COMPLETED &&
+    download.progress.stage !== DownloadStage.FAILED &&
+    download.progress.stage !== DownloadStage.CANCELLED;
+  const isCompleted = download.progress.stage === DownloadStage.COMPLETED;
   const isFailed =
-    download.progress.stage === "failed" ||
-    download.progress.stage === "cancelled";
-  const isCancelled = download.progress.stage === "cancelled";
+    download.progress.stage === DownloadStage.FAILED ||
+    download.progress.stage === DownloadStage.CANCELLED;
+  const isCancelled = download.progress.stage === DownloadStage.CANCELLED;
 
   const title =
     download.metadata.title ||
@@ -997,12 +998,12 @@ function renderDownloadItem(download: DownloadState): string {
   const isManifestDownload =
     (download.metadata.format === "hls" ||
       download.metadata.format === "m3u8") &&
-    (stage === "downloading" || stage === "merging");
+    (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
   if (isInProgress && isManifestDownload) {
     const percentage = download.progress.percentage || 0;
 
-    if (stage === "downloading") {
+    if (stage === DownloadStage.DOWNLOADING) {
       const downloaded = download.progress.downloaded || 0;
       const total = download.progress.total || 0;
       const speed = download.progress.speed || 0;
@@ -1029,7 +1030,7 @@ function renderDownloadItem(download: DownloadState): string {
           </div>
         </div>
       `;
-    } else if (stage === "merging") {
+    } else if (stage === DownloadStage.MERGING) {
       const message = download.progress.message || "Merging streams...";
       const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
 
@@ -1099,13 +1100,31 @@ function renderDownloadItem(download: DownloadState): string {
       </div>
     `;
   } else if (isInProgress) {
-    actionButtons = `
-      <div style="display: flex; gap: 6px; margin-top: 6px;">
-        <button class="video-btn download-remove-btn" data-download-id="${download.id}">
-          Cancel
-        </button>
-      </div>
-    `;
+    // Check if download is in merging or saving phase - disable cancellation
+    const isMergingOrSaving =
+      download.progress.stage === DownloadStage.MERGING ||
+      download.progress.stage === DownloadStage.SAVING;
+    
+    if (isMergingOrSaving) {
+      actionButtons = `
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          <button class="video-btn download-remove-btn" data-download-id="${download.id}" disabled title="Cannot cancel during merging/saving. Chunks are already downloaded and processing is in progress." style="opacity: 0.6; cursor: not-allowed;">
+            Cancel
+          </button>
+        </div>
+        <div style="font-size: 11px; color: #888; margin-top: 4px;">
+          Cannot cancel: Chunks downloaded, merging in progress
+        </div>
+      `;
+    } else {
+      actionButtons = `
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          <button class="video-btn download-remove-btn" data-download-id="${download.id}">
+            Cancel
+          </button>
+        </div>
+      `;
+    }
   }
 
   return `
@@ -1220,11 +1239,22 @@ async function handleRemoveDownload(downloadId: string) {
     }
 
     const isInProgress =
-      download.progress.stage !== "completed" &&
-      download.progress.stage !== "failed" &&
-      download.progress.stage !== "cancelled";
+      download.progress.stage !== DownloadStage.COMPLETED &&
+      download.progress.stage !== DownloadStage.FAILED &&
+      download.progress.stage !== DownloadStage.CANCELLED;
 
     if (isInProgress) {
+      // Check if download is in merging or saving phase - prevent cancellation
+      if (
+        download.progress.stage === DownloadStage.MERGING ||
+        download.progress.stage === DownloadStage.SAVING
+      ) {
+        alert(
+          "Cannot cancel download during merging or saving phase. Chunks are already downloaded and processing is in progress."
+        );
+        return;
+      }
+
       // Cancel the download if it's in progress
       if (!confirm("Are you sure you want to cancel this download?")) {
         return;
@@ -1250,6 +1280,8 @@ async function handleRemoveDownload(downloadId: string) {
         if (response && response.success) {
           await loadDownloadStates();
           renderDownloads();
+          // Refresh detected videos list to show video card in initial state
+          renderDetectedVideos();
         } else if (response && response.error) {
           alert(response.error);
         }
@@ -1495,16 +1527,16 @@ function getVideoTitleFromUrl(url: string): string {
 /**
  * Get status text
  */
-function getStatusText(stage: string): string {
-  const statusMap: Record<string, string> = {
-    detecting: "Detecting",
-    downloading: "Downloading",
-    merging: "Merging",
-    saving: "Saving",
-    uploading: "Uploading",
-    completed: "Completed",
-    failed: "Failed",
-    cancelled: "Cancelled",
+function getStatusText(stage: DownloadStage): string {
+  const statusMap: Record<DownloadStage, string> = {
+    [DownloadStage.DETECTING]: "Detecting",
+    [DownloadStage.DOWNLOADING]: "Downloading",
+    [DownloadStage.MERGING]: "Merging",
+    [DownloadStage.SAVING]: "Saving",
+    [DownloadStage.UPLOADING]: "Uploading",
+    [DownloadStage.COMPLETED]: "Completed",
+    [DownloadStage.FAILED]: "Failed",
+    [DownloadStage.CANCELLED]: "Cancelled",
   };
 
   return statusMap[stage] || stage;
@@ -1759,8 +1791,8 @@ function updateManualManifestFormState() {
 
     if (downloadState) {
       isDownloading =
-        downloadState.progress.stage !== "completed" &&
-        downloadState.progress.stage !== "failed";
+        downloadState.progress.stage !== DownloadStage.COMPLETED &&
+        downloadState.progress.stage !== DownloadStage.FAILED;
     }
   }
 

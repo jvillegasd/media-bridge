@@ -28,7 +28,7 @@
 import { DownloadError, CancellationError } from "../../utils/errors";
 import { cancelIfAborted } from "../../utils/cancellation";
 import { getDownload, storeDownload } from "../../database/downloads";
-import { DownloadState, Fragment, Level } from "../../types";
+import { DownloadState, Fragment, Level, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import { decrypt } from "../../utils/crypto-utils";
 import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
@@ -179,7 +179,7 @@ export class HlsDownloadHandler {
     state.progress.downloaded = downloadedBytes;
     state.progress.total = totalBytes;
     state.progress.percentage = percentage;
-    state.progress.stage = "downloading";
+    state.progress.stage = DownloadStage.DOWNLOADING;
     state.progress.message =
       message ||
       `Downloaded ${this.formatFileSize(downloadedBytes)}/${this.formatFileSize(
@@ -513,10 +513,25 @@ export class HlsDownloadHandler {
       );
 
       // Set timeout to prevent hanging
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
+        // Check if download was cancelled before rejecting with timeout
+        if (this.abortSignal?.aborted) {
+          chrome.runtime.onMessage.removeListener(messageListener);
+          reject(new CancellationError());
+          return;
+        }
         chrome.runtime.onMessage.removeListener(messageListener);
         reject(new Error("FFmpeg processing timeout"));
       }, 300000); // 5 minutes timeout
+
+      // Clear timeout if cancelled
+      if (this.abortSignal) {
+        this.abortSignal.addEventListener("abort", () => {
+          clearTimeout(timeoutId);
+          chrome.runtime.onMessage.removeListener(messageListener);
+          reject(new CancellationError());
+        });
+      }
     });
   }
 
@@ -787,7 +802,7 @@ export class HlsDownloadHandler {
       // Update progress: merging with FFmpeg
       const mergingState = await getDownload(stateId);
       if (mergingState) {
-        mergingState.progress.stage = "merging";
+        mergingState.progress.stage = DownloadStage.MERGING;
         mergingState.progress.message = "Merging streams...";
         await storeDownload(mergingState);
         this.notifyProgress(mergingState);
@@ -808,17 +823,17 @@ export class HlsDownloadHandler {
             // Show merging progress as 0-100% (restart progress bar for merging phase)
             state.progress.percentage = progress * 100;
             state.progress.message = message;
-            state.progress.stage = "merging";
+            state.progress.stage = DownloadStage.MERGING;
             await storeDownload(state);
             this.notifyProgress(state);
           }
         },
       );
 
-      // Update progress: saving (set stage to "saving" instead of "downloading")
+      // Update progress: saving (set stage to SAVING instead of DOWNLOADING)
       const savingState = await getDownload(stateId);
       if (savingState) {
-        savingState.progress.stage = "saving";
+        savingState.progress.stage = DownloadStage.SAVING;
         savingState.progress.message = "Saving file...";
         savingState.progress.percentage = 95; // Close to completion
         await storeDownload(savingState);
@@ -839,7 +854,7 @@ export class HlsDownloadHandler {
       const finalState = await getDownload(stateId);
       if (finalState) {
         finalState.localPath = filePath;
-        finalState.progress.stage = "completed";
+        finalState.progress.stage = DownloadStage.COMPLETED;
         finalState.progress.message = "Download completed";
         finalState.progress.percentage = 100;
         // Ensure downloaded equals total for completed state
@@ -851,9 +866,9 @@ export class HlsDownloadHandler {
 
         // Ensure state is persisted by reading it back and verifying
         const verifyState = await getDownload(stateId);
-        if (verifyState && verifyState.progress.stage !== "completed") {
+        if (verifyState && verifyState.progress.stage !== DownloadStage.COMPLETED) {
           logger.warn(`State verification failed for ${stateId}, retrying...`);
-          verifyState.progress.stage = "completed";
+          verifyState.progress.stage = DownloadStage.COMPLETED;
           verifyState.progress.message = "Download completed";
           verifyState.progress.percentage = 100;
           await storeDownload(verifyState);

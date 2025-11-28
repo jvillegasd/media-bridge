@@ -17,7 +17,7 @@
 
 import { DownloadError } from "../../utils/errors";
 import { getDownload, storeDownload } from "../../database/downloads";
-import { DownloadState } from "../../types";
+import { DownloadState, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import {
   detectExtensionFromUrl,
@@ -157,7 +157,7 @@ export class DirectDownloadHandler {
     currentState.progress.downloaded = loaded;
     currentState.progress.total = total;
     currentState.progress.percentage = percentage;
-    currentState.progress.stage = "downloading";
+    currentState.progress.stage = DownloadStage.DOWNLOADING;
     currentState.progress.message = "Downloading...";
 
     await storeDownload(currentState);
@@ -298,7 +298,7 @@ export class DirectDownloadHandler {
     }
 
     currentState.localPath = result.filePath;
-    currentState.progress.stage = "completed";
+    currentState.progress.stage = DownloadStage.COMPLETED;
     currentState.progress.message = "Download completed";
     currentState.progress.percentage = 100;
 

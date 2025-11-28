@@ -2,7 +2,7 @@
  * Message types for communication between extension components
  */
 
-import { VideoMetadata } from "../core/types";
+import { VideoMetadata, DownloadStage } from "../core/types";
 
 export enum MessageType {
   // Download messages
@@ -75,7 +75,7 @@ export interface DownloadProgressMessage extends BaseMessage {
   payload: {
     id: string;
     progress: {
-      stage: string;
+      stage: DownloadStage;
       downloaded?: number;
       total?: number;
       percentage?: number;

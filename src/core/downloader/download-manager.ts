@@ -3,7 +3,7 @@
  * Routes downloads to format-specific handlers (direct, HLS, M3U8)
  */
 
-import { VideoFormat, VideoMetadata, DownloadState } from "../types";
+import { VideoFormat, VideoMetadata, DownloadState, DownloadStage } from "../types";
 import {
   getDownload,
   storeDownload,
@@ -114,7 +114,7 @@ export class DownloadManager {
       }
 
       const format = metadata.format;
-      state.progress.stage = "downloading";
+      state.progress.stage = DownloadStage.DOWNLOADING;
       state.progress.message = `Format: ${format}`;
       await storeDownload(state);
       this.notifyProgress(state);
@@ -184,7 +184,7 @@ export class DownloadManager {
       metadata,
       progress: {
         url,
-        stage: "detecting",
+        stage: DownloadStage.DETECTING,
         percentage: 0,
       },
       isManual,
@@ -217,7 +217,7 @@ export class DownloadManager {
       metadata,
       progress: {
         url,
-        stage: "failed",
+        stage: DownloadStage.FAILED,
         error: errorMessage,
       },
       createdAt,

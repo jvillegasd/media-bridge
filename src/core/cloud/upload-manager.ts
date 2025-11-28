@@ -3,7 +3,7 @@
  */
 
 import { GoogleDriveClient, UploadResult } from "./google-drive";
-import { DownloadState } from "../types";
+import { DownloadState, DownloadStage } from "../types";
 import { UploadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { StorageConfig } from "../types";
@@ -45,7 +45,7 @@ export class UploadManager {
 
     try {
       if (downloadState) {
-        downloadState.progress.stage = "uploading";
+        downloadState.progress.stage = DownloadStage.UPLOADING;
         downloadState.progress.message = "Uploading to Google Drive...";
         this.onProgress?.(downloadState);
       }
@@ -54,7 +54,7 @@ export class UploadManager {
 
       if (downloadState) {
         downloadState.cloudId = result.fileId;
-        downloadState.progress.stage = "completed";
+        downloadState.progress.stage = DownloadStage.COMPLETED;
         downloadState.progress.message = "Upload completed";
         this.onProgress?.(downloadState);
       }
@@ -65,7 +65,7 @@ export class UploadManager {
       logger.error("Upload failed:", error);
 
       if (downloadState) {
-        downloadState.progress.stage = "failed";
+        downloadState.progress.stage = DownloadStage.FAILED;
         downloadState.progress.error =
           error instanceof Error ? error.message : String(error);
         this.onProgress?.(downloadState);
