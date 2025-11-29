@@ -138,12 +138,6 @@
       min-height: 0;
     }
 
-    #manifestContent {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      min-height: 0;
-    }
 
     #downloadsContent {
       flex: 1;
@@ -566,10 +560,10 @@
     .bottom-bar {
       display: flex;
       align-items: center;
-      justify-content: space-around;
+      justify-content: space-between;
       background: var(--bg-secondary);
       border-top: 1px solid var(--border-color);
-      padding: 0;
+      padding: 8px 12px;
       flex-shrink: 0;
       position: sticky;
       bottom: 0;
@@ -578,19 +572,16 @@
 
     .bottom-bar-btn {
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 3px;
-      padding: 10px;
+      padding: 8px 12px;
       background: transparent;
       border: none;
       color: var(--text-secondary);
       cursor: pointer;
-      border-radius: 0;
+      border-radius: 4px;
       transition: all 0.2s;
-      flex: 1;
-      font-size: 10px;
+      font-size: 0;
     }
 
     .bottom-bar-btn:hover {
@@ -604,14 +595,18 @@
 
     .bottom-bar-btn svg {
       display: block;
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
     }
 
     .bottom-bar-btn span {
-      display: block;
-      font-size: 10px;
-      line-height: 1.2;
+      display: none;
+    }
+
+    .bottom-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
     /* 3-dot menu dropdown */
@@ -856,47 +851,49 @@
         </svg>
         <span>Settings</span>
       </button>
-      <button id="clearCompletedBtn" class="bottom-bar-btn" title="Remove completed and failed downloads">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          <line x1="10" y1="11" x2="10" y2="17"></line>
-          <line x1="14" y1="11" x2="14" y2="17"></line>
-        </svg>
-        <span>Clear</span>
-      </button>
-      <div class="menu-dropdown">
-        <button id="menuBtn" class="bottom-bar-btn" title="More options">
+      <div class="bottom-bar-right">
+        <button id="clearCompletedBtn" class="bottom-bar-btn" title="Remove completed and failed downloads">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="1"></circle>
-            <circle cx="12" cy="5" r="1"></circle>
-            <circle cx="12" cy="19" r="1"></circle>
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
           </svg>
-          <span>More</span>
+          <span>Clear</span>
         </button>
-        <div id="menuDropdown" class="menu-dropdown-content">
-          <button id="downloadsBtn" class="menu-dropdown-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
+        <div class="menu-dropdown">
+          <button id="menuBtn" class="bottom-bar-btn" title="More options">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="1"></circle>
+              <circle cx="12" cy="5" r="1"></circle>
+              <circle cx="12" cy="19" r="1"></circle>
             </svg>
-            <span>Open Folder</span>
+            <span>More</span>
           </button>
-          <button id="themeToggle" class="menu-dropdown-item">
-            <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-            <span>Toggle Theme</span>
-          </button>
+          <div id="menuDropdown" class="menu-dropdown-content">
+            <button id="downloadsBtn" class="menu-dropdown-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Open Folder</span>
+            </button>
+            <button id="themeToggle" class="menu-dropdown-item">
+              <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+              <span>Toggle Theme</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -904,36 +901,34 @@
 
   <!-- Manifest Tab Content -->
   <div id="manifestContent" class="tab-content">
-    <div style="display: flex; flex-direction: column; height: 100%;">
-      <div style="flex: 1; overflow-y: auto; padding: 20px;">
+    <div style="flex: 1; overflow-y: auto; padding: 20px; min-height: 0;">
+      <div class="hls-quality-form-group">
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="manifestUrlInput" class="hls-quality-input" placeholder="Enter manifest URL (HLS .m3u8 or DASH .mpd)" style="flex: 1;">
+          <button id="loadHlsPlaylistBtn" class="primary-btn">Load</button>
+        </div>
+      </div>
+      <div id="hlsMediaPlaylistWarning" class="hls-quality-warning" style="display: none;">
+        <strong>⚠️ Media Playlist Detected</strong>
+        <p>This URL belongs to a media playlist. Quality selection is not available. The download will proceed with the available stream.</p>
+      </div>
+      <div id="hlsQualitySelection" style="display: none;">
         <div class="hls-quality-form-group">
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="manifestUrlInput" class="hls-quality-input" placeholder="Enter manifest URL (HLS .m3u8 or DASH .mpd)" style="flex: 1;">
-            <button id="loadHlsPlaylistBtn" class="primary-btn">Load</button>
-          </div>
+          <label for="videoQualitySelect">Video Quality:</label>
+          <select id="videoQualitySelect" class="hls-quality-select">
+            <option value="">Select video quality...</option>
+          </select>
         </div>
-        <div id="hlsMediaPlaylistWarning" class="hls-quality-warning" style="display: none;">
-          <strong>⚠️ Media Playlist Detected</strong>
-          <p>This URL belongs to a media playlist. Quality selection is not available. The download will proceed with the available stream.</p>
-        </div>
-        <div id="hlsQualitySelection" style="display: none;">
-          <div class="hls-quality-form-group">
-            <label for="videoQualitySelect">Video Quality:</label>
-            <select id="videoQualitySelect" class="hls-quality-select">
-              <option value="">Select video quality...</option>
-            </select>
-          </div>
-          <div class="hls-quality-form-group">
-            <label for="audioQualitySelect">Audio Quality:</label>
-            <select id="audioQualitySelect" class="hls-quality-select">
-              <option value="">Select audio quality...</option>
-            </select>
-          </div>
+        <div class="hls-quality-form-group">
+          <label for="audioQualitySelect">Audio Quality:</label>
+          <select id="audioQualitySelect" class="hls-quality-select">
+            <option value="">Select audio quality...</option>
+          </select>
         </div>
       </div>
       <!-- Download Progress Display -->
-      <div id="manifestProgress" style="display: none; padding: 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);"></div>
-      <div style="padding: 16px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); flex-shrink: 0;">
+      <div id="manifestProgress" style="display: none; padding: 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-color); margin-top: 20px;"></div>
+      <div style="padding: 16px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); margin-top: 20px;">
         <button id="startHlsDownloadBtn" class="primary-btn" style="width: 100%;" disabled>Download</button>
       </div>
     </div>
@@ -946,47 +941,49 @@
         </svg>
         <span>Settings</span>
       </button>
-      <button id="clearCompletedBtn" class="bottom-bar-btn" title="Remove completed and failed downloads">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          <line x1="10" y1="11" x2="10" y2="17"></line>
-          <line x1="14" y1="11" x2="14" y2="17"></line>
-        </svg>
-        <span>Clear</span>
-      </button>
-      <div class="menu-dropdown">
-        <button id="menuBtn" class="bottom-bar-btn" title="More options">
+      <div class="bottom-bar-right">
+        <button id="clearCompletedBtn" class="bottom-bar-btn" title="Remove completed and failed downloads">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="1"></circle>
-            <circle cx="12" cy="5" r="1"></circle>
-            <circle cx="12" cy="19" r="1"></circle>
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
           </svg>
-          <span>More</span>
+          <span>Clear</span>
         </button>
-        <div id="menuDropdown" class="menu-dropdown-content">
-          <button id="downloadsBtn" class="menu-dropdown-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
+        <div class="menu-dropdown">
+          <button id="menuBtn" class="bottom-bar-btn" title="More options">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="1"></circle>
+              <circle cx="12" cy="5" r="1"></circle>
+              <circle cx="12" cy="19" r="1"></circle>
             </svg>
-            <span>Open Folder</span>
+            <span>More</span>
           </button>
-          <button id="themeToggle" class="menu-dropdown-item">
-            <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-            <span>Toggle Theme</span>
-          </button>
+          <div id="menuDropdown" class="menu-dropdown-content">
+            <button id="downloadsBtn" class="menu-dropdown-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Open Folder</span>
+            </button>
+            <button id="themeToggle" class="menu-dropdown-item">
+              <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+              <span>Toggle Theme</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1004,47 +1001,49 @@
         </svg>
         <span>Settings</span>
       </button>
-      <button id="clearCompletedBtn" class="bottom-bar-btn" title="Remove completed and failed downloads">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          <line x1="10" y1="11" x2="10" y2="17"></line>
-          <line x1="14" y1="11" x2="14" y2="17"></line>
-        </svg>
-        <span>Clear</span>
-      </button>
-      <div class="menu-dropdown">
-        <button id="menuBtn" class="bottom-bar-btn" title="More options">
+      <div class="bottom-bar-right">
+        <button id="clearCompletedBtn" class="bottom-bar-btn" title="Remove completed and failed downloads">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="1"></circle>
-            <circle cx="12" cy="5" r="1"></circle>
-            <circle cx="12" cy="19" r="1"></circle>
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
           </svg>
-          <span>More</span>
+          <span>Clear</span>
         </button>
-        <div id="menuDropdown" class="menu-dropdown-content">
-          <button id="downloadsBtn" class="menu-dropdown-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
+        <div class="menu-dropdown">
+          <button id="menuBtn" class="bottom-bar-btn" title="More options">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="1"></circle>
+              <circle cx="12" cy="5" r="1"></circle>
+              <circle cx="12" cy="19" r="1"></circle>
             </svg>
-            <span>Open Folder</span>
+            <span>More</span>
           </button>
-          <button id="themeToggle" class="menu-dropdown-item">
-            <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-            <span>Toggle Theme</span>
-          </button>
+          <div id="menuDropdown" class="menu-dropdown-content">
+            <button id="downloadsBtn" class="menu-dropdown-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Open Folder</span>
+            </button>
+            <button id="themeToggle" class="menu-dropdown-item">
+              <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+              <span>Toggle Theme</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
