@@ -15,8 +15,6 @@ description: |
 jobs:
   rewrite-pr-title:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
     steps:
       - name: Rewrite PR Title from slash format
         uses: actions/github-script@v7
@@ -83,5 +81,4 @@ jobs:
           subjectPattern: ^.+$
           subjectPatternError: |
             The subject "{subject}" found in the PR title "{title}" didn't match the configured pattern. Please ensure it follows the conventional commit format.
-          wip: true
           validateSingleCommit: false
