@@ -15,8 +15,6 @@ description: |
 jobs:
   rewrite-pr-title:
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
     steps:
       - name: Rewrite PR Title from slash format
         uses: actions/github-script@v7
