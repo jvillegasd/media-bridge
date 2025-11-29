@@ -13,16 +13,24 @@ import {
 } from "./core/database/downloads";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { MessageType } from "./shared/messages";
-import { DownloadState, StorageConfig, VideoMetadata, DownloadStage } from "./core/types";
+import {
+  DownloadState,
+  StorageConfig,
+  VideoMetadata,
+  DownloadStage,
+} from "./core/types";
 import { CancellationError } from "./core/utils/errors";
 import { logger } from "./core/utils/logger";
-import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "./core/utils/download-utils";
+import {
+  canCancelDownload,
+  CANNOT_CANCEL_MESSAGE,
+} from "./core/utils/download-utils";
 import { normalizeUrl, detectFormatFromUrl } from "./core/utils/url-utils";
 import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
-import { deleteChunks } from "./core/database/chunks";
+import { deleteChunks, getChunkCount } from "./core/database/chunks";
 
 const CONFIG_KEY = "storage_config";
 const MAX_CONCURRENT_KEY = "max_concurrent";
@@ -320,6 +328,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+async function cleanupOrphanedChunks(existing: DownloadState) {
+  if (
+    existing.metadata.format !== "hls" &&
+    existing.metadata.format !== "m3u8"
+  ) {
+    return;
+  }
+
+  logger.info(
+    `Cleaning up orphaned chunks for ${existing.progress.stage} download ${existing.id}`,
+  );
+
+  try {
+    const chunkCount = await getChunkCount(existing.id);
+    if (chunkCount > 0) {
+      logger.warn(
+        `Orphaned chunks found for ${existing.progress.stage} download ${existing.id}: ${chunkCount} chunks remaining`,
+      );
+      await deleteChunks(existing.id);
+    } else {
+      logger.info(
+        `Successfully cleaned up orphaned chunks for ${existing.progress.stage} download ${existing.id}`,
+      );
+    }
+  } catch (error) {
+    logger.error(
+      `Error verifying chunk cleanup for ${existing.progress.stage} download ${existing.id}:`,
+      error,
+    );
+    // Don't throw - continue with download even if cleanup verification fails
+  }
+}
+
 /**
  * Process download request
  * Validates request, checks for duplicates, creates download manager, and starts download
@@ -355,19 +396,17 @@ async function handleDownloadRequest(payload: {
     await deleteDownload(existing.id);
   }
 
-  if (existing && existing.progress.stage === DownloadStage.CANCELLED) {
-    // Delete cancelled download to allow starting a new one
-    logger.info(`Deleting cancelled download to allow new download: ${normalizedUrl}`);
+  if (
+    existing &&
+    (existing.progress.stage === DownloadStage.FAILED ||
+      existing.progress.stage === DownloadStage.CANCELLED)
+  ) {
+    logger.info(`Retrying failed or cancelled download: ${normalizedUrl}`);
     await deleteDownload(existing.id);
     // Also ensure it's removed from activeDownloads map
     activeDownloads.delete(normalizedUrl);
-  }
 
-  if (existing && existing.progress.stage === DownloadStage.FAILED) {
-    logger.info(`Retrying failed download: ${normalizedUrl}`);
-    await deleteDownload(existing.id);
-    // Also ensure it's removed from activeDownloads map
-    activeDownloads.delete(normalizedUrl);
+    await cleanupOrphanedChunks(existing);
   }
 
   if (activeDownloads.has(normalizedUrl)) {
@@ -388,15 +427,17 @@ async function handleDownloadRequest(payload: {
     ffmpegTimeout,
     onProgress: async (state) => {
       const normalizedUrlForProgress = normalizeUrl(state.url);
-      
+
       // Get abort controller and store signal reference ONCE to avoid stale reference issues
       const controller = downloadAbortControllers.get(normalizedUrlForProgress);
       // If no controller exists (already cleaned up) or signal is aborted, skip update
       if (!controller || controller.signal.aborted) {
-        logger.info(`Download ${state.id} was aborted, ignoring progress update`);
+        logger.info(
+          `Download ${state.id} was aborted, ignoring progress update`,
+        );
         return;
       }
-      
+
       // Store signal reference for consistent checks throughout this function
       const signal = controller.signal;
 
@@ -404,18 +445,24 @@ async function handleDownloadRequest(payload: {
       const currentState = await getDownload(state.id);
       // If download was deleted (cancelled) or has CANCELLED stage, don't update
       if (!currentState) {
-        logger.info(`Download ${state.id} was deleted (cancelled), ignoring progress update`);
+        logger.info(
+          `Download ${state.id} was deleted (cancelled), ignoring progress update`,
+        );
         return;
       }
       if (currentState.progress.stage === DownloadStage.CANCELLED) {
-        logger.info(`Download ${state.id} was cancelled, ignoring progress update`);
+        logger.info(
+          `Download ${state.id} was cancelled, ignoring progress update`,
+        );
         return;
       }
 
       // Final abort check immediately before storing to minimize race window
       // Re-check abort signal after async database operation using stored reference
       if (signal.aborted) {
-        logger.info(`Download ${state.id} was aborted, ignoring progress update`);
+        logger.info(
+          `Download ${state.id} was aborted, ignoring progress update`,
+        );
         return;
       }
 
@@ -539,12 +586,10 @@ function isDownloadFailed(downloadState: DownloadState): boolean {
 /**
  * Clean up download resources after completion or cancellation
  */
-async function cleanupDownloadResources(
-  normalizedUrl: string,
-): Promise<void> {
+async function cleanupDownloadResources(normalizedUrl: string): Promise<void> {
   // Clean up AbortController
   downloadAbortControllers.delete(normalizedUrl);
-  
+
   // Note: activeDownloads cleanup is handled in the promise's finally block
   // to ensure it's removed regardless of success/failure/cancellation
 }
@@ -557,7 +602,9 @@ async function cancelChromeDownloads(download: DownloadState): Promise<void> {
   // Only cancel if chromeDownloadId is set (Chrome downloads API is being used)
   // HLS/M3U8 downloads only use Chrome API at the final save stage
   if (download.chromeDownloadId === undefined) {
-    logger.debug(`Skipping Chrome download cancellation - Chrome API not used for this download`);
+    logger.debug(
+      `Skipping Chrome download cancellation - Chrome API not used for this download`,
+    );
     return;
   }
 
@@ -566,7 +613,7 @@ async function cancelChromeDownloads(download: DownloadState): Promise<void> {
       if (chrome.runtime.lastError) {
         logger.debug(
           `Failed to cancel Chrome download ${download.chromeDownloadId}:`,
-          chrome.runtime.lastError.message
+          chrome.runtime.lastError.message,
         );
       } else {
         logger.info(`Cancelled Chrome download ${download.chromeDownloadId}`);
@@ -653,12 +700,14 @@ async function handleCancelDownload(id: string): Promise<void> {
   // Prevent cancellation during merging or saving phases
   // Chunks are already downloaded at this point, so cancellation would waste resources
   if (!canCancelDownload(download.progress.stage)) {
-    logger.info(`Cancellation prevented for download ${id}: ${CANNOT_CANCEL_MESSAGE}`);
+    logger.info(
+      `Cancellation prevented for download ${id}: ${CANNOT_CANCEL_MESSAGE}`,
+    );
     throw new Error(CANNOT_CANCEL_MESSAGE);
   }
 
   const normalizedUrl = normalizeUrl(download.url);
-  
+
   // 1. Abort fetch operations
   const abortController = downloadAbortControllers.get(normalizedUrl);
   if (abortController) {
@@ -666,7 +715,7 @@ async function handleCancelDownload(id: string): Promise<void> {
     logger.info(`Aborted fetch operations for download ${normalizedUrl}`);
     downloadAbortControllers.delete(normalizedUrl);
   }
-  
+
   // 2. Cancel Chrome downloads
   await cancelChromeDownloads(download);
 
@@ -682,7 +731,7 @@ async function handleCancelDownload(id: string): Promise<void> {
     } catch (error) {
       logger.error(
         `Failed to clean up chunks for download ${download.id}:`,
-        error
+        error,
       );
       // Don't throw - continue with cancellation even if cleanup fails
     }
