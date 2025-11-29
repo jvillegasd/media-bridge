@@ -81,5 +81,4 @@ jobs:
           subjectPattern: ^.+$
           subjectPatternError: |
             The subject "{subject}" found in the PR title "{title}" didn't match the configured pattern. Please ensure it follows the conventional commit format.
-          wip: true
           validateSingleCommit: false
