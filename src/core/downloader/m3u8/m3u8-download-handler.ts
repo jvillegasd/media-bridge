@@ -684,9 +684,6 @@ export class M3u8DownloadHandler {
         stateId,
       );
 
-      // Clean up IndexedDB chunks
-      await deleteChunks(this.downloadId);
-
       // Update progress: completed
       const finalState = await getDownload(stateId);
       if (finalState) {
@@ -724,17 +721,17 @@ export class M3u8DownloadHandler {
       };
     } catch (error) {
       logger.error("M3U8 media playlist download failed:", error);
-
-      // Always clean up IndexedDB chunks on any error (cancellation, failure, etc.)
-      try {
-        await deleteChunks(this.downloadId || stateId);
-        logger.info(`Cleaned up chunks for M3U8 download ${this.downloadId || stateId} after error`);
-      } catch (cleanupError) {
-        logger.error("Failed to clean up chunks:", cleanupError);
-      }
-
       // Re-throw the original error (preserve CancellationError, DownloadError, etc.)
       throw error;
+    } finally {
+      // Always clean up IndexedDB chunks regardless of success/failure/cancellation
+      try {
+        await deleteChunks(this.downloadId || stateId);
+        logger.info(`Cleaned up chunks for M3U8 download ${this.downloadId || stateId}`);
+      } catch (cleanupError) {
+        logger.error("Failed to clean up chunks:", cleanupError);
+        // Don't throw - cleanup errors shouldn't mask original errors
+      }
     }
   }
 
