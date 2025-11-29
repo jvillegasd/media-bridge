@@ -3,7 +3,7 @@ on:
     types: [opened, edited]
 
 permissions:
-  pull-requests: write
+  pull-requests: [write, read]
 
 name: Rewrite and Validate PR Title
 description: |
