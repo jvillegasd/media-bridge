@@ -664,12 +664,7 @@ function renderDetectedVideos() {
   }
 
   if (uniqueVideos.length === 0) {
-    detectedVideosList.innerHTML = `
-      <div class="empty-state">
-        No videos detected on this page.<br>
-        Try turning off autoplay, restart the page and starting the video manually.
-      </div>
-    `;
+    detectedVideosList.innerHTML = ``;
     return;
   }
 
