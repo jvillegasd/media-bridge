@@ -7,7 +7,7 @@ permissions:
   contents: write
   pull-requests: write
 
-name: release-please
+name: Build and Release
 
 description: |
   This GitHub Action will automatically create a release PR for the project
