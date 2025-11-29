@@ -62,6 +62,15 @@ let detectedVideos: Record<string, VideoMetadata> = {};
 let downloadStates: DownloadState[] = [];
 
 /**
+ * Close all menu dropdowns
+ */
+function closeAllMenuDropdowns() {
+  document.querySelectorAll(".menu-dropdown-content").forEach((dropdown) => {
+    dropdown.classList.remove("show");
+  });
+}
+
+/**
  * Initialize popup
  */
 async function init() {
@@ -114,8 +123,8 @@ async function init() {
   manifestProgress = document.getElementById(
     "manifestProgress",
   ) as HTMLDivElement;
-  themeToggle = document.getElementById("themeToggle") as HTMLButtonElement;
-  themeIcon = document.getElementById("themeIcon") as unknown as SVGElement;
+  themeToggle = document.querySelector("#themeToggle") as HTMLButtonElement;
+  themeIcon = document.querySelector("#themeIcon") as unknown as SVGElement;
 
   // Ensure notice is hidden initially
   if (noVideoNotice) {
@@ -126,16 +135,46 @@ async function init() {
   // Load and apply theme
   await loadTheme();
 
-  // Setup theme toggle
+  // Setup theme toggle (from menu dropdown)
   if (themeToggle) {
-    themeToggle.addEventListener("click", toggleTheme);
+    themeToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleTheme();
+      // Close dropdown after toggle
+      closeAllMenuDropdowns();
+    });
   }
 
-  // Setup event listeners
-  // Use querySelectorAll to handle buttons that may appear in multiple tabs
-  document.querySelectorAll("#noVideoBtn").forEach((btn) => {
-    btn.addEventListener("click", toggleNoVideoNotice);
+  // Setup menu dropdowns
+  document.querySelectorAll(".menu-dropdown").forEach((dropdown) => {
+    const menuBtn = dropdown.querySelector(".bottom-bar-btn") as HTMLButtonElement;
+    const menuContent = dropdown.querySelector(".menu-dropdown-content") as HTMLDivElement;
+    
+    if (menuBtn && menuContent) {
+      menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        // Toggle this dropdown
+        const isOpen = menuContent.classList.contains("show");
+        closeAllMenuDropdowns();
+        if (!isOpen) {
+          menuContent.classList.add("show");
+        }
+      });
+    }
   });
+
+  // Close dropdowns when clicking outside
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest(".menu-dropdown")) {
+      closeAllMenuDropdowns();
+    }
+  });
+
+  // Setup event listeners
+  // No video button (only in Videos tab)
+  if (noVideoBtn) {
+    noVideoBtn.addEventListener("click", toggleNoVideoNotice);
+  }
   if (closeNoVideoNoticeBtn) {
     closeNoVideoNoticeBtn.addEventListener("click", hideNoVideoNotice);
   }
@@ -148,7 +187,11 @@ async function init() {
     });
   });
   document.querySelectorAll("#downloadsBtn").forEach((btn) => {
-    btn.addEventListener("click", handleOpenDownloads);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleOpenDownloads();
+      closeAllMenuDropdowns();
+    });
   });
   document.querySelectorAll("#clearCompletedBtn").forEach((btn) => {
     btn.addEventListener("click", handleClearCompleted);
@@ -332,8 +375,6 @@ async function handleForceDetection() {
 }
 
 async function handleOpenDownloads() {
-  if (!downloadsBtn) return;
-
   try {
     // Open the default downloads folder
     await chrome.downloads.showDefaultFolder();
@@ -609,6 +650,18 @@ function getDownloadStateForVideo(
  */
 function renderDetectedVideos() {
   const uniqueVideos = Object.values(detectedVideos);
+
+  // Position "No video" button dynamically
+  const noVideoBtnContainer = document.getElementById("noVideoBtnContainer");
+  if (noVideoBtnContainer) {
+    if (uniqueVideos.length === 0) {
+      // No videos: center center
+      noVideoBtnContainer.classList.remove("has-videos");
+    } else {
+      // Has videos: bottom center
+      noVideoBtnContainer.classList.add("has-videos");
+    }
+  }
 
   if (uniqueVideos.length === 0) {
     detectedVideosList.innerHTML = `
@@ -2158,27 +2211,32 @@ function applyTheme(isLightMode: boolean) {
  * Update theme icon based on current theme
  */
 function updateThemeIcon(isLightMode: boolean) {
-  if (!themeIcon) return;
+  const themeIcons = document.querySelectorAll("#themeIcon") as NodeListOf<SVGElement>;
+  
+  const moonIcon = `
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+  `;
+  const sunIcon = `
+    <circle cx="12" cy="12" r="5"></circle>
+    <line x1="12" y1="1" x2="12" y2="3"></line>
+    <line x1="12" y1="21" x2="12" y2="23"></line>
+    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+    <line x1="1" y1="12" x2="3" y2="12"></line>
+    <line x1="21" y1="12" x2="23" y2="12"></line>
+    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+  `;
 
-  if (isLightMode) {
-    // Moon icon for light mode (to switch to dark)
-    themeIcon.innerHTML = `
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-    `;
-  } else {
-    // Sun icon for dark mode (to switch to light)
-    themeIcon.innerHTML = `
-      <circle cx="12" cy="12" r="5"></circle>
-      <line x1="12" y1="1" x2="12" y2="3"></line>
-      <line x1="12" y1="21" x2="12" y2="23"></line>
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-      <line x1="1" y1="12" x2="3" y2="12"></line>
-      <line x1="21" y1="12" x2="23" y2="12"></line>
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-    `;
-  }
+  themeIcons.forEach((icon) => {
+    if (isLightMode) {
+      // Moon icon for light mode (to switch to dark)
+      icon.innerHTML = moonIcon;
+    } else {
+      // Sun icon for dark mode (to switch to light)
+      icon.innerHTML = sunIcon;
+    }
+  });
 }
 
 /**
