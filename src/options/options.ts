@@ -21,6 +21,9 @@ const signOutBtn = document.getElementById("signOutBtn") as HTMLButtonElement;
 const maxConcurrent = document.getElementById(
   "maxConcurrent",
 ) as HTMLInputElement;
+const ffmpegTimeout = document.getElementById(
+  "ffmpegTimeout",
+) as HTMLInputElement;
 const saveBtn = document.getElementById("saveBtn") as HTMLButtonElement;
 const statusMessage = document.getElementById(
   "statusMessage",
@@ -73,6 +76,10 @@ async function loadSettings() {
   if (maxConcurrentValue) {
     maxConcurrent.value = maxConcurrentValue.toString();
   }
+
+  // Load FFmpeg timeout (stored internally as milliseconds, convert to minutes for UI)
+  const ffmpegTimeoutMs = config?.ffmpegTimeout || 900000; // Default 15 minutes in ms
+  ffmpegTimeout.value = Math.round(ffmpegTimeoutMs / 60000).toString(); // Convert ms to minutes
 }
 
 /**
@@ -156,6 +163,11 @@ async function handleSave() {
         createFolderIfNotExists: true,
       },
     };
+
+    // Store FFmpeg timeout in config (convert from minutes to milliseconds for internal storage)
+    const timeoutMinutes = parseInt(ffmpegTimeout.value) || 15;
+    const timeoutMs = Math.max(5, Math.min(60, timeoutMinutes)) * 60000; // Clamp 5-60 minutes, convert to ms
+    config.ffmpegTimeout = timeoutMs; // Stored internally as milliseconds
 
     await ChromeStorage.set(CONFIG_KEY, config);
     await ChromeStorage.set(

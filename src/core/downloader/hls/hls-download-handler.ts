@@ -30,7 +30,7 @@ import { cancelIfAborted, throwIfAborted } from "../../utils/cancellation";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment, Level, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
-import { decrypt } from "../../utils/crypto-utils";
+import { decryptFragment } from "../../utils/crypto-utils";
 import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
 import {
   parseMasterPlaylist,
@@ -50,57 +50,8 @@ export interface HlsDownloadHandlerOptions {
   onProgress?: DownloadProgressCallback;
   /** Maximum concurrent fragment downloads @default 3 */
   maxConcurrent?: number;
-}
-
-/** Encryption key information for fragment decryption */
-interface Key {
-  iv: string | null;
-  uri: string | null;
-}
-
-/**
- * Decrypt a single fragment if encrypted (AES-128)
- * Returns data unchanged if not encrypted
- */
-async function decryptSingleFragment(
-  key: Key,
-  data: ArrayBuffer,
-  fetchAttempts: number = 3,
-  abortSignal?: AbortSignal,
-): Promise<ArrayBuffer> {
-  // If no key URI or IV, fragment is not encrypted
-  if (!key.uri || !key.iv) {
-    return data;
-  }
-
-  try {
-    // Fetch the encryption key
-    const keyArrayBuffer = await fetchArrayBuffer(key.uri, fetchAttempts, abortSignal);
-
-    // Convert IV from hex string to Uint8Array
-    // IV should be 16 bytes for AES-128
-    const hexString = key.iv.startsWith("0x") ? key.iv.slice(2) : key.iv;
-    const ivBytes = new Uint8Array(16);
-
-    // Parse hex string (should be 32 hex chars = 16 bytes)
-    // Pad or truncate to exactly 16 bytes
-    const normalizedHex = hexString.padEnd(32, "0").slice(0, 32);
-    for (let i = 0; i < 16; i++) {
-      const hexByte = normalizedHex.substring(i * 2, i * 2 + 2);
-      ivBytes[i] = parseInt(hexByte, 16);
-    }
-
-    // Decrypt the data
-    const decryptedData = await decrypt(data, keyArrayBuffer, ivBytes);
-    return decryptedData;
-  } catch (error) {
-    logger.error(`Failed to decrypt fragment:`, error);
-    throw new Error(
-      `Decryption failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+  /** FFmpeg processing timeout in milliseconds @default 900000 (15 minutes) */
+  ffmpegTimeout?: number;
 }
 
 /**
@@ -110,6 +61,7 @@ async function decryptSingleFragment(
 export class HlsDownloadHandler {
   private readonly onProgress?: ProgressCallback;
   private readonly maxConcurrent: number;
+  private readonly ffmpegTimeout: number;
   /** Number of video fragments downloaded */
   private videoLength: number = 0;
   /** Number of audio fragments downloaded */
@@ -134,6 +86,7 @@ export class HlsDownloadHandler {
   constructor(options: HlsDownloadHandlerOptions = {}) {
     this.onProgress = options.onProgress;
     this.maxConcurrent = options.maxConcurrent || 3;
+    this.ffmpegTimeout = options.ffmpegTimeout || 900000; // Default 15 minutes
   }
 
   /**
@@ -244,7 +197,7 @@ export class HlsDownloadHandler {
     );
 
     const decryptedData = await cancelIfAborted(
-      decryptSingleFragment(
+      decryptFragment(
         fragment.key,
         data,
         fetchAttempts,
@@ -472,6 +425,29 @@ export class HlsDownloadHandler {
         reject(new CancellationError());
         return;
       }
+
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let isSettled = false;
+
+      // Cleanup function to remove all listeners and clear timeout
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        chrome.runtime.onMessage.removeListener(messageListener);
+        if (this.abortSignal) {
+          this.abortSignal.removeEventListener("abort", abortHandler);
+        }
+      };
+
+      // Abort handler as named function for cleanup
+      const abortHandler = () => {
+        if (isSettled) return;
+        isSettled = true;
+        cleanup();
+        reject(new CancellationError());
+      };
       
       // Set up message listener for offscreen responses
       const messageListener = (message: any) => {
@@ -488,10 +464,14 @@ export class HlsDownloadHandler {
           } = message.payload;
 
           if (type === "success") {
-            chrome.runtime.onMessage.removeListener(messageListener);
+            if (isSettled) return;
+            isSettled = true;
+            cleanup();
             resolve(blobUrl);
           } else if (type === "error") {
-            chrome.runtime.onMessage.removeListener(messageListener);
+            if (isSettled) return;
+            isSettled = true;
+            cleanup();
             reject(new Error(error || "FFmpeg processing failed"));
           } else if (type === "progress") {
             // Forward progress updates
@@ -501,6 +481,11 @@ export class HlsDownloadHandler {
       };
 
       chrome.runtime.onMessage.addListener(messageListener);
+
+      // Add abort listener
+      if (this.abortSignal) {
+        this.abortSignal.addEventListener("abort", abortHandler);
+      }
 
       // Send processing request
       chrome.runtime.sendMessage(
@@ -516,7 +501,9 @@ export class HlsDownloadHandler {
         (response) => {
           // Check for errors to prevent "unchecked runtime.lastError" warning
           if (chrome.runtime.lastError) {
-            chrome.runtime.onMessage.removeListener(messageListener);
+            if (isSettled) return;
+            isSettled = true;
+            cleanup();
             reject(
               new Error(
                 `Failed to send processing request: ${chrome.runtime.lastError.message}`,
@@ -528,31 +515,25 @@ export class HlsDownloadHandler {
         },
       );
 
-      // Set timeout to prevent hanging
-      const timeoutId = setTimeout(() => {
+      // Set timeout to prevent hanging (configurable via settings)
+      timeoutId = setTimeout(() => {
+        if (isSettled) return;
+        isSettled = true;
         // Check if download was cancelled before rejecting with timeout
         if (this.abortSignal?.aborted) {
-          chrome.runtime.onMessage.removeListener(messageListener);
+          cleanup();
           reject(new CancellationError());
           return;
         }
-        chrome.runtime.onMessage.removeListener(messageListener);
+        cleanup();
         reject(new Error("FFmpeg processing timeout"));
-      }, 300000); // 5 minutes timeout
-
-      // Clear timeout if cancelled
-      if (this.abortSignal) {
-        this.abortSignal.addEventListener("abort", () => {
-          clearTimeout(timeoutId);
-          chrome.runtime.onMessage.removeListener(messageListener);
-          reject(new CancellationError());
-        });
-      }
+      }, this.ffmpegTimeout);
     });
   }
 
   /**
    * Save blob URL to file using Chrome downloads API
+   * Stores chromeDownloadId in download state for reliable cancellation
    * @private
    */
   private async saveBlobUrlToFile(
@@ -569,44 +550,52 @@ export class HlsDownloadHandler {
             filename,
             saveAs: false,
           },
-          (downloadId) => {
+          async (downloadId) => {
             if (chrome.runtime.lastError) {
               reject(new Error(chrome.runtime.lastError.message));
-            } else {
-              // Wait for download to complete
-              const checkComplete = () => {
-                chrome.downloads.search({ id: downloadId }, (results) => {
-                  if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
-                    return;
-                  }
-
-                  const item = results?.[0];
-                  if (!item) {
-                    reject(new Error("Download item not found"));
-                    return;
-                  }
-
-                  if (item.state === "complete") {
-                    // Clean up blob URL after successful download
-                    if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                      URL.revokeObjectURL(blobUrl);
-                    }
-                    resolve(item.filename);
-                  } else if (item.state === "interrupted") {
-                    if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                      URL.revokeObjectURL(blobUrl);
-                    }
-                    reject(new Error(item.error || "Download interrupted"));
-                  } else {
-                    // Check again in a bit
-                    setTimeout(checkComplete, 100);
-                  }
-                });
-              };
-
-              checkComplete();
+              return;
             }
+
+            // Store chromeDownloadId in download state immediately
+            const currentState = await getDownload(stateId);
+            if (currentState) {
+              currentState.chromeDownloadId = downloadId!;
+              await storeDownload(currentState);
+            }
+
+            // Wait for download to complete
+            const checkComplete = () => {
+              chrome.downloads.search({ id: downloadId }, (results) => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                  return;
+                }
+
+                const item = results?.[0];
+                if (!item) {
+                  reject(new Error("Download item not found"));
+                  return;
+                }
+
+                if (item.state === "complete") {
+                  // Clean up blob URL after successful download
+                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
+                    URL.revokeObjectURL(blobUrl);
+                  }
+                  resolve(item.filename);
+                } else if (item.state === "interrupted") {
+                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
+                    URL.revokeObjectURL(blobUrl);
+                  }
+                  reject(new Error(item.error || "Download interrupted"));
+                } else {
+                  // Check again in a bit
+                  setTimeout(checkComplete, 100);
+                }
+              });
+            };
+
+            checkComplete();
           },
         );
       });

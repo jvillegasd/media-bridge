@@ -257,7 +257,8 @@ export class DirectDownloadHandler {
   }
 
   /**
-   * Wait for download to complete (5-minute timeout)
+   * Wait for download to complete via Chrome's onChanged event
+   * Relies entirely on Chrome's download API events (no timeout)
    * @private
    */
   private async waitForDownloadCompletion(
@@ -266,24 +267,13 @@ export class DirectDownloadHandler {
   ): Promise<DirectDownloadResult> {
     return new Promise<DirectDownloadResult>((resolve, reject) => {
       // Store promise resolvers and instance reference for onChanged callback
+      // Chrome's onChanged event will fire when download completes or fails
       DirectDownloadHandler.downloadProgressListeners.set(chromeDownloadId, {
         resolve,
         reject,
         stateId,
-        handler: this, // Store instance reference
+        handler: this,
       });
-
-      // Set timeout as fallback in case onChanged doesn't fire
-      setTimeout(() => {
-        if (
-          DirectDownloadHandler.downloadProgressListeners.has(chromeDownloadId)
-        ) {
-          DirectDownloadHandler.downloadProgressListeners.delete(
-            chromeDownloadId,
-          );
-          reject(new Error("Download timeout - completion event not received"));
-        }
-      }, 300000); // 5 minute timeout
     });
   }
 
@@ -350,6 +340,14 @@ export class DirectDownloadHandler {
 
       // Start Chrome download
       const chromeDownloadId = await this.startChromeDownload(url, filename);
+
+      // Store chromeDownloadId in download state for reliable cancellation
+      const currentState = await getDownload(stateId);
+      if (currentState) {
+        currentState.chromeDownloadId = chromeDownloadId;
+        await storeDownload(currentState);
+        this.notifyProgress(currentState);
+      }
 
       // Wait for download to complete
       const result = await this.waitForDownloadCompletion(

@@ -64,6 +64,7 @@ export interface DownloadState {
   localPath?: string;
   cloudId?: string;
   isManual?: boolean; // Indicates if download was started from manual/manifest tab
+  chromeDownloadId?: number; // Chrome downloads API ID for reliable cancellation (only set when Chrome API is used)
   createdAt: number;
   updatedAt: number;
 }
@@ -75,6 +76,7 @@ export interface StorageConfig {
     createFolderIfNotExists?: boolean;
     folderName?: string;
   };
+  ffmpegTimeout?: number; // FFmpeg processing timeout in milliseconds (default: 15 minutes)
 }
 
 export interface MessageRequest {

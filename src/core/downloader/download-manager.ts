@@ -28,6 +28,9 @@ export interface DownloadManagerOptions {
 
   /** Whether to upload completed downloads to Google Drive @default false */
   uploadToDrive?: boolean;
+
+  /** FFmpeg processing timeout in milliseconds @default 900000 (15 minutes) */
+  ffmpegTimeout?: number;
 }
 
 /**
@@ -50,6 +53,7 @@ export class DownloadManager {
     this.maxConcurrent = options.maxConcurrent || 3;
     this.onProgress = options.onProgress;
     this.uploadToDrive = options.uploadToDrive || false;
+    const ffmpegTimeout = options.ffmpegTimeout || 900000; // Default 15 minutes
 
     // Initialize direct download handler
     this.directDownloadHandler = new DirectDownloadHandler({
@@ -60,12 +64,14 @@ export class DownloadManager {
     this.hlsDownloadHandler = new HlsDownloadHandler({
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
+      ffmpegTimeout,
     });
 
     // Initialize M3U8 download handler
     this.m3u8DownloadHandler = new M3u8DownloadHandler({
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
+      ffmpegTimeout,
     });
   }
 
@@ -190,6 +196,7 @@ export class DownloadManager {
         percentage: 0,
       },
       isManual,
+      // chromeDownloadId will be set when Chrome downloads API is used (direct downloads or HLS/M3U8 final save)
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -222,6 +229,7 @@ export class DownloadManager {
         stage: DownloadStage.FAILED,
         error: errorMessage,
       },
+      // chromeDownloadId may not be set if download failed before Chrome API was used
       createdAt,
       updatedAt: Date.now(),
     };

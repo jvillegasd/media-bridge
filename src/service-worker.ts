@@ -26,6 +26,7 @@ import { deleteChunks } from "./core/database/chunks";
 
 const CONFIG_KEY = "storage_config";
 const MAX_CONCURRENT_KEY = "max_concurrent";
+const DEFAULT_FFMPEG_TIMEOUT = 900000; // 15 minutes in milliseconds (stored internally as ms)
 
 const activeDownloads = new Map<string, Promise<void>>();
 // Map to store AbortControllers for each download (keyed by normalized URL)
@@ -379,9 +380,12 @@ async function handleDownloadRequest(payload: {
   const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
   const maxConcurrent =
     (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || 3;
+  // FFmpeg timeout is stored in milliseconds (converted from minutes in settings UI)
+  const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT;
 
   const downloadManager = new DownloadManager({
     maxConcurrent,
+    ffmpegTimeout,
     onProgress: async (state) => {
       const normalizedUrlForProgress = normalizeUrl(state.url);
       
@@ -398,15 +402,20 @@ async function handleDownloadRequest(payload: {
 
       // Double-check cancellation state in database (defensive check)
       const currentState = await getDownload(state.id);
-      if (currentState && currentState.progress.stage === DownloadStage.CANCELLED) {
-        // Download was cancelled, don't update state
+      // If download was deleted (cancelled) or has CANCELLED stage, don't update
+      if (!currentState) {
+        logger.info(`Download ${state.id} was deleted (cancelled), ignoring progress update`);
+        return;
+      }
+      if (currentState.progress.stage === DownloadStage.CANCELLED) {
         logger.info(`Download ${state.id} was cancelled, ignoring progress update`);
         return;
       }
 
-      // Re-check abort signal after async operation using stored reference
+      // Final abort check immediately before storing to minimize race window
+      // Re-check abort signal after async database operation using stored reference
       if (signal.aborted) {
-        logger.info(`Download ${state.id} was aborted after state check, ignoring progress update`);
+        logger.info(`Download ${state.id} was aborted, ignoring progress update`);
         return;
       }
 
@@ -542,73 +551,29 @@ async function cleanupDownloadResources(
 
 /**
  * Cancel Chrome downloads associated with a download state
+ * Only cancels if chromeDownloadId is set (direct downloads or HLS/M3U8 final save)
  */
 async function cancelChromeDownloads(download: DownloadState): Promise<void> {
-  const filename = download.localPath
-    ? download.localPath.split(/[/\\]/).pop()
-    : undefined;
-
-  const searchQueries: chrome.downloads.DownloadQuery[] = [];
-  
-  if (filename) {
-    searchQueries.push({
-      filenameRegex: filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    });
+  // Only cancel if chromeDownloadId is set (Chrome downloads API is being used)
+  // HLS/M3U8 downloads only use Chrome API at the final save stage
+  if (download.chromeDownloadId === undefined) {
+    logger.debug(`Skipping Chrome download cancellation - Chrome API not used for this download`);
+    return;
   }
-  
-  searchQueries.push({ url: download.url });
 
-  // Convert callback-based Chrome Downloads API to Promise-based
-  const searchDownloads = (query: chrome.downloads.DownloadQuery): Promise<chrome.downloads.DownloadItem[]> => {
-    return new Promise((resolve, reject) => {
-      chrome.downloads.search(query, (results) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(results || []);
-        }
-      });
-    });
-  };
-
-  const cancelDownload = (item: chrome.downloads.DownloadItem): Promise<void> => {
-    return new Promise((resolve) => {
-      if (item.state === "in_progress") {
-        chrome.downloads.cancel(item.id, () => {
-          if (chrome.runtime.lastError) {
-            logger.debug(
-              `Failed to cancel Chrome download ${item.id}:`,
-              chrome.runtime.lastError.message
-            );
-          } else {
-            logger.info(`Cancelled Chrome download ${item.id}`);
-          }
-          resolve();
-        });
+  return new Promise((resolve) => {
+    chrome.downloads.cancel(download.chromeDownloadId!, () => {
+      if (chrome.runtime.lastError) {
+        logger.debug(
+          `Failed to cancel Chrome download ${download.chromeDownloadId}:`,
+          chrome.runtime.lastError.message
+        );
       } else {
-        resolve();
+        logger.info(`Cancelled Chrome download ${download.chromeDownloadId}`);
       }
+      resolve();
     });
-  };
-
-  // Process all queries and wait for all cancellations to complete
-  const cancellationPromises: Promise<void>[] = [];
-  
-  for (const query of searchQueries) {
-    try {
-      const results = await searchDownloads(query);
-      if (results && results.length > 0) {
-        for (const item of results) {
-          cancellationPromises.push(cancelDownload(item));
-        }
-      }
-    } catch (error) {
-      logger.error("Error searching Chrome downloads:", error);
-    }
-  }
-
-  // Wait for all cancellation operations to complete
-  await Promise.all(cancellationPromises);
+  });
 }
 
 /**
