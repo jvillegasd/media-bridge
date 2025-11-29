@@ -16,6 +16,7 @@ import { MessageType } from "./shared/messages";
 import { DownloadState, StorageConfig, VideoMetadata, DownloadStage } from "./core/types";
 import { CancellationError } from "./core/utils/errors";
 import { logger } from "./core/utils/logger";
+import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "./core/utils/download-utils";
 import { normalizeUrl, detectFormatFromUrl } from "./core/utils/url-utils";
 import {
   generateFilenameWithExtension,
@@ -384,12 +385,16 @@ async function handleDownloadRequest(payload: {
     onProgress: async (state) => {
       const normalizedUrlForProgress = normalizeUrl(state.url);
       
-      // Check abort signal first (atomic check, no async operation)
-      const abortControllerForProgress = downloadAbortControllers.get(normalizedUrlForProgress);
-      if (abortControllerForProgress?.signal.aborted) {
+      // Get abort controller and store signal reference ONCE to avoid stale reference issues
+      const controller = downloadAbortControllers.get(normalizedUrlForProgress);
+      // If no controller exists (already cleaned up) or signal is aborted, skip update
+      if (!controller || controller.signal.aborted) {
         logger.info(`Download ${state.id} was aborted, ignoring progress update`);
         return;
       }
+      
+      // Store signal reference for consistent checks throughout this function
+      const signal = controller.signal;
 
       // Double-check cancellation state in database (defensive check)
       const currentState = await getDownload(state.id);
@@ -399,8 +404,8 @@ async function handleDownloadRequest(payload: {
         return;
       }
 
-      // Re-check abort signal after async operation to catch race conditions
-      if (abortControllerForProgress?.signal.aborted) {
+      // Re-check abort signal after async operation using stored reference
+      if (signal.aborted) {
         logger.info(`Download ${state.id} was aborted after state check, ignoring progress update`);
         return;
       }
@@ -682,14 +687,9 @@ async function handleCancelDownload(id: string): Promise<void> {
 
   // Prevent cancellation during merging or saving phases
   // Chunks are already downloaded at this point, so cancellation would waste resources
-  if (
-    download.progress.stage === DownloadStage.MERGING ||
-    download.progress.stage === DownloadStage.SAVING
-  ) {
-    const errorMessage =
-      "Cannot cancel download during merging or saving phase. Chunks are already downloaded and processing is in progress.";
-    logger.info(`Cancellation prevented for download ${id}: ${errorMessage}`);
-    throw new Error(errorMessage);
+  if (!canCancelDownload(download.progress.stage)) {
+    logger.info(`Cancellation prevented for download ${id}: ${CANNOT_CANCEL_MESSAGE}`);
+    throw new Error(CANNOT_CANCEL_MESSAGE);
   }
 
   const normalizedUrl = normalizeUrl(download.url);

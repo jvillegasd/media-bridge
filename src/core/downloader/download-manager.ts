@@ -125,11 +125,13 @@ export class DownloadManager {
       // Route to appropriate download handler based on format
       if (format === "direct") {
         // Use direct download handler with Chrome downloads API
-        // Note: Direct downloads don't need abortSignal - Chrome Downloads API handles cancellation
+        // AbortSignal is used to cancel the HEAD request for extension detection
+        // The actual Chrome download is cancelled via chrome.downloads.cancel
         await this.directDownloadHandler.download(
           actualVideoUrl,
           filename,
           state.id,
+          abortSignal,
         );
       } else if (format === "hls") {
         // Use HLS download handler

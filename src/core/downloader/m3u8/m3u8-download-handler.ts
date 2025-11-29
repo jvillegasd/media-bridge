@@ -25,7 +25,7 @@
  * @module M3u8DownloadHandler
  */
 
-import { DownloadError, CancellationError } from "../../utils/errors";
+import { CancellationError } from "../../utils/errors";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
@@ -35,7 +35,7 @@ import { parseLevelsPlaylist } from "../../utils/m3u8-parser";
 import { storeChunk, deleteChunks } from "../../database/chunks";
 import { createOffscreenDocument } from "../../utils/offscreen-manager";
 import { MessageType } from "../../../shared/messages";
-import { cancelIfAborted } from "../../utils/cancellation";
+import { cancelIfAborted, throwIfAborted } from "../../utils/cancellation";
 import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
@@ -132,6 +132,23 @@ export class M3u8DownloadHandler {
   }
 
   /**
+   * Reset all download-specific state to initial values
+   * Called at the start of each download to prevent state pollution from previous downloads
+   * @param stateId - The download state ID for this download
+   * @param abortSignal - Optional abort signal for cancellation
+   * @private
+   */
+  private resetDownloadState(stateId: string, abortSignal?: AbortSignal): void {
+    this.downloadId = stateId;
+    this.bytesDownloaded = 0;
+    this.totalBytes = 0;
+    this.lastUpdateTime = 0;
+    this.lastDownloadedBytes = 0;
+    this.fragmentCount = 0;
+    this.abortSignal = abortSignal;
+  }
+
+  /**
    * Update download progress with bytes and speed calculation
    * @private
    */
@@ -141,9 +158,7 @@ export class M3u8DownloadHandler {
     totalBytes: number,
     message?: string,
   ): Promise<void> {
-    if (this.abortSignal?.aborted) {
-      throw new CancellationError();
-    }
+    throwIfAborted(this.abortSignal);
 
     const state = await getDownload(stateId);
     if (!state) {
@@ -261,9 +276,7 @@ export class M3u8DownloadHandler {
 
     let estimatedTotalBytes = 0;
     if (fragments.length > 0 && fragments[0] && this.abortSignal) {
-      if (this.abortSignal.aborted) {
-        throw new CancellationError();
-      }
+      throwIfAborted(this.abortSignal);
       
       try {
         const firstFragmentSize = await cancelIfAborted(
@@ -307,9 +320,7 @@ export class M3u8DownloadHandler {
       }
 
       while (currentIndex < totalFragments) {
-        if (this.abortSignal.aborted) {
-          throw new CancellationError();
-        }
+        throwIfAborted(this.abortSignal);
 
         const fragmentIndex = currentIndex++;
         const fragment = fragments[fragmentIndex];
@@ -384,9 +395,7 @@ export class M3u8DownloadHandler {
       throw new CancellationError();
     }
 
-    if (this.abortSignal?.aborted) {
-      throw new CancellationError();
-    }
+    throwIfAborted(this.abortSignal);
 
     this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
     if (this.abortSignal) {
@@ -434,6 +443,12 @@ export class M3u8DownloadHandler {
 
     // Send processing request to offscreen document
     return new Promise<string>((resolve, reject) => {
+      // Check if already aborted before setting up listeners and timeouts
+      if (this.abortSignal?.aborted) {
+        reject(new CancellationError());
+        return;
+      }
+      
       // Set up message listener for offscreen responses
       const messageListener = (message: any) => {
         if (
@@ -593,14 +608,13 @@ export class M3u8DownloadHandler {
     stateId: string,
     abortSignal?: AbortSignal,
   ): Promise<{ filePath: string; fileExtension?: string }> {
-    this.abortSignal = abortSignal;
+    // Reset all download-specific state to prevent pollution from previous downloads
+    this.resetDownloadState(stateId, abortSignal);
+    
     try {
       logger.info(
         `Starting M3U8 media playlist download from ${mediaPlaylistUrl}`,
       );
-
-      // Initialize downloadId
-      this.downloadId = stateId;
 
       // Update progress: parsing playlist
       await this.updateProgress(stateId, 0, 0, "Parsing playlist...");
@@ -623,26 +637,15 @@ export class M3u8DownloadHandler {
 
       logger.info(`Found ${fragments.length} fragments`);
 
-      // Initialize byte tracking
-      this.bytesDownloaded = 0;
-      this.totalBytes = 0;
-      this.lastUpdateTime = 0;
-      this.lastDownloadedBytes = 0;
-      this.fragmentCount = 0; // Reset fragment count
-
       // Check if cancelled before starting fragment downloads
-      if (this.abortSignal?.aborted) {
-        throw new CancellationError();
-      }
+      throwIfAborted(this.abortSignal);
 
       // Download all fragments
       await this.downloadAllFragments(fragments, this.downloadId, stateId);
 
       this.fragmentCount = fragments.length;
 
-      if (this.abortSignal?.aborted) {
-        throw new CancellationError();
-      }
+      throwIfAborted(this.abortSignal);
 
       // Update progress: merging with FFmpeg
       const mergingState = await getDownload(stateId);

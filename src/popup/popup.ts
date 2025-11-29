@@ -23,6 +23,7 @@ import {
   isMediaPlaylist,
 } from "../core/utils/m3u8-parser";
 import { ChromeStorage } from "../core/storage/chrome-storage";
+import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "../core/utils/download-utils";
 
 // DOM elements
 let noVideoBtn: HTMLButtonElement | null = null;
@@ -1100,15 +1101,11 @@ function renderDownloadItem(download: DownloadState): string {
       </div>
     `;
   } else if (isInProgress) {
-    // Check if download is in merging or saving phase - disable cancellation
-    const isMergingOrSaving =
-      download.progress.stage === DownloadStage.MERGING ||
-      download.progress.stage === DownloadStage.SAVING;
-    
-    if (isMergingOrSaving) {
+    // Check if download can be cancelled based on its current stage
+    if (!canCancelDownload(download.progress.stage)) {
       actionButtons = `
         <div style="display: flex; gap: 6px; margin-top: 6px;">
-          <button class="video-btn download-remove-btn" data-download-id="${download.id}" disabled title="Cannot cancel during merging/saving. Chunks are already downloaded and processing is in progress." style="opacity: 0.6; cursor: not-allowed;">
+          <button class="video-btn download-remove-btn" data-download-id="${download.id}" disabled title="${CANNOT_CANCEL_MESSAGE}" style="opacity: 0.6; cursor: not-allowed;">
             Cancel
           </button>
         </div>
@@ -1244,14 +1241,9 @@ async function handleRemoveDownload(downloadId: string) {
       download.progress.stage !== DownloadStage.CANCELLED;
 
     if (isInProgress) {
-      // Check if download is in merging or saving phase - prevent cancellation
-      if (
-        download.progress.stage === DownloadStage.MERGING ||
-        download.progress.stage === DownloadStage.SAVING
-      ) {
-        alert(
-          "Cannot cancel download during merging or saving phase. Chunks are already downloaded and processing is in progress."
-        );
+      // Check if download can be cancelled based on its current stage
+      if (!canCancelDownload(download.progress.stage)) {
+        alert(CANNOT_CANCEL_MESSAGE);
         return;
       }
 

@@ -15,7 +15,8 @@
  * @module DirectDownloadHandler
  */
 
-import { DownloadError } from "../../utils/errors";
+import { DownloadError, CancellationError } from "../../utils/errors";
+import { throwIfAborted } from "../../utils/cancellation";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
@@ -197,12 +198,18 @@ export class DirectDownloadHandler {
 
   /**
    * Extract file extension from URL or HTTP headers
+   * @param url - The URL to extract extension from
+   * @param abortSignal - Optional abort signal for cancellation
    * @private
    */
-  private async extractFileExtension(url: string): Promise<string | undefined> {
+  private async extractFileExtension(
+    url: string,
+    abortSignal?: AbortSignal,
+  ): Promise<string | undefined> {
     // Try to get extension from HTTP headers first
     try {
-      const response = await fetch(url, { method: "HEAD" });
+      throwIfAborted(abortSignal);
+      const response = await fetch(url, { method: "HEAD", signal: abortSignal });
       const contentType = response.headers.get("content-type") || "";
       const extension =
         detectExtensionFromUrl(url) ||
@@ -212,6 +219,10 @@ export class DirectDownloadHandler {
         return extension;
       }
     } catch (error) {
+      // If aborted, rethrow as CancellationError
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new CancellationError();
+      }
       logger.warn(`Failed to get headers for ${url}:`, error);
     }
 
@@ -317,19 +328,25 @@ export class DirectDownloadHandler {
    * @param url - Direct video URL
    * @param filename - Target filename
    * @param stateId - Download state ID for progress tracking
+   * @param abortSignal - Optional abort signal for cancellation
    * @returns Promise resolving to file path and extension
    * @throws {DownloadError} If download fails
+   * @throws {CancellationError} If download is cancelled
    */
   async download(
     url: string,
     filename: string,
     stateId: string,
+    abortSignal?: AbortSignal,
   ): Promise<DirectDownloadHandlerResult> {
     try {
       logger.info(`Downloading direct video from ${url} to ${filename}`);
 
-      // Extract file extension from URL or headers
-      const fileExtension = await this.extractFileExtension(url);
+      // Check if already aborted before starting
+      throwIfAborted(abortSignal);
+
+      // Extract file extension from URL or headers (cancellable)
+      const fileExtension = await this.extractFileExtension(url, abortSignal);
 
       // Start Chrome download
       const chromeDownloadId = await this.startChromeDownload(url, filename);

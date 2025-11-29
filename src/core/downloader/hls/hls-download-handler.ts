@@ -26,7 +26,7 @@
  */
 
 import { DownloadError, CancellationError } from "../../utils/errors";
-import { cancelIfAborted } from "../../utils/cancellation";
+import { cancelIfAborted, throwIfAborted } from "../../utils/cancellation";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment, Level, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
@@ -137,6 +137,24 @@ export class HlsDownloadHandler {
   }
 
   /**
+   * Reset all download-specific state to initial values
+   * Called at the start of each download to prevent state pollution from previous downloads
+   * @param stateId - The download state ID for this download
+   * @param abortSignal - Optional abort signal for cancellation
+   * @private
+   */
+  private resetDownloadState(stateId: string, abortSignal?: AbortSignal): void {
+    this.downloadId = stateId;
+    this.videoLength = 0;
+    this.audioLength = 0;
+    this.bytesDownloaded = 0;
+    this.totalBytes = 0;
+    this.lastUpdateTime = 0;
+    this.lastDownloadedBytes = 0;
+    this.abortSignal = abortSignal;
+  }
+
+  /**
    * Update download progress with bytes and speed calculation
    * @private
    */
@@ -146,9 +164,7 @@ export class HlsDownloadHandler {
     totalBytes: number,
     message?: string,
   ): Promise<void> {
-    if (this.abortSignal?.aborted) {
-      throw new CancellationError();
-    }
+    throwIfAborted(this.abortSignal);
 
     const state = await getDownload(stateId);
     if (!state) {
@@ -268,9 +284,7 @@ export class HlsDownloadHandler {
     // This is a rough estimate, but better than showing fragment count
     let estimatedTotalBytes = 0;
     if (fragments.length > 0 && fragments[0] && this.abortSignal) {
-      if (this.abortSignal.aborted) {
-        throw new CancellationError();
-      }
+      throwIfAborted(this.abortSignal);
       
       try {
         const firstFragmentSize = await cancelIfAborted(
@@ -329,9 +343,7 @@ export class HlsDownloadHandler {
       }
 
       while (currentIndex < totalFragments) {
-        if (this.abortSignal.aborted) {
-          throw new CancellationError();
-        }
+        throwIfAborted(this.abortSignal);
 
         const fragmentIndex = currentIndex++;
         const fragment = fragments[fragmentIndex];
@@ -407,9 +419,7 @@ export class HlsDownloadHandler {
       throw new CancellationError();
     }
 
-    if (this.abortSignal?.aborted) {
-      throw new CancellationError();
-    }
+    throwIfAborted(this.abortSignal);
 
     this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
     if (this.abortSignal) {
@@ -457,6 +467,12 @@ export class HlsDownloadHandler {
 
     // Send processing request to offscreen document
     return new Promise<string>((resolve, reject) => {
+      // Check if already aborted before setting up listeners and timeouts
+      if (this.abortSignal?.aborted) {
+        reject(new CancellationError());
+        return;
+      }
+      
       // Set up message listener for offscreen responses
       const messageListener = (message: any) => {
         if (
@@ -657,14 +673,11 @@ export class HlsDownloadHandler {
     },
     abortSignal?: AbortSignal,
   ): Promise<{ filePath: string; fileExtension?: string }> {
-    this.abortSignal = abortSignal;
+    // Reset all download-specific state to prevent pollution from previous downloads
+    this.resetDownloadState(stateId, abortSignal);
+    
     try {
       logger.info(`Starting HLS download from ${masterPlaylistUrl}`);
-
-      // Initialize downloadId
-      this.downloadId = stateId;
-      this.videoLength = 0;
-      this.audioLength = 0;
 
       // Update progress: parsing playlist
       await this.updateProgress(stateId, 0, 0, "Parsing playlist...");
@@ -713,15 +726,7 @@ export class HlsDownloadHandler {
         throw new Error("No video or audio levels found in master playlist");
       }
 
-      // Initialize byte tracking
-      this.bytesDownloaded = 0;
-      this.totalBytes = 0;
-      this.lastUpdateTime = 0;
-      this.lastDownloadedBytes = 0;
-
-      if (this.abortSignal?.aborted) {
-        throw new CancellationError();
-      }
+      throwIfAborted(this.abortSignal);
 
       if (videoPlaylistUrl) {
         const videoPlaylistText = this.abortSignal
@@ -756,9 +761,7 @@ export class HlsDownloadHandler {
         );
       }
 
-      if (this.abortSignal?.aborted) {
-        throw new CancellationError();
-      }
+      throwIfAborted(this.abortSignal);
 
       if (audioPlaylistUrl) {
         const audioPlaylistText = this.abortSignal
@@ -795,9 +798,7 @@ export class HlsDownloadHandler {
         );
       }
 
-      if (this.abortSignal?.aborted) {
-        throw new CancellationError();
-      }
+      throwIfAborted(this.abortSignal);
 
       // Update progress: merging with FFmpeg
       const mergingState = await getDownload(stateId);
