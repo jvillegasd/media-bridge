@@ -651,15 +651,14 @@ function getDownloadStateForVideo(
 function renderDetectedVideos() {
   const uniqueVideos = Object.values(detectedVideos);
 
-  // Position "No video" button dynamically
-  const noVideoBtnContainer = document.getElementById("noVideoBtnContainer");
-  if (noVideoBtnContainer) {
+  // Toggle animation on "No video" button based on video detection
+  if (noVideoBtn) {
     if (uniqueVideos.length === 0) {
-      // No videos: center center
-      noVideoBtnContainer.classList.remove("has-videos");
+      // No videos detected: add animation class
+      noVideoBtn.classList.add("no-videos-detected");
     } else {
-      // Has videos: bottom center
-      noVideoBtnContainer.classList.add("has-videos");
+      // Videos detected: remove animation class
+      noVideoBtn.classList.remove("no-videos-detected");
     }
   }
 
