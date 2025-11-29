@@ -15,9 +15,10 @@
  * @module DirectDownloadHandler
  */
 
-import { DownloadError } from "../../utils/errors";
-import { DownloadStateManager } from "../../storage/download-state";
-import { DownloadState } from "../../types";
+import { DownloadError, CancellationError } from "../../utils/errors";
+import { throwIfAborted } from "../../utils/cancellation";
+import { getDownload, storeDownload } from "../../database/downloads";
+import { DownloadState, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import {
   detectExtensionFromUrl,
@@ -145,7 +146,7 @@ export class DirectDownloadHandler {
       return;
     }
 
-    const currentState = await DownloadStateManager.getDownload(stateId);
+    const currentState = await getDownload(stateId);
     if (!currentState) {
       return;
     }
@@ -157,10 +158,10 @@ export class DirectDownloadHandler {
     currentState.progress.downloaded = loaded;
     currentState.progress.total = total;
     currentState.progress.percentage = percentage;
-    currentState.progress.stage = "downloading";
+    currentState.progress.stage = DownloadStage.DOWNLOADING;
     currentState.progress.message = "Downloading...";
 
-    await DownloadStateManager.saveDownload(currentState);
+    await storeDownload(currentState);
     this.notifyProgress(currentState);
   }
 
@@ -197,12 +198,18 @@ export class DirectDownloadHandler {
 
   /**
    * Extract file extension from URL or HTTP headers
+   * @param url - The URL to extract extension from
+   * @param abortSignal - Optional abort signal for cancellation
    * @private
    */
-  private async extractFileExtension(url: string): Promise<string | undefined> {
+  private async extractFileExtension(
+    url: string,
+    abortSignal?: AbortSignal,
+  ): Promise<string | undefined> {
     // Try to get extension from HTTP headers first
     try {
-      const response = await fetch(url, { method: "HEAD" });
+      throwIfAborted(abortSignal);
+      const response = await fetch(url, { method: "HEAD", signal: abortSignal });
       const contentType = response.headers.get("content-type") || "";
       const extension =
         detectExtensionFromUrl(url) ||
@@ -212,6 +219,10 @@ export class DirectDownloadHandler {
         return extension;
       }
     } catch (error) {
+      // If aborted, rethrow as CancellationError
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new CancellationError();
+      }
       logger.warn(`Failed to get headers for ${url}:`, error);
     }
 
@@ -246,7 +257,8 @@ export class DirectDownloadHandler {
   }
 
   /**
-   * Wait for download to complete (5-minute timeout)
+   * Wait for download to complete via Chrome's onChanged event
+   * Relies entirely on Chrome's download API events (no timeout)
    * @private
    */
   private async waitForDownloadCompletion(
@@ -255,24 +267,13 @@ export class DirectDownloadHandler {
   ): Promise<DirectDownloadResult> {
     return new Promise<DirectDownloadResult>((resolve, reject) => {
       // Store promise resolvers and instance reference for onChanged callback
+      // Chrome's onChanged event will fire when download completes or fails
       DirectDownloadHandler.downloadProgressListeners.set(chromeDownloadId, {
         resolve,
         reject,
         stateId,
-        handler: this, // Store instance reference
+        handler: this,
       });
-
-      // Set timeout as fallback in case onChanged doesn't fire
-      setTimeout(() => {
-        if (
-          DirectDownloadHandler.downloadProgressListeners.has(chromeDownloadId)
-        ) {
-          DirectDownloadHandler.downloadProgressListeners.delete(
-            chromeDownloadId,
-          );
-          reject(new Error("Download timeout - completion event not received"));
-        }
-      }, 300000); // 5 minute timeout
     });
   }
 
@@ -285,7 +286,7 @@ export class DirectDownloadHandler {
     result: DirectDownloadResult,
     fileExtension?: string,
   ): Promise<void> {
-    const currentState = await DownloadStateManager.getDownload(stateId);
+    const currentState = await getDownload(stateId);
     if (!currentState) {
       return;
     }
@@ -298,7 +299,7 @@ export class DirectDownloadHandler {
     }
 
     currentState.localPath = result.filePath;
-    currentState.progress.stage = "completed";
+    currentState.progress.stage = DownloadStage.COMPLETED;
     currentState.progress.message = "Download completed";
     currentState.progress.percentage = 100;
 
@@ -308,7 +309,7 @@ export class DirectDownloadHandler {
     }
 
     currentState.updatedAt = Date.now();
-    await DownloadStateManager.saveDownload(currentState);
+    await storeDownload(currentState);
     this.notifyProgress(currentState);
   }
 
@@ -317,22 +318,36 @@ export class DirectDownloadHandler {
    * @param url - Direct video URL
    * @param filename - Target filename
    * @param stateId - Download state ID for progress tracking
+   * @param abortSignal - Optional abort signal for cancellation
    * @returns Promise resolving to file path and extension
    * @throws {DownloadError} If download fails
+   * @throws {CancellationError} If download is cancelled
    */
   async download(
     url: string,
     filename: string,
     stateId: string,
+    abortSignal?: AbortSignal,
   ): Promise<DirectDownloadHandlerResult> {
     try {
       logger.info(`Downloading direct video from ${url} to ${filename}`);
 
-      // Extract file extension from URL or headers
-      const fileExtension = await this.extractFileExtension(url);
+      // Check if already aborted before starting
+      throwIfAborted(abortSignal);
+
+      // Extract file extension from URL or headers (cancellable)
+      const fileExtension = await this.extractFileExtension(url, abortSignal);
 
       // Start Chrome download
       const chromeDownloadId = await this.startChromeDownload(url, filename);
+
+      // Store chromeDownloadId in download state for reliable cancellation
+      const currentState = await getDownload(stateId);
+      if (currentState) {
+        currentState.chromeDownloadId = chromeDownloadId;
+        await storeDownload(currentState);
+        this.notifyProgress(currentState);
+      }
 
       // Wait for download to complete
       const result = await this.waitForDownloadCompletion(

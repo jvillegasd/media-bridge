@@ -347,6 +347,21 @@
         Number of segments to download simultaneously (1-10)
       </div>
     </div>
+
+    <div class="form-group">
+      <label class="form-label" for="ffmpegTimeout">FFmpeg Processing Timeout (minutes)</label>
+      <input 
+        type="number" 
+        id="ffmpegTimeout" 
+        class="form-input" 
+        min="5" 
+        max="60" 
+        value="15"
+      />
+      <div class="form-help">
+        Maximum time allowed for FFmpeg to process video files (5-60 minutes). Increase for very large files.
+      </div>
+    </div>
   </div>
 
   <div id="statusMessage"></div>

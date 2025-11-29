@@ -3,8 +3,12 @@
  * Routes downloads to format-specific handlers (direct, HLS, M3U8)
  */
 
-import { VideoFormat, VideoMetadata, DownloadState } from "../types";
-import { DownloadStateManager } from "../storage/download-state";
+import { VideoFormat, VideoMetadata, DownloadState, DownloadStage } from "../types";
+import {
+  getDownload,
+  storeDownload,
+  updateDownloadProgress,
+} from "../database/downloads";
 import { DownloadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";
@@ -24,6 +28,9 @@ export interface DownloadManagerOptions {
 
   /** Whether to upload completed downloads to Google Drive @default false */
   uploadToDrive?: boolean;
+
+  /** FFmpeg processing timeout in milliseconds @default 900000 (15 minutes) */
+  ffmpegTimeout?: number;
 }
 
 /**
@@ -46,6 +53,7 @@ export class DownloadManager {
     this.maxConcurrent = options.maxConcurrent || 3;
     this.onProgress = options.onProgress;
     this.uploadToDrive = options.uploadToDrive || false;
+    const ffmpegTimeout = options.ffmpegTimeout || 900000; // Default 15 minutes
 
     // Initialize direct download handler
     this.directDownloadHandler = new DirectDownloadHandler({
@@ -56,12 +64,14 @@ export class DownloadManager {
     this.hlsDownloadHandler = new HlsDownloadHandler({
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
+      ffmpegTimeout,
     });
 
     // Initialize M3U8 download handler
     this.m3u8DownloadHandler = new M3u8DownloadHandler({
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
+      ffmpegTimeout,
     });
   }
 
@@ -71,7 +81,7 @@ export class DownloadManager {
    * @param url - Original URL where video was detected
    * @param filename - Desired filename for downloaded video
    * @param metadata - Video metadata with format and URL
-   * @param hlsQuality - Optional HLS quality selection (for HLS format)
+   * @param manifestQuality - Optional manifest quality selection (for HLS format)
    * @returns Promise resolving to final DownloadState
    * @throws {Error} If format is unknown/unsupported or download fails
    */
@@ -79,10 +89,12 @@ export class DownloadManager {
     url: string,
     filename: string,
     metadata: VideoMetadata,
-    hlsQuality?: {
+    manifestQuality?: {
       videoPlaylistUrl?: string | null;
       audioPlaylistUrl?: string | null;
     },
+    isManual?: boolean,
+    abortSignal?: AbortSignal,
   ): Promise<DownloadState> {
     const downloadId = this.generateDownloadId(url);
 
@@ -92,6 +104,7 @@ export class DownloadManager {
         downloadId,
         url,
         metadata,
+        isManual,
       );
 
       // Validate format from metadata (should already be set by detection)
@@ -107,9 +120,9 @@ export class DownloadManager {
       }
 
       const format = metadata.format;
-      state.progress.stage = "downloading";
+      state.progress.stage = DownloadStage.DOWNLOADING;
       state.progress.message = `Format: ${format}`;
-      await DownloadStateManager.saveDownload(state);
+      await storeDownload(state);
       this.notifyProgress(state);
 
       // metadata.url is always the actual video URL
@@ -118,10 +131,13 @@ export class DownloadManager {
       // Route to appropriate download handler based on format
       if (format === "direct") {
         // Use direct download handler with Chrome downloads API
+        // AbortSignal is used to cancel the HEAD request for extension detection
+        // The actual Chrome download is cancelled via chrome.downloads.cancel
         await this.directDownloadHandler.download(
           actualVideoUrl,
           filename,
           state.id,
+          abortSignal,
         );
       } else if (format === "hls") {
         // Use HLS download handler
@@ -129,7 +145,8 @@ export class DownloadManager {
           actualVideoUrl,
           filename,
           state.id,
-          hlsQuality,
+          manifestQuality,
+          abortSignal,
         );
       } else if (format === "m3u8") {
         // Use M3U8 download handler
@@ -137,13 +154,14 @@ export class DownloadManager {
           actualVideoUrl,
           filename,
           state.id,
+          abortSignal,
         );
       } else {
         throw new Error(`Unsupported format: ${format}`);
       }
 
       // Get final state (may have been updated by progress tracking)
-      const finalState = await DownloadStateManager.getDownload(state.id);
+      const finalState = await getDownload(state.id);
       return finalState || state;
     } catch (error) {
       logger.error("Download failed:", error);
@@ -166,6 +184,7 @@ export class DownloadManager {
     downloadId: string,
     url: string,
     metadata: VideoMetadata,
+    isManual?: boolean,
   ): Promise<DownloadState> {
     const state: DownloadState = {
       id: downloadId,
@@ -173,14 +192,16 @@ export class DownloadManager {
       metadata,
       progress: {
         url,
-        stage: "detecting",
+        stage: DownloadStage.DETECTING,
         percentage: 0,
       },
+      isManual,
+      // chromeDownloadId will be set when Chrome downloads API is used (direct downloads or HLS/M3U8 final save)
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
-    await DownloadStateManager.saveDownload(state);
+    await storeDownload(state);
     this.notifyProgress(state);
 
     return state;
@@ -205,14 +226,15 @@ export class DownloadManager {
       metadata,
       progress: {
         url,
-        stage: "failed",
+        stage: DownloadStage.FAILED,
         error: errorMessage,
       },
+      // chromeDownloadId may not be set if download failed before Chrome API was used
       createdAt,
       updatedAt: Date.now(),
     };
 
-    await DownloadStateManager.saveDownload(failedState);
+    await storeDownload(failedState);
     this.notifyProgress(failedState);
 
     return failedState;

@@ -13,7 +13,7 @@ export interface VideoMetadata {
   width?: number;
   height?: number;
   resolution?: string; // e.g., "1920x1080", "1080p"
-  pageUrl?: string; // URL of the page where video was detected
+  pageUrl: string; // URL of the page where video was detected
   thumbnail?: string; // Thumbnail/preview image URL
   videoId?: string; // Unique identifier for this video instance
   fileExtension?: string; // Detected file extension (e.g., "mp4", "webm")
@@ -29,16 +29,23 @@ export interface VideoQuality {
   codecs?: string;
 }
 
+/**
+ * Download stage enum for type-safe stage checking
+ */
+export enum DownloadStage {
+  DETECTING = "detecting",
+  DOWNLOADING = "downloading",
+  MERGING = "merging",
+  SAVING = "saving",
+  UPLOADING = "uploading",
+  COMPLETED = "completed",
+  FAILED = "failed",
+  CANCELLED = "cancelled",
+}
+
 export interface DownloadProgress {
   url: string;
-  stage:
-    | "detecting"
-    | "downloading"
-    | "merging"
-    | "saving"
-    | "uploading"
-    | "completed"
-    | "failed";
+  stage: DownloadStage;
   downloaded?: number;
   total?: number;
   percentage?: number;
@@ -56,6 +63,8 @@ export interface DownloadState {
   progress: DownloadProgress;
   localPath?: string;
   cloudId?: string;
+  isManual?: boolean; // Indicates if download was started from manual/manifest tab
+  chromeDownloadId?: number; // Chrome downloads API ID for reliable cancellation (only set when Chrome API is used)
   createdAt: number;
   updatedAt: number;
 }
@@ -67,6 +76,7 @@ export interface StorageConfig {
     createFolderIfNotExists?: boolean;
     folderName?: string;
   };
+  ffmpegTimeout?: number; // FFmpeg processing timeout in milliseconds (default: 15 minutes)
 }
 
 export interface MessageRequest {
