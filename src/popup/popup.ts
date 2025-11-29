@@ -132,26 +132,27 @@ async function init() {
   }
 
   // Setup event listeners
-  if (noVideoBtn) {
-    noVideoBtn.addEventListener("click", toggleNoVideoNotice);
-  }
+  // Use querySelectorAll to handle buttons that may appear in multiple tabs
+  document.querySelectorAll("#noVideoBtn").forEach((btn) => {
+    btn.addEventListener("click", toggleNoVideoNotice);
+  });
   if (closeNoVideoNoticeBtn) {
     closeNoVideoNoticeBtn.addEventListener("click", hideNoVideoNotice);
   }
   if (forceDetectionBtn) {
     forceDetectionBtn.addEventListener("click", handleForceDetection);
   }
-  if (settingsBtn) {
-    settingsBtn.addEventListener("click", () => {
+  document.querySelectorAll("#settingsBtn").forEach((btn) => {
+    btn.addEventListener("click", () => {
       chrome.runtime.openOptionsPage();
     });
-  }
-  if (downloadsBtn) {
-    downloadsBtn.addEventListener("click", handleOpenDownloads);
-  }
-  if (clearCompletedBtn) {
-    clearCompletedBtn.addEventListener("click", handleClearCompleted);
-  }
+  });
+  document.querySelectorAll("#downloadsBtn").forEach((btn) => {
+    btn.addEventListener("click", handleOpenDownloads);
+  });
+  document.querySelectorAll("#clearCompletedBtn").forEach((btn) => {
+    btn.addEventListener("click", handleClearCompleted);
+  });
   if (autoDetectTab) {
     autoDetectTab.addEventListener("click", async () => await switchTab("auto"));
   }
@@ -345,44 +346,48 @@ async function handleOpenDownloads() {
 }
 
 async function handleClearCompleted() {
-  if (!clearCompletedBtn) return;
+  const clearCompletedButtons = document.querySelectorAll("#clearCompletedBtn") as NodeListOf<HTMLButtonElement>;
+  if (clearCompletedButtons.length === 0) return;
 
-  const originalText = clearCompletedBtn.querySelector("span")?.textContent;
+  const firstButton = clearCompletedButtons[0];
+  const originalText = firstButton.querySelector("span")?.textContent;
+
+  // Helper function to update all buttons
+  const updateAllButtons = (disabled: boolean, text?: string) => {
+    clearCompletedButtons.forEach((btn) => {
+      btn.disabled = disabled;
+      if (text !== undefined && btn.querySelector("span")) {
+        btn.querySelector("span")!.textContent = text;
+      }
+    });
+  };
 
   try {
-    // Disable button and show loading state
-    clearCompletedBtn.disabled = true;
-    if (clearCompletedBtn.querySelector("span")) {
-      clearCompletedBtn.querySelector("span")!.textContent = "Clearing...";
-    }
+    // Disable buttons and show loading state
+    updateAllButtons(true, "Clearing...");
 
     // Get all downloads
     const allDownloads = await getAllDownloads();
 
-    // Filter completed downloads
-    const completedDownloads = allDownloads.filter(
-      (download) => download.progress.stage === DownloadStage.COMPLETED,
+    // Filter completed, failed, and cancelled downloads
+    const downloadsToClear = allDownloads.filter(
+      (download) =>
+        download.progress.stage === DownloadStage.COMPLETED ||
+        download.progress.stage === DownloadStage.FAILED ||
+        download.progress.stage === DownloadStage.CANCELLED,
     );
 
-    if (completedDownloads.length === 0) {
-      // No completed downloads to clear
-      if (clearCompletedBtn.querySelector("span")) {
-        clearCompletedBtn.querySelector("span")!.textContent = "No completed";
-        setTimeout(() => {
-          if (clearCompletedBtn) {
-            if (clearCompletedBtn.querySelector("span") && originalText) {
-              clearCompletedBtn.querySelector("span")!.textContent =
-                originalText;
-            }
-            clearCompletedBtn.disabled = false;
-          }
-        }, 1000);
-      }
+    if (downloadsToClear.length === 0) {
+      // No downloads to clear
+      updateAllButtons(false, "Nothing to clear");
+      setTimeout(() => {
+        updateAllButtons(false, originalText || "Clear");
+      }, 1000);
       return;
     }
 
-    // Remove all completed downloads
-    for (const download of completedDownloads) {
+    // Remove all completed, failed, and cancelled downloads
+    for (const download of downloadsToClear) {
       await deleteDownload(download.id);
     }
 
@@ -391,28 +396,14 @@ async function handleClearCompleted() {
     renderDetectedVideos();
 
     // Show success feedback
-    if (clearCompletedBtn.querySelector("span")) {
-      clearCompletedBtn.querySelector("span")!.textContent = "Cleared!";
-      setTimeout(() => {
-        if (clearCompletedBtn) {
-          if (clearCompletedBtn.querySelector("span") && originalText) {
-            clearCompletedBtn.querySelector("span")!.textContent = originalText;
-          }
-          clearCompletedBtn.disabled = false;
-        }
-      }, 1000);
-    }
+    updateAllButtons(false, "Cleared!");
+    setTimeout(() => {
+      updateAllButtons(false, originalText || "Clear");
+    }, 1000);
   } catch (error) {
     console.error("Failed to clear completed downloads:", error);
     alert("Failed to clear completed downloads. Please try again.");
-    if (
-      clearCompletedBtn &&
-      clearCompletedBtn.querySelector("span") &&
-      originalText
-    ) {
-      clearCompletedBtn.querySelector("span")!.textContent = originalText;
-    }
-    clearCompletedBtn.disabled = false;
+    updateAllButtons(false, originalText || "Clear");
   }
 }
 
