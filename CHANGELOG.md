@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/jvillegasd/media-bridge/compare/v1.3.0...v1.4.0) (2025-11-29)
+
+
+### 🎉 New Features
+
+* hls-tab: Refactored UI/UX for Manifest view and better bottom bar, Cancel buttom, tweaks ([#16](https://github.com/jvillegasd/media-bridge/issues/16)) ([ea6471d](https://github.com/jvillegasd/media-bridge/commit/ea6471dec5c703df7358e8296614c50186e4ddc8))
+
 ## [1.3.0](https://github.com/jvillegasd/media-bridge/compare/v1.2.0...v1.3.0) (2025-11-22)
 
 
