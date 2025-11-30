@@ -76,7 +76,16 @@ jobs:
             ci
             revert
           scopes: |
-            optional
+            core
+            offscreen
+            popup
+            options
+            content
+            service-worker
+            types
+            utils
+            tests
+            scripts
           requireScope: false
           subjectPattern: ^.+$
           subjectPatternError: |
