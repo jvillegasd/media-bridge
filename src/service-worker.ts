@@ -41,6 +41,24 @@ const activeDownloads = new Map<string, Promise<void>>();
 const downloadAbortControllers = new Map<string, AbortController>();
 
 /**
+ * Keep-alive heartbeat mechanism to prevent service worker termination
+ * Calls chrome.runtime.getPlatformInfo() every 20 seconds to keep worker alive
+ * during long-running operations like downloads and FFmpeg processing
+ * 
+ * Source: https://stackoverflow.com/a/66618269
+ */
+const keepAlive = ((i?: ReturnType<typeof setInterval> | 0) => (state: boolean) => {
+  if (state && !i) {
+    // If service worker has been running for more than 20 seconds, call immediately
+    if (performance.now() > 20e3) chrome.runtime.getPlatformInfo();
+    i = setInterval(() => chrome.runtime.getPlatformInfo(), 20e3);
+  } else if (!state && i) {
+    clearInterval(i);
+    i = 0;
+  }
+})();
+
+/**
  * Initialize service worker
  */
 async function init() {
@@ -508,6 +526,11 @@ async function handleDownloadRequest(payload: {
   );
   activeDownloads.set(normalizedUrl, downloadPromise);
 
+  // Start keep-alive if this is the first active download
+  if (activeDownloads.size === 1) {
+    keepAlive(true);
+  }
+
   downloadPromise
     .then(async () => {
       await cleanupDownloadResources(normalizedUrl);
@@ -529,6 +552,11 @@ async function handleDownloadRequest(payload: {
       // Ensure promise is removed from activeDownloads when it completes
       // This handles both success and failure cases
       activeDownloads.delete(normalizedUrl);
+      
+      // Stop keep-alive if no more active downloads
+      if (activeDownloads.size === 0) {
+        keepAlive(false);
+      }
     });
 }
 
