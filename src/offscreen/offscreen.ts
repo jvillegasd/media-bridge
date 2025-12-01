@@ -42,12 +42,12 @@ async function concatenateChunks(
   startIndex: number,
   length: number,
 ): Promise<Blob> {
-  const chunks: Uint8Array[] = [];
+  const chunks: BlobPart[] = [];
 
   for (let i = 0; i < length; i++) {
     const chunk = await readChunkByIndex(downloadId, startIndex + i);
     if (chunk) {
-      chunks.push(chunk);
+      chunks.push(chunk as BlobPart);
     }
   }
 
@@ -110,7 +110,11 @@ async function processVideoAndAudio(
 }
 
 /**
- * Process video only stream with FFmpeg
+ * Process video stream with FFmpeg (handles muxed video+audio or video-only)
+ * 
+ * Note: HLS streams from master playlists often have audio muxed into the video
+ * segments (indicated by codecs like "avc1.64001e,mp4a.40.2"). When there's no
+ * separate audio playlist, we copy ALL streams to preserve the embedded audio.
  */
 async function processVideoOnly(
   ffmpeg: FFmpeg,
@@ -126,12 +130,16 @@ async function processVideoOnly(
   await ffmpeg.writeFile("video.ts", await fetchFile(videoBlob));
 
   onProgress?.(0.7, "Converting to MP4");
+  // Use -c copy to copy ALL streams (video + any embedded audio)
+  // This handles muxed HLS streams where audio is embedded in video segments
   await ffmpeg.exec([
     "-y",
     "-i",
     "video.ts",
-    "-c:v",
+    "-c",
     "copy",
+    "-bsf:a",
+    "aac_adtstoasc", // Convert AAC ADTS to ASC for MP4 compatibility
     "-movflags",
     "+faststart",
     outputFileName,
@@ -274,7 +282,7 @@ async function processHLSChunks(
     onProgress?.(1, "Done");
 
     // Create blob URL
-    const blob = new Blob([data], { type: "video/mp4" });
+    const blob = new Blob([data as BlobPart], { type: "video/mp4" });
     const blobUrl = URL.createObjectURL(blob);
 
     // Cleanup output file
@@ -325,7 +333,7 @@ async function processM3u8Chunks(
     onProgress?.(1, "Done");
 
     // Create blob URL
-    const blob = new Blob([data], { type: "video/mp4" });
+    const blob = new Blob([data as BlobPart], { type: "video/mp4" });
     const blobUrl = URL.createObjectURL(blob);
 
     // Cleanup output file
