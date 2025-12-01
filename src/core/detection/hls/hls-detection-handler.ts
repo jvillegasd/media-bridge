@@ -35,6 +35,7 @@ import {
 import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
+import { extractThumbnail } from "../../utils/thumbnail-utils";
 
 /** Configuration options for HlsDetectionHandler */
 export interface HlsDetectionHandlerOptions {
@@ -315,27 +316,10 @@ export class HlsDetectionHandler {
       fileExtension: "m3u8",
     };
 
-    // Try to find thumbnail in page
-    const thumbnailSelectors = [
-      'meta[property="og:image"]',
-      'meta[name="twitter:image"]',
-      'link[rel="image_src"]',
-      'img[class*="thumbnail"]',
-      'img[class*="preview"]',
-    ];
-
-    for (const selector of thumbnailSelectors) {
-      const element = document.querySelector(selector);
-      if (element) {
-        const thumbnailUrl =
-          element.getAttribute("content") ||
-          element.getAttribute("href") ||
-          (element as HTMLImageElement).src;
-        if (thumbnailUrl) {
-          metadata.thumbnail = thumbnailUrl;
-          break;
-        }
-      }
+    // Extract thumbnail using unified utility (page-based search)
+    const thumbnail = extractThumbnail();
+    if (thumbnail) {
+      metadata.thumbnail = thumbnail;
     }
 
     return metadata;
