@@ -25,6 +25,7 @@
 
 import { VideoMetadata } from "../../types";
 import { detectFormatFromUrl } from "../../utils/url-utils";
+import { extractThumbnail } from "../../utils/thumbnail-utils";
 
 /** Configuration options for DirectDetectionHandler */
 export interface DirectDetectionHandlerOptions {
@@ -339,25 +340,10 @@ export class DirectDetectionHandler {
         }
       }
 
-      // Extract thumbnail
-      if (videoElement.poster) {
-        metadata.thumbnail = videoElement.poster;
-      } else {
-        // Try to capture current frame as thumbnail
-        try {
-          if (videoElement.readyState >= 2) {
-            const canvas = document.createElement("canvas");
-            canvas.width = videoElement.videoWidth || 320;
-            canvas.height = videoElement.videoHeight || 180;
-            const ctx = canvas.getContext("2d");
-            if (ctx) {
-              ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-              metadata.thumbnail = canvas.toDataURL("image/jpeg", 0.8);
-            }
-          }
-        } catch (error) {
-          // CORS or other issues, ignore
-        }
+      // Extract thumbnail using unified utility
+      const thumbnail = extractThumbnail(videoElement);
+      if (thumbnail) {
+        metadata.thumbnail = thumbnail;
       }
 
       // Try to find a more specific title from the page context
@@ -402,27 +388,10 @@ export class DirectDetectionHandler {
         }
       }
     } else {
-      // Try to find thumbnail in page (for YouTube, Twitter, etc.)
-      const thumbnailSelectors = [
-        'meta[property="og:image"]',
-        'meta[name="twitter:image"]',
-        'link[rel="image_src"]',
-        'img[class*="thumbnail"]',
-        'img[class*="preview"]',
-      ];
-
-      for (const selector of thumbnailSelectors) {
-        const element = document.querySelector(selector);
-        if (element) {
-          const thumbnailUrl =
-            element.getAttribute("content") ||
-            element.getAttribute("href") ||
-            (element as HTMLImageElement).src;
-          if (thumbnailUrl) {
-            metadata.thumbnail = thumbnailUrl;
-            break;
-          }
-        }
+      // Extract thumbnail using unified utility (page-based search)
+      const thumbnail = extractThumbnail();
+      if (thumbnail) {
+        metadata.thumbnail = thumbnail;
       }
     }
 
