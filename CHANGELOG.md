@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/jvillegasd/media-bridge/compare/v1.4.0...v1.5.0) (2025-12-01)
+
+
+### 🎉 New Features
+
+* **service-worker:** implement keep-alive mechanism to prevent termination during long downloads ([#20](https://github.com/jvillegasd/media-bridge/issues/20)) ([bd5d6e7](https://github.com/jvillegasd/media-bridge/commit/bd5d6e7d4373c080fb1a376452992b557c777a15))
+
 ## [1.4.0](https://github.com/jvillegasd/media-bridge/compare/v1.3.0...v1.4.0) (2025-11-29)
 
 
