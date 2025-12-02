@@ -319,7 +319,7 @@ export class HlsDetectionHandler {
       title: document.title,
       fileExtension: "m3u8",
       hasDrm: hasDrm(playlistText),
-      cannotDecrypt: !canDecrypt(playlistText),
+      unsupported: !canDecrypt(playlistText),
     };
 
     // Extract thumbnail using unified utility (page-based search)

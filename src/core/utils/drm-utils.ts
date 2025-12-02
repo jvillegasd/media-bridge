@@ -46,7 +46,8 @@ export function hasDrm(manifest: string): boolean {
 export function canDecrypt(manifest: string): boolean {
   // Check for unsupported encryption methods
   // Only NONE or AES-128 are supported for decryption
-  const encryptionMethodPattern = /#EXT-X-KEY:METHOD=(?!NONE|AES-128)/;
+  // Pattern matches METHOD= followed by a value that is NOT NONE or AES-128
+  const encryptionMethodPattern = /#EXT-X-KEY:METHOD=(?!NONE|AES-128)[A-Z0-9-]+/i;
   if (encryptionMethodPattern.test(manifest)) {
     return false;
   }

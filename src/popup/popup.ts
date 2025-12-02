@@ -54,7 +54,7 @@ let manifestProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
 let currentManualManifestUrl: string | null = null;
 let hasDrmInManifest: boolean = false;
-let cannotDecryptManifest: boolean = false;
+let unsupportedManifest: boolean = false;
 let themeToggle: HTMLButtonElement | null = null;
 let themeIcon: SVGElement | null = null;
 
@@ -717,10 +717,10 @@ function renderDetectedVideos() {
         buttonDisabled = true;
       }
 
-      // Check for undecrypted manifests (unsupported encryption methods)
-      const cannotDecrypt = video.cannotDecrypt === true;
-      if (cannotDecrypt && !hasDrm) {
-        statusBadge = `<span class="video-status status-undecrypted">Cannot Decrypt</span>`;
+      // Check for unsupported encryption methods
+      const unsupported = video.unsupported === true;
+      if (unsupported && !hasDrm) {
+        statusBadge = `<span class="video-status status-undecrypted">Unsupported</span>`;
         buttonDisabled = true;
       }
 
@@ -875,7 +875,7 @@ function renderDetectedVideos() {
         </div>
         ${progressBar}
         ${
-          !isDownloading
+          !isDownloading && !hasDrm && !unsupported
             ? `
           <div style="display: flex; gap: 6px; margin-top: 6px;">
             <button class="video-btn ${buttonDisabled ? "disabled" : ""}" 
@@ -884,7 +884,7 @@ function renderDetectedVideos() {
               ${buttonText}
             </button>
             ${
-              (video.format === "hls" || video.format === "m3u8") && !hasDrm && !cannotDecrypt
+              (video.format === "hls" || video.format === "m3u8") && !hasDrm && !unsupported
                 ? `
               <button class="video-btn-manifest" 
                       data-url="${escapeHtml(video.url)}" 
@@ -1872,8 +1872,8 @@ function updateManualManifestFormState() {
     return;
   }
 
-  // Disable button if manifest cannot be decrypted
-  if (cannotDecryptManifest) {
+  // Disable button if manifest is unsupported
+  if (unsupportedManifest) {
     startManifestDownloadBtn.disabled = true;
     return;
   }
@@ -1947,9 +1947,9 @@ async function handleLoadManifestPlaylist() {
     manifestQualitySelection.style.display = "none";
   }
 
-  // Reset DRM and decryption flags
+  // Reset DRM and unsupported flags
   hasDrmInManifest = false;
-  cannotDecryptManifest = false;
+  unsupportedManifest = false;
 
   try {
     // Fetch playlist using normalized URL
@@ -1958,8 +1958,8 @@ async function handleLoadManifestPlaylist() {
     // Check for DRM protection
     hasDrmInManifest = hasDrm(playlistText);
 
-    // Check for decryption capability
-    cannotDecryptManifest = !canDecrypt(playlistText);
+    // Check for unsupported encryption methods
+    unsupportedManifest = !canDecrypt(playlistText);
 
     // If DRM detected, show warning and disable download
     if (hasDrmInManifest) {
@@ -1983,8 +1983,8 @@ async function handleLoadManifestPlaylist() {
       return;
     }
 
-    // If manifest cannot be decrypted, show warning and disable download
-    if (cannotDecryptManifest) {
+    // If manifest is unsupported, show warning and disable download
+    if (unsupportedManifest) {
       if (manifestUndecryptedWarning) {
         manifestUndecryptedWarning.style.display = "block";
       }
@@ -2098,9 +2098,9 @@ async function handleLoadManifestPlaylist() {
     if (manifestQualitySelection) {
       manifestQualitySelection.style.display = "none";
     }
-    // Reset DRM and decryption flags on error
+    // Reset DRM and unsupported flags on error
     hasDrmInManifest = false;
-    cannotDecryptManifest = false;
+    unsupportedManifest = false;
     // Update form state on error
     updateManualManifestFormState();
   } finally {
