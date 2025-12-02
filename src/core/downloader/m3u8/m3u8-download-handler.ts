@@ -25,7 +25,7 @@
  * @module M3u8DownloadHandler
  */
 
-import { CancellationError } from "../../utils/errors";
+import { CancellationError, DownloadError } from "../../utils/errors";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
@@ -40,6 +40,7 @@ import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
+import { hasDrm } from "../../utils/drm-utils";
 
 /** Configuration options for M3U8 download handler */
 export interface M3u8DownloadHandlerOptions {
@@ -615,6 +616,12 @@ export class M3u8DownloadHandler {
             this.abortSignal
           )
         : await fetchText(mediaPlaylistUrl, 3);
+
+      // Check for DRM protection
+      if (hasDrm(mediaPlaylistText)) {
+        throw new DownloadError("Cannot download DRM-protected content");
+      }
+
       const fragments = parseLevelsPlaylist(
         mediaPlaylistText,
         mediaPlaylistUrl,

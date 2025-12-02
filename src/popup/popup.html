@@ -454,6 +454,7 @@
     .status-completed { background: #1e3a2e; color: #66bb6a; }
     .status-failed { background: #4a1e1e; color: #ef5350; }
     .status-cancelled { background: #4a1e1e; color: #ef5350; }
+    .status-drm { background: #4a1e1e; color: #ef5350; }
 
     /* Status badges - light mode */
     :root.light-mode .status-detecting { background: #e3f2fd; color: #1976d2; }
@@ -464,6 +465,7 @@
     :root.light-mode .status-completed { background: #e8f5e9; color: #388e3c; }
     :root.light-mode .status-failed { background: #ffebee; color: #d32f2f; }
     :root.light-mode .status-cancelled { background: #ffebee; color: #d32f2f; }
+    :root.light-mode .status-drm { background: #ffebee; color: #d32f2f; }
 
     .downloading-label {
       display: flex;
@@ -883,6 +885,10 @@
       <div id="hlsMediaPlaylistWarning" class="hls-quality-warning" style="display: none;">
         <strong>⚠️ Media Playlist Detected</strong>
         <p>This URL belongs to a media playlist. Quality selection is not available. The download will proceed with the available stream.</p>
+      </div>
+      <div id="hlsDrmWarning" class="hls-quality-warning" style="display: none;">
+        <strong>🔒 DRM Protected Content</strong>
+        <p>This content is protected by DRM (Digital Rights Management) and cannot be downloaded. DRM-protected content requires special decryption keys that are not available.</p>
       </div>
       <div id="hlsQualitySelection" style="display: none;">
         <div class="hls-quality-form-group">

@@ -43,6 +43,7 @@ import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
+import { hasDrm } from "../../utils/drm-utils";
 
 /** Configuration options for HLS download handler */
 export interface HlsDownloadHandlerOptions {
@@ -673,6 +674,7 @@ export class HlsDownloadHandler {
 
       let videoPlaylistUrl: string | null = null;
       let audioPlaylistUrl: string | null = null;
+      let masterPlaylistText: string = "";
 
       // If quality preferences are provided, use them directly
       if (manifestQuality) {
@@ -683,14 +685,59 @@ export class HlsDownloadHandler {
             videoPlaylistUrl || "none"
           }, audio: ${audioPlaylistUrl || "none"}`,
         );
-      } else {
-        // Otherwise, fetch and parse master playlist to auto-select
-        const masterPlaylistText = this.abortSignal
+
+        // Fetch master playlist to check for DRM
+        masterPlaylistText = this.abortSignal
           ? await cancelIfAborted(
               fetchText(masterPlaylistUrl, 3, this.abortSignal),
               this.abortSignal
             )
           : await fetchText(masterPlaylistUrl, 3);
+
+        // Check master playlist for DRM
+        if (hasDrm(masterPlaylistText)) {
+          throw new DownloadError("Cannot download DRM-protected content");
+        }
+
+        // Check video playlist for DRM if provided
+        if (videoPlaylistUrl) {
+          const videoPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(videoPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(videoPlaylistUrl, 3);
+          if (hasDrm(videoPlaylistText)) {
+            throw new DownloadError("Cannot download DRM-protected content");
+          }
+        }
+
+        // Check audio playlist for DRM if provided
+        if (audioPlaylistUrl) {
+          const audioPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(audioPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(audioPlaylistUrl, 3);
+          if (hasDrm(audioPlaylistText)) {
+            throw new DownloadError("Cannot download DRM-protected content");
+          }
+        }
+      } else {
+        // Otherwise, fetch and parse master playlist to auto-select
+        masterPlaylistText = this.abortSignal
+          ? await cancelIfAborted(
+              fetchText(masterPlaylistUrl, 3, this.abortSignal),
+              this.abortSignal
+            )
+          : await fetchText(masterPlaylistUrl, 3);
+
+        // Check for DRM in master playlist
+        if (hasDrm(masterPlaylistText)) {
+          throw new DownloadError("Cannot download DRM-protected content");
+        }
+
         const levels = parseMasterPlaylist(
           masterPlaylistText,
           masterPlaylistUrl,

@@ -24,6 +24,7 @@ import {
 } from "../core/utils/m3u8-parser";
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "../core/utils/download-utils";
+import { hasDrm } from "../core/utils/drm-utils";
 
 // DOM elements
 let noVideoBtn: HTMLButtonElement | null = null;
@@ -46,10 +47,12 @@ let videoQualitySelect: HTMLSelectElement | null = null;
 let audioQualitySelect: HTMLSelectElement | null = null;
 let manifestUrlInput: HTMLInputElement | null = null;
 let manifestMediaPlaylistWarning: HTMLDivElement | null = null;
+let manifestDrmWarning: HTMLDivElement | null = null;
 let manifestQualitySelection: HTMLDivElement | null = null;
 let manifestProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
 let currentManualManifestUrl: string | null = null;
+let hasDrmInManifest: boolean = false;
 let themeToggle: HTMLButtonElement | null = null;
 let themeIcon: SVGElement | null = null;
 
@@ -116,6 +119,9 @@ async function init() {
   manifestUrlInput = document.getElementById("manifestUrlInput") as HTMLInputElement;
   manifestMediaPlaylistWarning = document.getElementById(
     "hlsMediaPlaylistWarning",
+  ) as HTMLDivElement;
+  manifestDrmWarning = document.getElementById(
+    "hlsDrmWarning",
   ) as HTMLDivElement;
   manifestQualitySelection = document.getElementById(
     "hlsQualitySelection",
@@ -699,6 +705,13 @@ function renderDetectedVideos() {
       let buttonText = "Download";
       let buttonDisabled = false;
 
+      // Check for DRM protection
+      const hasDrm = video.hasDrm === true;
+      if (hasDrm) {
+        statusBadge = `<span class="video-status status-drm">DRM Protected</span>`;
+        buttonDisabled = true;
+      }
+
       if (isDownloading) {
         const stage = downloadState.progress.stage;
         statusBadge = `<span class="video-status status-${stage}">${getStatusText(
@@ -859,7 +872,7 @@ function renderDetectedVideos() {
               ${buttonText}
             </button>
             ${
-              (video.format === "hls" || video.format === "m3u8")
+              (video.format === "hls" || video.format === "m3u8") && !hasDrm
                 ? `
               <button class="video-btn-manifest" 
                       data-url="${escapeHtml(video.url)}" 
@@ -1841,6 +1854,12 @@ function updateManualManifestFormState() {
   // Update download button state
   if (!startManifestDownloadBtn) return;
 
+  // Disable button if DRM detected
+  if (hasDrmInManifest) {
+    startManifestDownloadBtn.disabled = true;
+    return;
+  }
+
   // Disable button while downloading
   if (isDownloading) {
     startManifestDownloadBtn.disabled = true;
@@ -1900,13 +1919,41 @@ async function handleLoadManifestPlaylist() {
   if (manifestMediaPlaylistWarning) {
     manifestMediaPlaylistWarning.style.display = "none";
   }
+  if (manifestDrmWarning) {
+    manifestDrmWarning.style.display = "none";
+  }
   if (manifestQualitySelection) {
     manifestQualitySelection.style.display = "none";
   }
 
+  // Reset DRM flag
+  hasDrmInManifest = false;
+
   try {
     // Fetch playlist using normalized URL
     const playlistText = await fetchTextViaBackground(normalizedUrl);
+
+    // Check for DRM protection
+    hasDrmInManifest = hasDrm(playlistText);
+
+    // If DRM detected, show warning and disable download
+    if (hasDrmInManifest) {
+      if (manifestDrmWarning) {
+        manifestDrmWarning.style.display = "block";
+      }
+      if (manifestMediaPlaylistWarning) {
+        manifestMediaPlaylistWarning.style.display = "none";
+      }
+      if (manifestQualitySelection) {
+        manifestQualitySelection.style.display = "none";
+      }
+      if (startManifestDownloadBtn) {
+        startManifestDownloadBtn.disabled = true;
+      }
+      // Update form state and return early
+      updateManualManifestFormState();
+      return;
+    }
 
     // Check if it's a media playlist or master playlist
     if (isMediaPlaylist(playlistText)) {
@@ -1992,9 +2039,14 @@ async function handleLoadManifestPlaylist() {
     if (manifestMediaPlaylistWarning) {
       manifestMediaPlaylistWarning.style.display = "none";
     }
+    if (manifestDrmWarning) {
+      manifestDrmWarning.style.display = "none";
+    }
     if (manifestQualitySelection) {
       manifestQualitySelection.style.display = "none";
     }
+    // Reset DRM flag on error
+    hasDrmInManifest = false;
     // Update form state on error
     updateManualManifestFormState();
   } finally {
