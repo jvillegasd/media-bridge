@@ -17,6 +17,8 @@ export interface VideoMetadata {
   thumbnail?: string; // Thumbnail/preview image URL
   videoId?: string; // Unique identifier for this video instance
   fileExtension?: string; // Detected file extension (e.g., "mp4", "webm")
+  hasDrm?: boolean; // Indicates if the video is DRM-protected
+  unsupported?: boolean; // Indicates if the manifest uses unsupported encryption methods
 }
 
 export interface VideoQuality {

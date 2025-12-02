@@ -43,6 +43,8 @@ import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
+import { canDownloadHLSManifest } from "../../utils/drm-utils";
+import { sanitizeFilename } from "../../utils/file-utils";
 
 /** Configuration options for HLS download handler */
 export interface HlsDownloadHandlerOptions {
@@ -552,6 +554,9 @@ export class HlsDownloadHandler {
           },
           async (downloadId) => {
             if (chrome.runtime.lastError) {
+              logger.error(
+                `Chrome downloads API error: ${chrome.runtime.lastError.message}`,
+              );
               reject(new Error(chrome.runtime.lastError.message));
               return;
             }
@@ -673,6 +678,19 @@ export class HlsDownloadHandler {
 
       let videoPlaylistUrl: string | null = null;
       let audioPlaylistUrl: string | null = null;
+      let videoPlaylistText: string | null = null;
+      let audioPlaylistText: string | null = null;
+
+      // Fetch and validate master playlist once
+      const masterPlaylistText = this.abortSignal
+        ? await cancelIfAborted(
+            fetchText(masterPlaylistUrl, 3, this.abortSignal),
+            this.abortSignal
+          )
+        : await fetchText(masterPlaylistUrl, 3);
+
+      // Validate master playlist can be downloaded
+      canDownloadHLSManifest(masterPlaylistText);
 
       // If quality preferences are provided, use them directly
       if (manifestQuality) {
@@ -683,14 +701,30 @@ export class HlsDownloadHandler {
             videoPlaylistUrl || "none"
           }, audio: ${audioPlaylistUrl || "none"}`,
         );
+
+        // Fetch and validate video playlist if provided
+        if (videoPlaylistUrl) {
+          videoPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(videoPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(videoPlaylistUrl, 3);
+          canDownloadHLSManifest(videoPlaylistText);
+        }
+
+        // Fetch and validate audio playlist if provided
+        if (audioPlaylistUrl) {
+          audioPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(audioPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(audioPlaylistUrl, 3);
+          canDownloadHLSManifest(audioPlaylistText);
+        }
       } else {
-        // Otherwise, fetch and parse master playlist to auto-select
-        const masterPlaylistText = this.abortSignal
-          ? await cancelIfAborted(
-              fetchText(masterPlaylistUrl, 3, this.abortSignal),
-              this.abortSignal
-            )
-          : await fetchText(masterPlaylistUrl, 3);
+        // Otherwise, parse master playlist to auto-select
         const levels = parseMasterPlaylist(
           masterPlaylistText,
           masterPlaylistUrl,
@@ -717,13 +751,20 @@ export class HlsDownloadHandler {
 
       throwIfAborted(this.abortSignal);
 
+      // Process video playlist if available
       if (videoPlaylistUrl) {
-        const videoPlaylistText = this.abortSignal
-          ? await cancelIfAborted(
-              fetchText(videoPlaylistUrl, 3, this.abortSignal),
-              this.abortSignal
-            )
-          : await fetchText(videoPlaylistUrl, 3);
+        // Fetch video playlist if not already fetched (when auto-selecting)
+        if (!videoPlaylistText) {
+          videoPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(videoPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(videoPlaylistUrl, 3);
+          // Validate video playlist can be downloaded
+          canDownloadHLSManifest(videoPlaylistText);
+        }
+        
         const videoFragments = parseLevelsPlaylist(
           videoPlaylistText,
           videoPlaylistUrl,
@@ -752,13 +793,20 @@ export class HlsDownloadHandler {
 
       throwIfAborted(this.abortSignal);
 
+      // Process audio playlist if available
       if (audioPlaylistUrl) {
-        const audioPlaylistText = this.abortSignal
-          ? await cancelIfAborted(
-              fetchText(audioPlaylistUrl, 3, this.abortSignal),
-              this.abortSignal
-            )
-          : await fetchText(audioPlaylistUrl, 3);
+        // Fetch audio playlist if not already fetched (when auto-selecting)
+        if (!audioPlaylistText) {
+          audioPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(audioPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(audioPlaylistUrl, 3);
+          // Validate audio playlist can be downloaded
+          canDownloadHLSManifest(audioPlaylistText);
+        }
+        
         const audioFragments = parseLevelsPlaylist(
           audioPlaylistText,
           audioPlaylistUrl,
@@ -798,8 +846,18 @@ export class HlsDownloadHandler {
         this.notifyProgress(mergingState);
       }
 
-      // Extract base filename without extension
-      const baseFileName = filename.replace(/\.[^/.]+$/, "");
+      // Sanitize and extract base filename without extension
+      const sanitizedFilename = sanitizeFilename(filename);
+      logger.info(`Sanitized filename: "${sanitizedFilename}"`);
+      
+      let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
+      
+      // Fallback if base filename is empty or invalid
+      if (!baseFileName || baseFileName.trim() === "") {
+        const timestamp = Date.now();
+        baseFileName = `video_${timestamp}`;
+        logger.warn(`Filename became empty after sanitization, using fallback: ${baseFileName}`);
+      }
 
       // Process chunks using offscreen document and FFmpeg
       const blobUrl = await this.streamToMp4Blob(
@@ -831,9 +889,10 @@ export class HlsDownloadHandler {
       }
 
       // Save to file using blob URL
+      const finalFilename = `${baseFileName}.mp4`;
       const filePath = await this.saveBlobUrlToFile(
         blobUrl,
-        `${baseFileName}.mp4`,
+        finalFilename,
         stateId,
       );
 

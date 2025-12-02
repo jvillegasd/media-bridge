@@ -30,6 +30,7 @@ import {
   DirectDownloadHandlerResult,
   DirectDownloadResult,
 } from "../types";
+import { sanitizeFilename } from "../../utils/file-utils";
 
 /** Internal listener structure for tracking Chrome download progress */
 interface DownloadListener {
@@ -330,7 +331,9 @@ export class DirectDownloadHandler {
     abortSignal?: AbortSignal,
   ): Promise<DirectDownloadHandlerResult> {
     try {
-      logger.info(`Downloading direct video from ${url} to ${filename}`);
+      // Sanitize filename to remove invalid characters
+      const sanitizedFilename = sanitizeFilename(filename);
+      logger.info(`Downloading direct video from ${url} to ${sanitizedFilename}`);
 
       // Check if already aborted before starting
       throwIfAborted(abortSignal);
@@ -338,8 +341,8 @@ export class DirectDownloadHandler {
       // Extract file extension from URL or headers (cancellable)
       const fileExtension = await this.extractFileExtension(url, abortSignal);
 
-      // Start Chrome download
-      const chromeDownloadId = await this.startChromeDownload(url, filename);
+      // Start Chrome download with sanitized filename
+      const chromeDownloadId = await this.startChromeDownload(url, sanitizedFilename);
 
       // Store chromeDownloadId in download state for reliable cancellation
       const currentState = await getDownload(stateId);

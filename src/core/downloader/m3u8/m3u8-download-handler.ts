@@ -25,7 +25,7 @@
  * @module M3u8DownloadHandler
  */
 
-import { CancellationError } from "../../utils/errors";
+import { CancellationError, DownloadError } from "../../utils/errors";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadState, Fragment, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
@@ -40,6 +40,8 @@ import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
+import { canDownloadHLSManifest } from "../../utils/drm-utils";
+import { sanitizeFilename } from "../../utils/file-utils";
 
 /** Configuration options for M3U8 download handler */
 export interface M3u8DownloadHandlerOptions {
@@ -615,6 +617,10 @@ export class M3u8DownloadHandler {
             this.abortSignal
           )
         : await fetchText(mediaPlaylistUrl, 3);
+
+      // Validate media playlist can be downloaded
+      canDownloadHLSManifest(mediaPlaylistText);
+
       const fragments = parseLevelsPlaylist(
         mediaPlaylistText,
         mediaPlaylistUrl,
@@ -645,8 +651,16 @@ export class M3u8DownloadHandler {
         this.notifyProgress(mergingState);
       }
 
-      // Extract base filename without extension
-      const baseFileName = filename.replace(/\.[^/.]+$/, "");
+      // Sanitize and extract base filename without extension
+      const sanitizedFilename = sanitizeFilename(filename);
+      let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
+      
+      // Fallback if base filename is empty or invalid
+      if (!baseFileName || baseFileName.trim() === "") {
+        const timestamp = Date.now();
+        baseFileName = `video_${timestamp}`;
+        logger.warn(`Filename became empty after sanitization, using fallback: ${baseFileName}`);
+      }
 
       // Process chunks using offscreen document and FFmpeg
       const blobUrl = await this.streamToMp4Blob(

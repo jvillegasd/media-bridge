@@ -36,6 +36,7 @@ import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
 import { extractThumbnail } from "../../utils/thumbnail-utils";
+import { hasDrm, canDecrypt } from "../../utils/drm-utils";
 
 /** Configuration options for HlsDetectionHandler */
 export interface HlsDetectionHandlerOptions {
@@ -88,7 +89,7 @@ export class HlsDetectionHandler {
       const isMedia = isMediaPlaylist(playlistText);
 
       if (isMedia) {
-        return await this.handleMediaPlaylist(url, normalizedUrl);
+        return await this.handleMediaPlaylist(url, normalizedUrl, playlistText);
       }
 
       if (isMaster) {
@@ -125,6 +126,7 @@ export class HlsDetectionHandler {
   private async handleMediaPlaylist(
     url: string,
     normalizedUrl: string,
+    playlistText: string,
   ): Promise<VideoMetadata | null> {
     const belongsToMaster = this.checkIfBelongsToMasterPlaylist(normalizedUrl);
 
@@ -139,7 +141,7 @@ export class HlsDetectionHandler {
 
     // It's a standalone media playlist, add it as M3U8 format
     logger.info("[Media Bridge] Detected standalone M3U8 media playlist", url);
-    return await this.addDetectedVideo(url, "m3u8");
+    return await this.addDetectedVideo(url, "m3u8", playlistText);
   }
 
   /**
@@ -162,7 +164,7 @@ export class HlsDetectionHandler {
     // Remove any existing detected videos that are variants of this master playlist
     this.removeVariantVideos(variantUrls);
 
-    return await this.addDetectedVideo(url, "hls");
+    return await this.addDetectedVideo(url, "hls", playlistText);
   }
 
   /**
@@ -208,8 +210,9 @@ export class HlsDetectionHandler {
   private async addDetectedVideo(
     url: string,
     format: "hls" | "m3u8",
+    playlistText: string,
   ): Promise<VideoMetadata | null> {
-    const metadata = await this.extractMetadata(url, format);
+    const metadata = await this.extractMetadata(url, format, playlistText);
 
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
@@ -307,6 +310,7 @@ export class HlsDetectionHandler {
   private async extractMetadata(
     url: string,
     format: "hls" | "m3u8" = "hls",
+    playlistText: string,
   ): Promise<VideoMetadata | null> {
     const metadata: VideoMetadata = {
       url,
@@ -314,6 +318,8 @@ export class HlsDetectionHandler {
       pageUrl: window.location.href,
       title: document.title,
       fileExtension: "m3u8",
+      hasDrm: hasDrm(playlistText),
+      unsupported: !canDecrypt(playlistText),
     };
 
     // Extract thumbnail using unified utility (page-based search)
