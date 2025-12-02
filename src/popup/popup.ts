@@ -48,7 +48,7 @@ let audioQualitySelect: HTMLSelectElement | null = null;
 let manifestUrlInput: HTMLInputElement | null = null;
 let manifestMediaPlaylistWarning: HTMLDivElement | null = null;
 let manifestDrmWarning: HTMLDivElement | null = null;
-let manifestUndecryptedWarning: HTMLDivElement | null = null;
+let manifestUnsupportedWarning: HTMLDivElement | null = null;
 let manifestQualitySelection: HTMLDivElement | null = null;
 let manifestProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
@@ -125,8 +125,8 @@ async function init() {
   manifestDrmWarning = document.getElementById(
     "hlsDrmWarning",
   ) as HTMLDivElement;
-  manifestUndecryptedWarning = document.getElementById(
-    "hlsUndecryptedWarning",
+  manifestUnsupportedWarning = document.getElementById(
+    "hlsUnsupportedWarning",
   ) as HTMLDivElement;
   manifestQualitySelection = document.getElementById(
     "hlsQualitySelection",
@@ -720,7 +720,7 @@ function renderDetectedVideos() {
       // Check for unsupported encryption methods
       const unsupported = video.unsupported === true;
       if (unsupported && !hasDrm) {
-        statusBadge = `<span class="video-status status-undecrypted">Unsupported</span>`;
+        statusBadge = `<span class="video-status status-unsupported">Unsupported</span>`;
         buttonDisabled = true;
       }
 
@@ -1940,8 +1940,8 @@ async function handleLoadManifestPlaylist() {
   if (manifestDrmWarning) {
     manifestDrmWarning.style.display = "none";
   }
-  if (manifestUndecryptedWarning) {
-    manifestUndecryptedWarning.style.display = "none";
+  if (manifestUnsupportedWarning) {
+    manifestUnsupportedWarning.style.display = "none";
   }
   if (manifestQualitySelection) {
     manifestQualitySelection.style.display = "none";
@@ -1966,8 +1966,8 @@ async function handleLoadManifestPlaylist() {
       if (manifestDrmWarning) {
         manifestDrmWarning.style.display = "block";
       }
-      if (manifestUndecryptedWarning) {
-        manifestUndecryptedWarning.style.display = "none";
+      if (manifestUnsupportedWarning) {
+        manifestUnsupportedWarning.style.display = "none";
       }
       if (manifestMediaPlaylistWarning) {
         manifestMediaPlaylistWarning.style.display = "none";
@@ -1985,8 +1985,8 @@ async function handleLoadManifestPlaylist() {
 
     // If manifest is unsupported, show warning and disable download
     if (unsupportedManifest) {
-      if (manifestUndecryptedWarning) {
-        manifestUndecryptedWarning.style.display = "block";
+      if (manifestUnsupportedWarning) {
+        manifestUnsupportedWarning.style.display = "block";
       }
       if (manifestDrmWarning) {
         manifestDrmWarning.style.display = "none";
@@ -2092,8 +2092,8 @@ async function handleLoadManifestPlaylist() {
     if (manifestDrmWarning) {
       manifestDrmWarning.style.display = "none";
     }
-    if (manifestUndecryptedWarning) {
-      manifestUndecryptedWarning.style.display = "none";
+    if (manifestUnsupportedWarning) {
+      manifestUnsupportedWarning.style.display = "none";
     }
     if (manifestQualitySelection) {
       manifestQualitySelection.style.display = "none";
