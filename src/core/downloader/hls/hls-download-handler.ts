@@ -43,7 +43,7 @@ import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
-import { hasDrm } from "../../utils/drm-utils";
+import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { sanitizeFilename } from "../../utils/file-utils";
 
 /** Configuration options for HLS download handler */
@@ -698,12 +698,10 @@ export class HlsDownloadHandler {
             )
           : await fetchText(masterPlaylistUrl, 3);
 
-        // Check master playlist for DRM
-        if (hasDrm(masterPlaylistText)) {
-          throw new DownloadError("Cannot download DRM-protected content");
-        }
+        // Validate master playlist can be downloaded
+        canDownloadHLSManifest(masterPlaylistText);
 
-        // Check video playlist for DRM if provided
+        // Check video playlist if provided
         if (videoPlaylistUrl) {
           const videoPlaylistText = this.abortSignal
             ? await cancelIfAborted(
@@ -711,12 +709,10 @@ export class HlsDownloadHandler {
                 this.abortSignal
               )
             : await fetchText(videoPlaylistUrl, 3);
-          if (hasDrm(videoPlaylistText)) {
-            throw new DownloadError("Cannot download DRM-protected content");
-          }
+          canDownloadHLSManifest(videoPlaylistText);
         }
 
-        // Check audio playlist for DRM if provided
+        // Check audio playlist if provided
         if (audioPlaylistUrl) {
           const audioPlaylistText = this.abortSignal
             ? await cancelIfAborted(
@@ -724,9 +720,7 @@ export class HlsDownloadHandler {
                 this.abortSignal
               )
             : await fetchText(audioPlaylistUrl, 3);
-          if (hasDrm(audioPlaylistText)) {
-            throw new DownloadError("Cannot download DRM-protected content");
-          }
+          canDownloadHLSManifest(audioPlaylistText);
         }
       } else {
         // Otherwise, fetch and parse master playlist to auto-select
@@ -737,10 +731,8 @@ export class HlsDownloadHandler {
             )
           : await fetchText(masterPlaylistUrl, 3);
 
-        // Check for DRM in master playlist
-        if (hasDrm(masterPlaylistText)) {
-          throw new DownloadError("Cannot download DRM-protected content");
-        }
+        // Validate master playlist can be downloaded
+        canDownloadHLSManifest(masterPlaylistText);
 
         const levels = parseMasterPlaylist(
           masterPlaylistText,
@@ -775,6 +767,10 @@ export class HlsDownloadHandler {
               this.abortSignal
             )
           : await fetchText(videoPlaylistUrl, 3);
+        
+        // Validate video playlist can be downloaded
+        canDownloadHLSManifest(videoPlaylistText);
+        
         const videoFragments = parseLevelsPlaylist(
           videoPlaylistText,
           videoPlaylistUrl,
@@ -810,6 +806,10 @@ export class HlsDownloadHandler {
               this.abortSignal
             )
           : await fetchText(audioPlaylistUrl, 3);
+        
+        // Validate audio playlist can be downloaded
+        canDownloadHLSManifest(audioPlaylistText);
+        
         const audioFragments = parseLevelsPlaylist(
           audioPlaylistText,
           audioPlaylistUrl,

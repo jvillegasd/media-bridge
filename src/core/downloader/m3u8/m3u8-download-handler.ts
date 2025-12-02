@@ -40,7 +40,7 @@ import {
   DownloadProgressCallback,
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
-import { hasDrm } from "../../utils/drm-utils";
+import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { sanitizeFilename } from "../../utils/file-utils";
 
 /** Configuration options for M3U8 download handler */
@@ -618,10 +618,8 @@ export class M3u8DownloadHandler {
           )
         : await fetchText(mediaPlaylistUrl, 3);
 
-      // Check for DRM protection
-      if (hasDrm(mediaPlaylistText)) {
-        throw new DownloadError("Cannot download DRM-protected content");
-      }
+      // Validate media playlist can be downloaded
+      canDownloadHLSManifest(mediaPlaylistText);
 
       const fragments = parseLevelsPlaylist(
         mediaPlaylistText,
