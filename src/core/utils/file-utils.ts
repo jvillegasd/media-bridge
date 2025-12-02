@@ -5,12 +5,14 @@
 /**
  * Sanitize filename by removing invalid characters
  */
-function sanitizeFilename(filename: string): string {
+export function sanitizeFilename(filename: string): string {
   // Remove or replace invalid filename characters
   // Windows: < > : " / \ | ? *
   // Unix/Mac: / and null
   return filename
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "") // Remove invalid characters
+    .replace(/[\u200B-\u200D\u200E\u200F\uFEFF]/g, "") // Remove invisible Unicode characters (zero-width spaces, marks, etc.)
+    .replace(/[\u202A-\u202E]/g, "") // Remove bidirectional formatting characters
     .replace(/\s+/g, " ") // Normalize whitespace
     .trim();
 }

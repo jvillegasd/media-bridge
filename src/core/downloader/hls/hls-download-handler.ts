@@ -44,6 +44,7 @@ import {
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
 import { hasDrm } from "../../utils/drm-utils";
+import { sanitizeFilename } from "../../utils/file-utils";
 
 /** Configuration options for HLS download handler */
 export interface HlsDownloadHandlerOptions {
@@ -553,6 +554,9 @@ export class HlsDownloadHandler {
           },
           async (downloadId) => {
             if (chrome.runtime.lastError) {
+              logger.error(
+                `Chrome downloads API error: ${chrome.runtime.lastError.message}`,
+              );
               reject(new Error(chrome.runtime.lastError.message));
               return;
             }
@@ -845,8 +849,18 @@ export class HlsDownloadHandler {
         this.notifyProgress(mergingState);
       }
 
-      // Extract base filename without extension
-      const baseFileName = filename.replace(/\.[^/.]+$/, "");
+      // Sanitize and extract base filename without extension
+      const sanitizedFilename = sanitizeFilename(filename);
+      logger.info(`Sanitized filename: "${sanitizedFilename}"`);
+      
+      let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
+      
+      // Fallback if base filename is empty or invalid
+      if (!baseFileName || baseFileName.trim() === "") {
+        const timestamp = Date.now();
+        baseFileName = `video_${timestamp}`;
+        logger.warn(`Filename became empty after sanitization, using fallback: ${baseFileName}`);
+      }
 
       // Process chunks using offscreen document and FFmpeg
       const blobUrl = await this.streamToMp4Blob(
@@ -878,9 +892,10 @@ export class HlsDownloadHandler {
       }
 
       // Save to file using blob URL
+      const finalFilename = `${baseFileName}.mp4`;
       const filePath = await this.saveBlobUrlToFile(
         blobUrl,
-        `${baseFileName}.mp4`,
+        finalFilename,
         stateId,
       );
 

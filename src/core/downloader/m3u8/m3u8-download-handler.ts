@@ -41,6 +41,7 @@ import {
   DownloadProgressCallback as ProgressCallback,
 } from "../types";
 import { hasDrm } from "../../utils/drm-utils";
+import { sanitizeFilename } from "../../utils/file-utils";
 
 /** Configuration options for M3U8 download handler */
 export interface M3u8DownloadHandlerOptions {
@@ -652,8 +653,16 @@ export class M3u8DownloadHandler {
         this.notifyProgress(mergingState);
       }
 
-      // Extract base filename without extension
-      const baseFileName = filename.replace(/\.[^/.]+$/, "");
+      // Sanitize and extract base filename without extension
+      const sanitizedFilename = sanitizeFilename(filename);
+      let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
+      
+      // Fallback if base filename is empty or invalid
+      if (!baseFileName || baseFileName.trim() === "") {
+        const timestamp = Date.now();
+        baseFileName = `video_${timestamp}`;
+        logger.warn(`Filename became empty after sanitization, using fallback: ${baseFileName}`);
+      }
 
       // Process chunks using offscreen document and FFmpeg
       const blobUrl = await this.streamToMp4Blob(
