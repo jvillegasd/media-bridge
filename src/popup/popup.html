@@ -455,6 +455,7 @@
     .status-failed { background: #4a1e1e; color: #ef5350; }
     .status-cancelled { background: #4a1e1e; color: #ef5350; }
     .status-drm { background: #4a1e1e; color: #ef5350; }
+    .status-undecrypted { background: #4a1e1e; color: #ef5350; }
 
     /* Status badges - light mode */
     :root.light-mode .status-detecting { background: #e3f2fd; color: #1976d2; }
@@ -466,6 +467,7 @@
     :root.light-mode .status-failed { background: #ffebee; color: #d32f2f; }
     :root.light-mode .status-cancelled { background: #ffebee; color: #d32f2f; }
     :root.light-mode .status-drm { background: #ffebee; color: #d32f2f; }
+    :root.light-mode .status-undecrypted { background: #ffebee; color: #d32f2f; }
 
     .downloading-label {
       display: flex;
@@ -889,6 +891,10 @@
       <div id="hlsDrmWarning" class="hls-quality-warning" style="display: none;">
         <strong>🔒 DRM Protected Content</strong>
         <p>This content is protected by DRM (Digital Rights Management) and cannot be downloaded. DRM-protected content requires special decryption keys that are not available.</p>
+      </div>
+      <div id="hlsUndecryptedWarning" class="hls-quality-warning" style="display: none;">
+        <strong>🔐 Cannot Decrypt Content</strong>
+        <p>This content uses an unsupported encryption method and cannot be decrypted. Only content encrypted with AES-128 or unencrypted content can be downloaded.</p>
       </div>
       <div id="hlsQualitySelection" style="display: none;">
         <div class="hls-quality-form-group">

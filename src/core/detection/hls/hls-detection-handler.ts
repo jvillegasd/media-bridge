@@ -36,7 +36,7 @@ import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
 import { extractThumbnail } from "../../utils/thumbnail-utils";
-import { hasDrm } from "../../utils/drm-utils";
+import { hasDrm, canDecrypt } from "../../utils/drm-utils";
 
 /** Configuration options for HlsDetectionHandler */
 export interface HlsDetectionHandlerOptions {
@@ -319,6 +319,7 @@ export class HlsDetectionHandler {
       title: document.title,
       fileExtension: "m3u8",
       hasDrm: hasDrm(playlistText),
+      cannotDecrypt: !canDecrypt(playlistText),
     };
 
     // Extract thumbnail using unified utility (page-based search)

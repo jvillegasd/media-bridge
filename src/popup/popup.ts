@@ -24,7 +24,7 @@ import {
 } from "../core/utils/m3u8-parser";
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "../core/utils/download-utils";
-import { hasDrm } from "../core/utils/drm-utils";
+import { hasDrm, canDecrypt } from "../core/utils/drm-utils";
 
 // DOM elements
 let noVideoBtn: HTMLButtonElement | null = null;
@@ -48,11 +48,13 @@ let audioQualitySelect: HTMLSelectElement | null = null;
 let manifestUrlInput: HTMLInputElement | null = null;
 let manifestMediaPlaylistWarning: HTMLDivElement | null = null;
 let manifestDrmWarning: HTMLDivElement | null = null;
+let manifestUndecryptedWarning: HTMLDivElement | null = null;
 let manifestQualitySelection: HTMLDivElement | null = null;
 let manifestProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
 let currentManualManifestUrl: string | null = null;
 let hasDrmInManifest: boolean = false;
+let cannotDecryptManifest: boolean = false;
 let themeToggle: HTMLButtonElement | null = null;
 let themeIcon: SVGElement | null = null;
 
@@ -122,6 +124,9 @@ async function init() {
   ) as HTMLDivElement;
   manifestDrmWarning = document.getElementById(
     "hlsDrmWarning",
+  ) as HTMLDivElement;
+  manifestUndecryptedWarning = document.getElementById(
+    "hlsUndecryptedWarning",
   ) as HTMLDivElement;
   manifestQualitySelection = document.getElementById(
     "hlsQualitySelection",
@@ -712,6 +717,13 @@ function renderDetectedVideos() {
         buttonDisabled = true;
       }
 
+      // Check for undecrypted manifests (unsupported encryption methods)
+      const cannotDecrypt = video.cannotDecrypt === true;
+      if (cannotDecrypt && !hasDrm) {
+        statusBadge = `<span class="video-status status-undecrypted">Cannot Decrypt</span>`;
+        buttonDisabled = true;
+      }
+
       if (isDownloading) {
         const stage = downloadState.progress.stage;
         statusBadge = `<span class="video-status status-${stage}">${getStatusText(
@@ -872,7 +884,7 @@ function renderDetectedVideos() {
               ${buttonText}
             </button>
             ${
-              (video.format === "hls" || video.format === "m3u8") && !hasDrm
+              (video.format === "hls" || video.format === "m3u8") && !hasDrm && !cannotDecrypt
                 ? `
               <button class="video-btn-manifest" 
                       data-url="${escapeHtml(video.url)}" 
@@ -1860,6 +1872,12 @@ function updateManualManifestFormState() {
     return;
   }
 
+  // Disable button if manifest cannot be decrypted
+  if (cannotDecryptManifest) {
+    startManifestDownloadBtn.disabled = true;
+    return;
+  }
+
   // Disable button while downloading
   if (isDownloading) {
     startManifestDownloadBtn.disabled = true;
@@ -1922,12 +1940,16 @@ async function handleLoadManifestPlaylist() {
   if (manifestDrmWarning) {
     manifestDrmWarning.style.display = "none";
   }
+  if (manifestUndecryptedWarning) {
+    manifestUndecryptedWarning.style.display = "none";
+  }
   if (manifestQualitySelection) {
     manifestQualitySelection.style.display = "none";
   }
 
-  // Reset DRM flag
+  // Reset DRM and decryption flags
   hasDrmInManifest = false;
+  cannotDecryptManifest = false;
 
   try {
     // Fetch playlist using normalized URL
@@ -1936,10 +1958,38 @@ async function handleLoadManifestPlaylist() {
     // Check for DRM protection
     hasDrmInManifest = hasDrm(playlistText);
 
+    // Check for decryption capability
+    cannotDecryptManifest = !canDecrypt(playlistText);
+
     // If DRM detected, show warning and disable download
     if (hasDrmInManifest) {
       if (manifestDrmWarning) {
         manifestDrmWarning.style.display = "block";
+      }
+      if (manifestUndecryptedWarning) {
+        manifestUndecryptedWarning.style.display = "none";
+      }
+      if (manifestMediaPlaylistWarning) {
+        manifestMediaPlaylistWarning.style.display = "none";
+      }
+      if (manifestQualitySelection) {
+        manifestQualitySelection.style.display = "none";
+      }
+      if (startManifestDownloadBtn) {
+        startManifestDownloadBtn.disabled = true;
+      }
+      // Update form state and return early
+      updateManualManifestFormState();
+      return;
+    }
+
+    // If manifest cannot be decrypted, show warning and disable download
+    if (cannotDecryptManifest) {
+      if (manifestUndecryptedWarning) {
+        manifestUndecryptedWarning.style.display = "block";
+      }
+      if (manifestDrmWarning) {
+        manifestDrmWarning.style.display = "none";
       }
       if (manifestMediaPlaylistWarning) {
         manifestMediaPlaylistWarning.style.display = "none";
@@ -2042,11 +2092,15 @@ async function handleLoadManifestPlaylist() {
     if (manifestDrmWarning) {
       manifestDrmWarning.style.display = "none";
     }
+    if (manifestUndecryptedWarning) {
+      manifestUndecryptedWarning.style.display = "none";
+    }
     if (manifestQualitySelection) {
       manifestQualitySelection.style.display = "none";
     }
-    // Reset DRM flag on error
+    // Reset DRM and decryption flags on error
     hasDrmInManifest = false;
+    cannotDecryptManifest = false;
     // Update form state on error
     updateManualManifestFormState();
   } finally {
