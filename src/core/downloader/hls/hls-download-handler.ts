@@ -678,7 +678,19 @@ export class HlsDownloadHandler {
 
       let videoPlaylistUrl: string | null = null;
       let audioPlaylistUrl: string | null = null;
-      let masterPlaylistText: string = "";
+      let videoPlaylistText: string | null = null;
+      let audioPlaylistText: string | null = null;
+
+      // Fetch and validate master playlist once
+      const masterPlaylistText = this.abortSignal
+        ? await cancelIfAborted(
+            fetchText(masterPlaylistUrl, 3, this.abortSignal),
+            this.abortSignal
+          )
+        : await fetchText(masterPlaylistUrl, 3);
+
+      // Validate master playlist can be downloaded
+      canDownloadHLSManifest(masterPlaylistText);
 
       // If quality preferences are provided, use them directly
       if (manifestQuality) {
@@ -690,20 +702,9 @@ export class HlsDownloadHandler {
           }, audio: ${audioPlaylistUrl || "none"}`,
         );
 
-        // Fetch master playlist to check for DRM
-        masterPlaylistText = this.abortSignal
-          ? await cancelIfAborted(
-              fetchText(masterPlaylistUrl, 3, this.abortSignal),
-              this.abortSignal
-            )
-          : await fetchText(masterPlaylistUrl, 3);
-
-        // Validate master playlist can be downloaded
-        canDownloadHLSManifest(masterPlaylistText);
-
-        // Check video playlist if provided
+        // Fetch and validate video playlist if provided
         if (videoPlaylistUrl) {
-          const videoPlaylistText = this.abortSignal
+          videoPlaylistText = this.abortSignal
             ? await cancelIfAborted(
                 fetchText(videoPlaylistUrl, 3, this.abortSignal),
                 this.abortSignal
@@ -712,9 +713,9 @@ export class HlsDownloadHandler {
           canDownloadHLSManifest(videoPlaylistText);
         }
 
-        // Check audio playlist if provided
+        // Fetch and validate audio playlist if provided
         if (audioPlaylistUrl) {
-          const audioPlaylistText = this.abortSignal
+          audioPlaylistText = this.abortSignal
             ? await cancelIfAborted(
                 fetchText(audioPlaylistUrl, 3, this.abortSignal),
                 this.abortSignal
@@ -723,17 +724,7 @@ export class HlsDownloadHandler {
           canDownloadHLSManifest(audioPlaylistText);
         }
       } else {
-        // Otherwise, fetch and parse master playlist to auto-select
-        masterPlaylistText = this.abortSignal
-          ? await cancelIfAborted(
-              fetchText(masterPlaylistUrl, 3, this.abortSignal),
-              this.abortSignal
-            )
-          : await fetchText(masterPlaylistUrl, 3);
-
-        // Validate master playlist can be downloaded
-        canDownloadHLSManifest(masterPlaylistText);
-
+        // Otherwise, parse master playlist to auto-select
         const levels = parseMasterPlaylist(
           masterPlaylistText,
           masterPlaylistUrl,
@@ -760,16 +751,19 @@ export class HlsDownloadHandler {
 
       throwIfAborted(this.abortSignal);
 
+      // Process video playlist if available
       if (videoPlaylistUrl) {
-        const videoPlaylistText = this.abortSignal
-          ? await cancelIfAborted(
-              fetchText(videoPlaylistUrl, 3, this.abortSignal),
-              this.abortSignal
-            )
-          : await fetchText(videoPlaylistUrl, 3);
-        
-        // Validate video playlist can be downloaded
-        canDownloadHLSManifest(videoPlaylistText);
+        // Fetch video playlist if not already fetched (when auto-selecting)
+        if (!videoPlaylistText) {
+          videoPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(videoPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(videoPlaylistUrl, 3);
+          // Validate video playlist can be downloaded
+          canDownloadHLSManifest(videoPlaylistText);
+        }
         
         const videoFragments = parseLevelsPlaylist(
           videoPlaylistText,
@@ -799,16 +793,19 @@ export class HlsDownloadHandler {
 
       throwIfAborted(this.abortSignal);
 
+      // Process audio playlist if available
       if (audioPlaylistUrl) {
-        const audioPlaylistText = this.abortSignal
-          ? await cancelIfAborted(
-              fetchText(audioPlaylistUrl, 3, this.abortSignal),
-              this.abortSignal
-            )
-          : await fetchText(audioPlaylistUrl, 3);
-        
-        // Validate audio playlist can be downloaded
-        canDownloadHLSManifest(audioPlaylistText);
+        // Fetch audio playlist if not already fetched (when auto-selecting)
+        if (!audioPlaylistText) {
+          audioPlaylistText = this.abortSignal
+            ? await cancelIfAborted(
+                fetchText(audioPlaylistUrl, 3, this.abortSignal),
+                this.abortSignal
+              )
+            : await fetchText(audioPlaylistUrl, 3);
+          // Validate audio playlist can be downloaded
+          canDownloadHLSManifest(audioPlaylistText);
+        }
         
         const audioFragments = parseLevelsPlaylist(
           audioPlaylistText,
