@@ -2409,8 +2409,14 @@ async function handleStartManifestDownload() {
       ? MessageType.START_RECORDING
       : MessageType.DOWNLOAD_REQUEST;
 
+    // For live recordings from a master playlist, use the selected variant URL
+    // so the recording handler doesn't auto-select the highest bitrate
+    const recordingUrl = isLiveManifest && videoPlaylistUrl
+      ? videoPlaylistUrl
+      : playlistUrl;
+
     const payload = isLiveManifest
-      ? { url: playlistUrl, metadata, tabTitle, website }
+      ? { url: recordingUrl, metadata, tabTitle, website }
       : {
           url: playlistUrl,
           metadata,
