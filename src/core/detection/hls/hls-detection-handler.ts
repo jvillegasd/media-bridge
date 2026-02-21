@@ -140,8 +140,10 @@ export class HlsDetectionHandler {
     }
 
     // It's a standalone media playlist, add it as M3U8 format
+    // A media playlist without #EXT-X-ENDLIST is a live stream
+    const isLive = !playlistText.includes("#EXT-X-ENDLIST");
     logger.info("[Media Bridge] Detected standalone M3U8 media playlist", url);
-    return await this.addDetectedVideo(url, "m3u8", playlistText);
+    return await this.addDetectedVideo(url, "m3u8", playlistText, isLive);
   }
 
   /**
@@ -164,7 +166,31 @@ export class HlsDetectionHandler {
     // Remove any existing detected videos that are variants of this master playlist
     this.removeVariantVideos(variantUrls);
 
-    return await this.addDetectedVideo(url, "hls", playlistText);
+    // Determine liveness by fetching the first variant playlist and checking for #EXT-X-ENDLIST
+    const isLive = await this.checkMasterIsLive(playlistText, url);
+
+    return await this.addDetectedVideo(url, "hls", playlistText, isLive);
+  }
+
+  /**
+   * Check if an HLS master playlist represents a live stream
+   * Fetches the first video variant and checks for #EXT-X-ENDLIST
+   * @private
+   */
+  private async checkMasterIsLive(
+    masterPlaylistText: string,
+    masterUrl: string,
+  ): Promise<boolean> {
+    try {
+      const levels = parseMasterPlaylist(masterPlaylistText, masterUrl);
+      const firstVariant = levels.find((l) => l.type === "stream");
+      if (!firstVariant) return false;
+      const variantText = await fetchText(firstVariant.uri, 1);
+      return !variantText.includes("#EXT-X-ENDLIST");
+    } catch {
+      // If we can't fetch the variant, assume VOD (safer default)
+      return false;
+    }
   }
 
   /**
@@ -211,8 +237,9 @@ export class HlsDetectionHandler {
     url: string,
     format: "hls" | "m3u8",
     playlistText: string,
+    isLive: boolean = false,
   ): Promise<VideoMetadata | null> {
-    const metadata = await this.extractMetadata(url, format, playlistText);
+    const metadata = await this.extractMetadata(url, format, playlistText, isLive);
 
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
@@ -311,6 +338,7 @@ export class HlsDetectionHandler {
     url: string,
     format: "hls" | "m3u8" = "hls",
     playlistText: string,
+    isLive: boolean = false,
   ): Promise<VideoMetadata | null> {
     const metadata: VideoMetadata = {
       url,
@@ -320,6 +348,7 @@ export class HlsDetectionHandler {
       fileExtension: "m3u8",
       hasDrm: hasDrm(playlistText),
       unsupported: !canDecrypt(playlistText),
+      isLive,
     };
 
     // Extract thumbnail using unified utility (page-based search)

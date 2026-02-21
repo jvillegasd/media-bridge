@@ -19,6 +19,7 @@ export interface VideoMetadata {
   fileExtension?: string; // Detected file extension (e.g., "mp4", "webm")
   hasDrm?: boolean; // Indicates if the video is DRM-protected
   unsupported?: boolean; // Indicates if the manifest uses unsupported encryption methods
+  isLive?: boolean; // Indicates if the stream is a live stream (no #EXT-X-ENDLIST)
 }
 
 export interface VideoQuality {

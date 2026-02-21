@@ -921,11 +921,12 @@ function renderDetectedVideos() {
                       title="Select quality">
                 Select Quality
               </button>
+              ${video.isLive ? `
               <button class="video-btn btn-rec"
                       data-url="${escapeHtml(video.url)}"
                       title="Record live stream">
                 REC
-              </button>
+              </button>` : ""}
             `
                 : ""
             }
