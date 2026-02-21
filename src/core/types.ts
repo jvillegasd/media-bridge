@@ -37,6 +37,7 @@ export interface VideoQuality {
 export enum DownloadStage {
   DETECTING = "detecting",
   DOWNLOADING = "downloading",
+  RECORDING = "recording",
   MERGING = "merging",
   SAVING = "saving",
   UPLOADING = "uploading",
@@ -56,6 +57,7 @@ export interface DownloadProgress {
   speed?: number; // Download speed in bytes per second
   lastUpdateTime?: number; // Timestamp for speed calculation
   lastDownloaded?: number; // Last downloaded bytes for speed calculation
+  segmentsCollected?: number; // Number of segments collected during live recording
 }
 
 export interface DownloadState {

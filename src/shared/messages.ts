@@ -51,6 +51,10 @@ export enum MessageType {
   // Icon management
   SET_ICON_BLUE = "SET_ICON_BLUE",
   SET_ICON_GRAY = "SET_ICON_GRAY",
+
+  // Live recording
+  START_RECORDING = "START_RECORDING",
+  STOP_RECORDING = "STOP_RECORDING",
 }
 
 export interface BaseMessage {

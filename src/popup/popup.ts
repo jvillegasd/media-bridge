@@ -730,6 +730,34 @@ function renderDetectedVideos() {
           stage,
         )}</span>`;
 
+        // Recording stage: live HLS stream being collected
+        if (stage === DownloadStage.RECORDING) {
+          const segmentsCollected = downloadState.progress.segmentsCollected || 0;
+          const downloaded = downloadState.progress.downloaded || 0;
+          const downloadedText = formatFileSize(downloaded);
+
+          progressBar = `
+            <div class="manifest-progress-container">
+              <div class="manifest-progress-bar-wrapper">
+                <div class="manifest-progress-bar recording"></div>
+              </div>
+              <div class="manifest-progress-info">
+                <span class="manifest-progress-size">${segmentsCollected} segments &bull; ${downloadedText}</span>
+                <span class="rec-badge"><span class="rec-dot"></span>REC</span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+              <button class="video-btn btn-stop-rec"
+                      data-url="${escapeHtml(video.url)}">
+                Stop
+              </button>
+            </div>
+          `;
+          // Skip the normal "Hide button while downloading" logic below
+          buttonText = "";
+          buttonDisabled = true;
+        }
+
         // Check if this is a manifest or M3U8 download (format is 'hls' or 'm3u8')
         // Manifest/M3U8 downloads have speed tracking and show progress bar with real file size
         // Show detailed progress during downloading and merging stages
@@ -737,7 +765,9 @@ function renderDetectedVideos() {
           (video.format === "hls" || video.format === "m3u8") &&
           (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
-        if (isManifestDownload) {
+        if (stage === DownloadStage.RECORDING) {
+          // already handled above — no-op
+        } else if (isManifestDownload) {
           const percentage = downloadState.progress.percentage || 0;
 
           if (stage === DownloadStage.DOWNLOADING) {
@@ -886,10 +916,15 @@ function renderDetectedVideos() {
             ${
               (video.format === "hls" || video.format === "m3u8") && !hasDrm && !unsupported
                 ? `
-              <button class="video-btn-manifest" 
-                      data-url="${escapeHtml(video.url)}" 
+              <button class="video-btn-manifest"
+                      data-url="${escapeHtml(video.url)}"
                       title="Select quality">
                 Select Quality
+              </button>
+              <button class="video-btn btn-rec"
+                      data-url="${escapeHtml(video.url)}"
+                      title="Record live stream">
+                REC
               </button>
             `
                 : ""
@@ -922,6 +957,33 @@ function renderDetectedVideos() {
       const button = e.target as HTMLButtonElement;
       const url = button.getAttribute("data-url")!;
       handleSendToManifestTab(url);
+    });
+  });
+
+  // Add click handlers for REC (start recording) buttons
+  detectedVideosList.querySelectorAll(".btn-rec").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const button = e.target as HTMLButtonElement;
+      if (button.disabled) return;
+      const url = button.getAttribute("data-url")!;
+      const normalizedUrl = normalizeUrl(url);
+      const videoMetadata = detectedVideos[normalizedUrl];
+      chrome.runtime.sendMessage({
+        type: MessageType.START_RECORDING,
+        payload: { url, metadata: videoMetadata },
+      });
+    });
+  });
+
+  // Add click handlers for STOP (stop recording) buttons
+  detectedVideosList.querySelectorAll(".btn-stop-rec").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const button = e.target as HTMLButtonElement;
+      const url = button.getAttribute("data-url")!;
+      chrome.runtime.sendMessage({
+        type: MessageType.STOP_RECORDING,
+        payload: { url },
+      });
     });
   });
 }
@@ -1586,6 +1648,7 @@ function getStatusText(stage: DownloadStage): string {
   const statusMap: Record<DownloadStage, string> = {
     [DownloadStage.DETECTING]: "Detecting",
     [DownloadStage.DOWNLOADING]: "Downloading",
+    [DownloadStage.RECORDING]: "Recording",
     [DownloadStage.MERGING]: "Merging",
     [DownloadStage.SAVING]: "Saving",
     [DownloadStage.UPLOADING]: "Uploading",
