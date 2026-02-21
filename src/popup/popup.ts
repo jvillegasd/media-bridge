@@ -797,6 +797,11 @@ function renderDetectedVideos() {
                 }
               </div>
             </div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+              <button class="video-btn btn-stop-save" data-url="${escapeHtml(video.url)}">
+                Stop &amp; Save
+              </button>
+            </div>
           `;
           } else if (stage === DownloadStage.MERGING) {
             // Manifest merging progress: progress bar restarts at 0% and goes to 100%
@@ -983,6 +988,18 @@ function renderDetectedVideos() {
       const url = button.getAttribute("data-url")!;
       chrome.runtime.sendMessage({
         type: MessageType.STOP_RECORDING,
+        payload: { url },
+      });
+    });
+  });
+
+  // Add click handlers for Stop & Save buttons
+  detectedVideosList.querySelectorAll(".btn-stop-save").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const button = e.target as HTMLButtonElement;
+      const url = button.getAttribute("data-url")!;
+      chrome.runtime.sendMessage({
+        type: MessageType.STOP_AND_SAVE_DOWNLOAD,
         payload: { url },
       });
     });

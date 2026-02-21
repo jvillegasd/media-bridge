@@ -36,7 +36,7 @@ import {
   parseMasterPlaylist,
   parseLevelsPlaylist,
 } from "../../utils/m3u8-parser";
-import { storeChunk, deleteChunks } from "../../database/chunks";
+import { storeChunk, deleteChunks, getChunkCount } from "../../database/chunks";
 import { createOffscreenDocument } from "../../utils/offscreen-manager";
 import { MessageType } from "../../../shared/messages";
 import {
@@ -54,6 +54,8 @@ export interface HlsDownloadHandlerOptions {
   maxConcurrent?: number;
   /** FFmpeg processing timeout in milliseconds @default 900000 (15 minutes) */
   ffmpegTimeout?: number;
+  /** When cancelled, save partial progress instead of discarding */
+  shouldSaveOnCancel?: () => boolean;
 }
 
 /**
@@ -64,6 +66,7 @@ export class HlsDownloadHandler {
   private readonly onProgress?: ProgressCallback;
   private readonly maxConcurrent: number;
   private readonly ffmpegTimeout: number;
+  private readonly shouldSaveOnCancel?: () => boolean;
   /** Number of video fragments downloaded */
   private videoLength: number = 0;
   /** Number of audio fragments downloaded */
@@ -89,6 +92,7 @@ export class HlsDownloadHandler {
     this.onProgress = options.onProgress;
     this.maxConcurrent = options.maxConcurrent || 3;
     this.ffmpegTimeout = options.ffmpegTimeout || 900000; // Default 15 minutes
+    this.shouldSaveOnCancel = options.shouldSaveOnCancel;
   }
 
   /**
@@ -933,6 +937,80 @@ export class HlsDownloadHandler {
         fileExtension: "mp4",
       };
     } catch (error) {
+      if (error instanceof CancellationError && this.shouldSaveOnCancel?.()) {
+        try {
+          const chunkCount = await getChunkCount(this.downloadId);
+          if (chunkCount > 0) {
+            // Transition to MERGING immediately to block further cancellation
+            const mergingState = await getDownload(stateId);
+            if (mergingState) {
+              mergingState.progress.stage = DownloadStage.MERGING;
+              mergingState.progress.message = "Merging partial download...";
+              await storeDownload(mergingState);
+              this.notifyProgress(mergingState);
+            }
+
+            // Compute effective lengths based on how many chunks were stored
+            const effectiveVideoLength = Math.min(chunkCount, this.videoLength);
+            const effectiveAudioLength = Math.max(0, chunkCount - this.videoLength);
+            this.videoLength = effectiveVideoLength;
+            this.audioLength = effectiveAudioLength;
+
+            // Clear abort signal so FFmpeg processing is not immediately rejected
+            this.abortSignal = undefined;
+
+            const sanitizedFilename = sanitizeFilename(filename);
+            let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
+            if (!baseFileName || baseFileName.trim() === "") {
+              baseFileName = `video_${Date.now()}`;
+            }
+
+            const blobUrl = await this.streamToMp4Blob(
+              baseFileName,
+              stateId,
+              async (progress, message) => {
+                const state = await getDownload(stateId);
+                if (state) {
+                  state.progress.percentage = progress * 100;
+                  state.progress.message = message;
+                  state.progress.stage = DownloadStage.MERGING;
+                  await storeDownload(state);
+                  this.notifyProgress(state);
+                }
+              },
+            );
+
+            const savingState = await getDownload(stateId);
+            if (savingState) {
+              savingState.progress.stage = DownloadStage.SAVING;
+              savingState.progress.message = "Saving partial file...";
+              savingState.progress.percentage = 95;
+              await storeDownload(savingState);
+              this.notifyProgress(savingState);
+            }
+
+            const finalFilename = `${baseFileName}.mp4`;
+            const filePath = await this.saveBlobUrlToFile(blobUrl, finalFilename, stateId);
+
+            const finalState = await getDownload(stateId);
+            if (finalState) {
+              finalState.localPath = filePath;
+              finalState.progress.stage = DownloadStage.COMPLETED;
+              finalState.progress.message = "Download completed (partial)";
+              finalState.progress.percentage = 100;
+              finalState.progress.downloaded = finalState.progress.total || this.bytesDownloaded || 0;
+              finalState.updatedAt = Date.now();
+              await storeDownload(finalState);
+              this.notifyProgress(finalState);
+            }
+
+            logger.info(`HLS partial download saved: ${filePath}`);
+            return { filePath, fileExtension: "mp4" };
+          }
+        } catch (saveError) {
+          logger.error("Failed to save partial HLS download:", saveError);
+        }
+      }
       logger.error("HLS download failed:", error);
       // Re-throw the original error (preserve CancellationError, DownloadError, etc.)
       throw error;

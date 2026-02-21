@@ -31,6 +31,9 @@ export interface DownloadManagerOptions {
 
   /** FFmpeg processing timeout in milliseconds @default 900000 (15 minutes) */
   ffmpegTimeout?: number;
+
+  /** When cancelled, save partial progress instead of discarding */
+  shouldSaveOnCancel?: () => boolean;
 }
 
 /**
@@ -65,6 +68,7 @@ export class DownloadManager {
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
       ffmpegTimeout,
+      shouldSaveOnCancel: options.shouldSaveOnCancel,
     });
 
     // Initialize M3U8 download handler
@@ -72,6 +76,7 @@ export class DownloadManager {
       onProgress: this.onProgress,
       maxConcurrent: this.maxConcurrent,
       ffmpegTimeout,
+      shouldSaveOnCancel: options.shouldSaveOnCancel,
     });
   }
 

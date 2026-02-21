@@ -40,6 +40,8 @@ const DEFAULT_FFMPEG_TIMEOUT = 900000; // 15 minutes in milliseconds (stored int
 const activeDownloads = new Map<string, Promise<void>>();
 // Map to store AbortControllers for each download (keyed by normalized URL)
 const downloadAbortControllers = new Map<string, AbortController>();
+// Set of normalized URLs that should save partial progress on abort
+const savePartialDownloads = new Set<string>();
 
 /**
  * Keep-alive heartbeat mechanism to prevent service worker termination
@@ -338,6 +340,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleStopRecordingMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.STOP_AND_SAVE_DOWNLOAD:
+        handleStopAndSaveMessage(message.payload).then(sendResponse);
+        return true;
+
       default:
         // Only log warnings for truly unknown message types
         // Some messages might be handled by other listeners (like content scripts)
@@ -452,6 +458,7 @@ async function handleDownloadRequest(payload: {
   const downloadManager = new DownloadManager({
     maxConcurrent,
     ffmpegTimeout,
+    shouldSaveOnCancel: () => savePartialDownloads.has(normalizedUrl),
     onProgress: async (state) => {
       const normalizedUrlForProgress = normalizeUrl(state.url);
 
@@ -626,6 +633,8 @@ function isDownloadFailed(downloadState: DownloadState): boolean {
 async function cleanupDownloadResources(normalizedUrl: string): Promise<void> {
   // Clean up AbortController
   downloadAbortControllers.delete(normalizedUrl);
+  // Clean up stop-and-save marker
+  savePartialDownloads.delete(normalizedUrl);
 
   // Note: activeDownloads cleanup is handled in the promise's finally block
   // to ensure it's removed regardless of success/failure/cancellation
@@ -720,6 +729,31 @@ async function startDownload(
 
     sendDownloadFailed(url, errorMessage);
     throw error;
+  }
+}
+
+/**
+ * Stop an active HLS/M3U8 download and save whatever segments have been downloaded so far
+ */
+async function handleStopAndSaveMessage(payload: {
+  url: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const normalizedUrl = normalizeUrl(payload.url);
+    const controller = downloadAbortControllers.get(normalizedUrl);
+    if (!controller) {
+      return { success: false, error: "No active download found for this URL." };
+    }
+    savePartialDownloads.add(normalizedUrl);
+    controller.abort();
+    logger.info(`Stop-and-save triggered for ${normalizedUrl}`);
+    return { success: true };
+  } catch (error) {
+    logger.error("Stop-and-save error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

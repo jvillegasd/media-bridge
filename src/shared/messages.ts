@@ -55,6 +55,9 @@ export enum MessageType {
   // Live recording
   START_RECORDING = "START_RECORDING",
   STOP_RECORDING = "STOP_RECORDING",
+
+  // Stop and save partial download
+  STOP_AND_SAVE_DOWNLOAD = "STOP_AND_SAVE_DOWNLOAD",
 }
 
 export interface BaseMessage {
