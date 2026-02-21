@@ -870,7 +870,6 @@ function renderDetectedVideos() {
             ? `
           <img src="${escapeHtml(video.thumbnail)}" 
                alt="Video preview" 
-               onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>🎬</div>'"
                loading="lazy">
         `
             : `
@@ -954,6 +953,13 @@ function renderDetectedVideos() {
   `;
     })
     .join("");
+
+  // Handle thumbnail load errors (inline onerror is blocked by CSP)
+  detectedVideosList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
+    img.addEventListener("error", () => {
+      img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
+    });
+  });
 
   // Add click handlers for download buttons
   detectedVideosList.querySelectorAll(".video-btn").forEach((btn) => {
@@ -1108,6 +1114,13 @@ function renderDownloads() {
   }
 
   downloadsList.innerHTML = html;
+
+  // Handle thumbnail load errors (inline onerror is blocked by CSP)
+  downloadsList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
+    img.addEventListener("error", () => {
+      img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
+    });
+  });
 
   // Add event listeners for buttons
   downloadsList.querySelectorAll(".download-open-btn").forEach((btn) => {
@@ -1335,7 +1348,6 @@ function renderDownloadItem(download: DownloadState): string {
             ? `
           <img src="${escapeHtml(download.metadata.thumbnail)}" 
                alt="Video preview" 
-               onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>🎬</div>'"
                loading="lazy">
         `
             : `
