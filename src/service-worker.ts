@@ -913,6 +913,15 @@ async function handleStartRecordingMessage(payload: {
         sendDownloadComplete(stateId);
       })
       .catch(async (error: unknown) => {
+        // Persist FAILED state to IndexedDB so the downloads tab reflects the real status
+        const failedState = await getDownload(stateId);
+        if (failedState && failedState.progress.stage !== DownloadStage.COMPLETED) {
+          failedState.progress.stage = DownloadStage.FAILED;
+          failedState.progress.message =
+            error instanceof Error ? error.message : String(error);
+          failedState.updatedAt = Date.now();
+          await storeDownload(failedState);
+        }
         if (!(error instanceof CancellationError)) {
           logger.error(`Recording failed for ${url}:`, error);
           sendDownloadFailed(url, error instanceof Error ? error.message : String(error));
