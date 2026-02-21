@@ -405,14 +405,16 @@ export class HlsRecordingHandler {
                   return;
                 }
                 if (item.state === "complete") {
-                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                    URL.revokeObjectURL(blobUrl);
-                  }
+                  chrome.runtime.sendMessage(
+                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+                    () => { if (chrome.runtime.lastError) {} },
+                  );
                   resolve(item.filename);
                 } else if (item.state === "interrupted") {
-                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                    URL.revokeObjectURL(blobUrl);
-                  }
+                  chrome.runtime.sendMessage(
+                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+                    () => { if (chrome.runtime.lastError) {} },
+                  );
                   reject(new Error(item.error || "Download interrupted"));
                 } else {
                   setTimeout(checkComplete, 100);
@@ -425,9 +427,10 @@ export class HlsRecordingHandler {
         );
       });
     } catch (error) {
-      if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-        URL.revokeObjectURL(blobUrl);
-      }
+      chrome.runtime.sendMessage(
+        { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+        () => { if (chrome.runtime.lastError) {} },
+      );
       throw error;
     }
   }

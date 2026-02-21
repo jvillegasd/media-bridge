@@ -507,6 +507,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Revoke a blob URL that was created in this offscreen document context
+  if (message.type === MessageType.REVOKE_BLOB_URL) {
+    const { blobUrl } = message.payload;
+    URL.revokeObjectURL(blobUrl);
+    sendResponse({ acknowledged: true });
+    return false;
+  }
+
   // Return false for messages we don't handle (don't log warnings)
   return false;
 });

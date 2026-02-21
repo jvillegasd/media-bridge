@@ -588,14 +588,16 @@ export class HlsDownloadHandler {
 
                 if (item.state === "complete") {
                   // Clean up blob URL after successful download
-                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                    URL.revokeObjectURL(blobUrl);
-                  }
+                  chrome.runtime.sendMessage(
+                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+                    () => { if (chrome.runtime.lastError) {} },
+                  );
                   resolve(item.filename);
                 } else if (item.state === "interrupted") {
-                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                    URL.revokeObjectURL(blobUrl);
-                  }
+                  chrome.runtime.sendMessage(
+                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+                    () => { if (chrome.runtime.lastError) {} },
+                  );
                   reject(new Error(item.error || "Download interrupted"));
                 } else {
                   // Check again in a bit
@@ -610,9 +612,10 @@ export class HlsDownloadHandler {
       });
     } catch (error) {
       // Clean up blob URL on error
-      if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-        URL.revokeObjectURL(blobUrl);
-      }
+      chrome.runtime.sendMessage(
+        { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+        () => { if (chrome.runtime.lastError) {} },
+      );
       throw error;
     }
   }

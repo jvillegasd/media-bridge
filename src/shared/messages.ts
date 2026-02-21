@@ -58,6 +58,9 @@ export enum MessageType {
 
   // Stop and save partial download
   STOP_AND_SAVE_DOWNLOAD = "STOP_AND_SAVE_DOWNLOAD",
+
+  // Blob URL revocation (must be sent to offscreen document — not service worker)
+  REVOKE_BLOB_URL = "REVOKE_BLOB_URL",
 }
 
 export interface BaseMessage {
