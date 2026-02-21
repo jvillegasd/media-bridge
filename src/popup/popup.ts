@@ -747,7 +747,7 @@ function renderDetectedVideos() {
               </div>
             </div>
             <div style="display: flex; gap: 6px; margin-top: 6px;">
-              <button class="video-btn btn-stop-rec"
+              <button class="btn-stop-rec"
                       data-url="${escapeHtml(video.url)}">
                 Stop
               </button>
@@ -798,7 +798,7 @@ function renderDetectedVideos() {
               </div>
             </div>
             <div style="display: flex; gap: 6px; margin-top: 6px;">
-              <button class="video-btn btn-stop-save" data-url="${escapeHtml(video.url)}">
+              <button class="btn-stop-save" data-url="${escapeHtml(video.url)}">
                 Stop &amp; Save
               </button>
             </div>
@@ -927,7 +927,7 @@ function renderDetectedVideos() {
                 Select Quality
               </button>
               ${video.isLive ? `
-              <button class="video-btn btn-rec"
+              <button class="btn-rec"
                       data-url="${escapeHtml(video.url)}"
                       title="Record live stream">
                 REC

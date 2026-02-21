@@ -34,6 +34,7 @@ export async function fetchResource(
     body?: ArrayBuffer | string;
     mode?: RequestMode;
     signal?: AbortSignal;
+    cache?: RequestCache;
   },
 ): Promise<Response> {
   // If we're in a service worker/background context, use native fetch
@@ -132,9 +133,10 @@ export async function fetchText(
   url: string,
   attempts: number = 1,
   signal?: AbortSignal,
+  noCache?: boolean,
 ) {
   const fetchFn: FetchFn<string> = () =>
-    fetchResource(url, { signal }).then((res) => res.text());
+    fetchResource(url, { signal, cache: noCache ? "no-store" : undefined }).then((res) => res.text());
   return fetchWithRetry(fetchFn, attempts);
 }
 

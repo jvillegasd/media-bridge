@@ -62,6 +62,8 @@ export class HlsDetectionHandler {
   private onVideoRemoved?: (url: string) => void;
   // Track master playlists and their variants
   private masterPlaylists: Map<string, MasterPlaylistInfo> = new Map();
+  // Deduplicate HLS URLs by origin+pathname (ignoring query params like tokens/timestamps)
+  private seenPathKeys: Set<string> = new Set();
 
   /**
    * Create a new HlsDetectionHandler instance
@@ -81,6 +83,14 @@ export class HlsDetectionHandler {
     if (!this.isHlsUrl(url)) {
       return null;
     }
+
+    // Deduplicate by origin+pathname so re-fetches with different query params
+    // (auth tokens, timestamps) don't create duplicate video cards
+    const pathKey = this.getPathKey(url);
+    if (this.seenPathKeys.has(pathKey)) {
+      return null;
+    }
+    this.seenPathKeys.add(pathKey);
 
     try {
       const playlistText = await this.fetchPlaylistText(url);
@@ -273,6 +283,20 @@ export class HlsDetectionHandler {
    * @param contentType - Content-Type header value
    * @returns True if content type indicates HLS playlist
    */
+  /**
+   * Get a deduplication key from a URL using only origin + pathname.
+   * This ensures that the same playlist re-fetched with different query
+   * parameters (tokens, timestamps) is recognized as the same stream.
+   */
+  private getPathKey(url: string): string {
+    try {
+      const u = new URL(url);
+      return u.origin + u.pathname;
+    } catch {
+      return url;
+    }
+  }
+
   isHlsContentType(contentType: string): boolean {
     const contentTypeLower = contentType.toLowerCase();
     return (
@@ -286,9 +310,16 @@ export class HlsDetectionHandler {
    * @private
    */
   private checkIfBelongsToMasterPlaylist(mediaPlaylistUrl: string): boolean {
+    const mediaPathKey = this.getPathKey(mediaPlaylistUrl);
     for (const [masterUrl, masterInfo] of this.masterPlaylists.entries()) {
       if (masterInfo.variantUrls.has(mediaPlaylistUrl)) {
         return true;
+      }
+      // Also compare by path key to handle variant URLs with different query params
+      for (const variantUrl of masterInfo.variantUrls) {
+        if (this.getPathKey(variantUrl) === mediaPathKey) {
+          return true;
+        }
       }
       // Also check using the parser function for more robust matching
       try {

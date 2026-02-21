@@ -137,18 +137,22 @@ export class HlsRecordingHandler {
 
     // Detect master playlist by presence of #EXT-X-STREAM-INF
     if (!text.includes("#EXT-X-STREAM-INF")) {
+      logger.info(`[REC] URL is already a media playlist: ${url.substring(0, 100)}...`);
       return url;
     }
 
     const levels = parseMasterPlaylist(text, url);
     const videoLevels = levels.filter((l) => l.type === "stream");
     if (videoLevels.length === 0) {
+      logger.warn(`[REC] No video levels found in master playlist, using URL as-is`);
       return url;
     }
 
     // Pick highest bitrate variant
     videoLevels.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-    return videoLevels[0]!.uri;
+    const resolvedUrl = videoLevels[0]!.uri;
+    logger.info(`[REC] Resolved media playlist: ${resolvedUrl.substring(0, 100)}...`);
+    return resolvedUrl;
   }
 
   /**
@@ -162,10 +166,14 @@ export class HlsRecordingHandler {
   ): Promise<void> {
     const seenUris = new Set<string>();
 
+    logger.info(`[REC] Starting polling loop, abortSignal.aborted=${abortSignal.aborted}`);
+    let pollCount = 0;
+
     while (!abortSignal.aborted) {
+      pollCount++;
       let playlistText: string;
       try {
-        playlistText = await fetchText(mediaPlaylistUrl, 3, abortSignal);
+        playlistText = await fetchText(mediaPlaylistUrl, 3, abortSignal, true);
       } catch (err) {
         if (abortSignal.aborted) break;
         logger.warn("Failed to fetch manifest during recording, retrying...", err);
@@ -175,9 +183,13 @@ export class HlsRecordingHandler {
 
       if (abortSignal.aborted) break;
 
+      logger.info(`[REC] Poll #${pollCount}: playlist length=${playlistText.length}, aborted=${abortSignal.aborted}`);
+
       // Parse new fragments
       const allFragments = parseLevelsPlaylist(playlistText, mediaPlaylistUrl);
       const newFragments = allFragments.filter((f) => !seenUris.has(f.uri));
+
+      logger.info(`[REC] Poll #${pollCount}: total fragments=${allFragments.length}, new=${newFragments.length}, seen=${seenUris.size}`);
 
       if (newFragments.length > 0) {
         // Assign sequential global indices
@@ -200,6 +212,7 @@ export class HlsRecordingHandler {
 
       // Check for end-of-stream marker
       const hasEndList = playlistText.includes("#EXT-X-ENDLIST");
+      logger.info(`[REC] Poll #${pollCount}: hasEndList=${hasEndList}`);
       if (hasEndList) {
         logger.info("HLS stream ended naturally (#EXT-X-ENDLIST detected)");
         break;
@@ -208,6 +221,7 @@ export class HlsRecordingHandler {
       // Wait before next poll
       await this.sleep(POLL_INTERVAL_MS, abortSignal);
     }
+    logger.info(`[REC] Polling loop exited after ${pollCount} polls, segments=${this.segmentIndex}, aborted=${abortSignal.aborted}`);
   }
 
   /**

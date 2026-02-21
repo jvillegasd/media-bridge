@@ -870,7 +870,13 @@ async function handleStartRecordingMessage(payload: {
 
     const onProgress = async (state: DownloadState) => {
       const controller = downloadAbortControllers.get(normalizeUrl(state.url));
-      if (!controller || controller.signal.aborted) return;
+      // Allow progress updates through when in post-recording stages (MERGING, SAVING, COMPLETED)
+      // since the abort signal is used to stop the recording loop, not to cancel the merge
+      const isPostRecording =
+        state.progress.stage === DownloadStage.MERGING ||
+        state.progress.stage === DownloadStage.SAVING ||
+        state.progress.stage === DownloadStage.COMPLETED;
+      if (!isPostRecording && (!controller || controller.signal.aborted)) return;
       await storeDownload(state);
       try {
         chrome.runtime.sendMessage(
