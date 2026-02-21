@@ -12,15 +12,6 @@ import { logger } from "../core/utils/logger";
 let ffmpegInstance: FFmpeg | null = null;
 
 /**
- * Sanitize a downloadId for use as an FFmpeg output filename.
- * Recording downloads use the full URL as their ID, which contains
- * characters (: / ? & =) invalid for filesystem paths.
- */
-function sanitizeForFilename(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-/**
  * Initialize FFmpeg instance
  */
 async function getFFmpeg(): Promise<FFmpeg> {
@@ -276,9 +267,7 @@ async function processHLSChunks(
 ): Promise<string> {
   const ffmpeg = await getFFmpeg();
 
-  // Use sanitized downloadId for a unique, filesystem-safe name in FFmpeg's MEMFS
-  // (recording downloads use full URLs as IDs, which contain invalid path characters)
-  const outputFileName = `/tmp/${sanitizeForFilename(downloadId)}.mp4`;
+  const outputFileName = `/tmp/${downloadId}.mp4`;
 
   // Process based on available streams
   try {
@@ -345,8 +334,7 @@ async function processM3u8Chunks(
 ): Promise<string> {
   const ffmpeg = await getFFmpeg();
 
-  // Use sanitized downloadId for a unique, filesystem-safe name in FFmpeg's MEMFS
-  const outputFileName = `/tmp/${sanitizeForFilename(downloadId)}.mp4`;
+  const outputFileName = `/tmp/${downloadId}.mp4`;
 
   if (fragmentCount === 0) {
     throw new Error("No fragments to process");

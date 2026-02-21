@@ -21,6 +21,7 @@ import {
   DownloadStage,
 } from "./core/types";
 import { CancellationError } from "./core/utils/errors";
+import { generateDownloadId } from "./core/utils/id-utils";
 import { logger } from "./core/utils/logger";
 import {
   canCancelDownload,
@@ -852,7 +853,7 @@ async function handleStartRecordingMessage(payload: {
     const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT;
 
     // Build initial download state
-    const stateId = normalizedUrl;
+    const stateId = generateDownloadId(normalizedUrl);
     const initialState: DownloadState = {
       id: stateId,
       url,

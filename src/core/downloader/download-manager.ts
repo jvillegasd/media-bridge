@@ -10,6 +10,7 @@ import {
   updateDownloadProgress,
 } from "../database/downloads";
 import { DownloadError } from "../utils/errors";
+import { generateDownloadId } from "../utils/id-utils";
 import { logger } from "../utils/logger";
 import { DownloadProgressCallback } from "./types";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
@@ -101,7 +102,7 @@ export class DownloadManager {
     isManual?: boolean,
     abortSignal?: AbortSignal,
   ): Promise<DownloadState> {
-    const downloadId = this.generateDownloadId(url);
+    const downloadId = generateDownloadId(url);
 
     try {
       // Create and initialize download state
@@ -245,15 +246,6 @@ export class DownloadManager {
     return failedState;
   }
 
-  /**
-   * Generates unique download ID from URL (format: dl_{timestamp}_{sanitizedUrl})
-   * @private
-   */
-  private generateDownloadId(url: string): string {
-    return `dl_${Date.now()}_${url
-      .substring(0, 20)
-      .replace(/[^a-z0-9]/gi, "")}`;
-  }
 
   /**
    * Notifies progress callback if configured
