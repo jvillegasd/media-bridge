@@ -464,8 +464,12 @@ async function handleDownloadRequest(payload: {
 
       // Get abort controller and store signal reference ONCE to avoid stale reference issues
       const controller = downloadAbortControllers.get(normalizedUrlForProgress);
+      // Allow progress updates through if we're in stop-and-save mode (partial save in progress)
+      const isSavingPartial = savePartialDownloads.has(normalizedUrlForProgress);
+
       // If no controller exists (already cleaned up) or signal is aborted, skip update
-      if (!controller || controller.signal.aborted) {
+      // BUT allow updates through if we're saving a partial download
+      if (!isSavingPartial && (!controller || controller.signal.aborted)) {
         logger.info(
           `Download ${state.id} was aborted, ignoring progress update`,
         );
@@ -473,7 +477,7 @@ async function handleDownloadRequest(payload: {
       }
 
       // Store signal reference for consistent checks throughout this function
-      const signal = controller.signal;
+      const signal = controller?.signal;
 
       // Double-check cancellation state in database (defensive check)
       const currentState = await getDownload(state.id);
@@ -493,7 +497,8 @@ async function handleDownloadRequest(payload: {
 
       // Final abort check immediately before storing to minimize race window
       // Re-check abort signal after async database operation using stored reference
-      if (signal.aborted) {
+      // Skip this check if we're saving a partial download
+      if (!isSavingPartial && signal?.aborted) {
         logger.info(
           `Download ${state.id} was aborted, ignoring progress update`,
         );

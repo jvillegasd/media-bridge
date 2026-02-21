@@ -196,20 +196,15 @@ export class HlsDownloadHandler {
     if (!this.abortSignal) {
       throw new Error("AbortSignal is required for fragment download");
     }
-    
+
     const data = await cancelIfAborted(
       fetchArrayBuffer(fragment.uri, fetchAttempts, this.abortSignal),
-      this.abortSignal
+      this.abortSignal,
     );
 
     const decryptedData = await cancelIfAborted(
-      decryptFragment(
-        fragment.key,
-        data,
-        fetchAttempts,
-        this.abortSignal,
-      ),
-      this.abortSignal
+      decryptFragment(fragment.key, data, fetchAttempts, this.abortSignal),
+      this.abortSignal,
     );
 
     // Store in IndexedDB
@@ -244,13 +239,13 @@ export class HlsDownloadHandler {
     let estimatedTotalBytes = 0;
     if (fragments.length > 0 && fragments[0] && this.abortSignal) {
       throwIfAborted(this.abortSignal);
-      
+
       try {
         const firstFragmentSize = await cancelIfAborted(
           this.downloadFragment(fragments[0], downloadId),
-          this.abortSignal
+          this.abortSignal,
         );
-        
+
         sessionBytesDownloaded += firstFragmentSize;
         downloadedFragments++;
         this.bytesDownloaded += firstFragmentSize;
@@ -272,7 +267,7 @@ export class HlsDownloadHandler {
               this.totalBytes,
               `Downloading fragments...`,
             ),
-            this.abortSignal
+            this.abortSignal,
           );
         } else {
           await this.updateProgress(
@@ -308,14 +303,16 @@ export class HlsDownloadHandler {
         const fragment = fragments[fragmentIndex];
 
         if (!fragment) {
-          logger.warn(`Fragment at index ${fragmentIndex} is undefined, skipping`);
+          logger.warn(
+            `Fragment at index ${fragmentIndex} is undefined, skipping`,
+          );
           continue;
         }
 
         try {
           const fragmentSize = await cancelIfAborted(
             this.downloadFragment(fragment, downloadId),
-            this.abortSignal
+            this.abortSignal,
           );
 
           sessionBytesDownloaded += fragmentSize;
@@ -338,17 +335,20 @@ export class HlsDownloadHandler {
               this.totalBytes,
               `Downloading fragments...`,
             ),
-            this.abortSignal
+            this.abortSignal,
           );
         } catch (error) {
           // If cancellation error, propagate it immediately
           if (error instanceof CancellationError) {
             throw error;
           }
-          
+
           const err = error instanceof Error ? error : new Error(String(error));
           errors.push(err);
-          logger.error(`Fragment ${fragment?.index ?? fragmentIndex} failed:`, err);
+          logger.error(
+            `Fragment ${fragment?.index ?? fragmentIndex} failed:`,
+            err,
+          );
           // Continue with other fragments even if one fails (unless cancelled)
         }
       }
@@ -366,14 +366,14 @@ export class HlsDownloadHandler {
     // Wait for all downloads to complete
     // Use Promise.allSettled to handle cancellation errors properly
     const results = await Promise.allSettled(downloadQueue);
-    
+
     // Check if any download was cancelled
     const cancelledError = results.find(
       (result) =>
         result.status === "rejected" &&
-        result.reason instanceof CancellationError
+        result.reason instanceof CancellationError,
     );
-    
+
     if (cancelledError) {
       throw new CancellationError();
     }
@@ -389,7 +389,7 @@ export class HlsDownloadHandler {
           this.totalBytes,
           `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
         ),
-        this.abortSignal
+        this.abortSignal,
       );
     } else {
       await this.updateProgress(
@@ -454,7 +454,7 @@ export class HlsDownloadHandler {
         cleanup();
         reject(new CancellationError());
       };
-      
+
       // Set up message listener for offscreen responses
       const messageListener = (message: any) => {
         if (
@@ -590,13 +590,19 @@ export class HlsDownloadHandler {
                   // Clean up blob URL after successful download
                   chrome.runtime.sendMessage(
                     { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
-                    () => { if (chrome.runtime.lastError) {} },
+                    () => {
+                      if (chrome.runtime.lastError) {
+                      }
+                    },
                   );
                   resolve(item.filename);
                 } else if (item.state === "interrupted") {
                   chrome.runtime.sendMessage(
                     { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
-                    () => { if (chrome.runtime.lastError) {} },
+                    () => {
+                      if (chrome.runtime.lastError) {
+                      }
+                    },
                   );
                   reject(new Error(item.error || "Download interrupted"));
                 } else {
@@ -614,7 +620,10 @@ export class HlsDownloadHandler {
       // Clean up blob URL on error
       chrome.runtime.sendMessage(
         { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
-        () => { if (chrome.runtime.lastError) {} },
+        () => {
+          if (chrome.runtime.lastError) {
+          }
+        },
       );
       throw error;
     }
@@ -676,7 +685,7 @@ export class HlsDownloadHandler {
   ): Promise<{ filePath: string; fileExtension?: string }> {
     // Reset all download-specific state to prevent pollution from previous downloads
     this.resetDownloadState(stateId, abortSignal);
-    
+
     try {
       logger.info(`Starting HLS download from ${masterPlaylistUrl}`);
 
@@ -692,7 +701,7 @@ export class HlsDownloadHandler {
       const masterPlaylistText = this.abortSignal
         ? await cancelIfAborted(
             fetchText(masterPlaylistUrl, 3, this.abortSignal),
-            this.abortSignal
+            this.abortSignal,
           )
         : await fetchText(masterPlaylistUrl, 3);
 
@@ -714,7 +723,7 @@ export class HlsDownloadHandler {
           videoPlaylistText = this.abortSignal
             ? await cancelIfAborted(
                 fetchText(videoPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal
+                this.abortSignal,
               )
             : await fetchText(videoPlaylistUrl, 3);
           canDownloadHLSManifest(videoPlaylistText);
@@ -725,7 +734,7 @@ export class HlsDownloadHandler {
           audioPlaylistText = this.abortSignal
             ? await cancelIfAborted(
                 fetchText(audioPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal
+                this.abortSignal,
               )
             : await fetchText(audioPlaylistUrl, 3);
           canDownloadHLSManifest(audioPlaylistText);
@@ -765,13 +774,13 @@ export class HlsDownloadHandler {
           videoPlaylistText = this.abortSignal
             ? await cancelIfAborted(
                 fetchText(videoPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal
+                this.abortSignal,
               )
             : await fetchText(videoPlaylistUrl, 3);
           // Validate video playlist can be downloaded
           canDownloadHLSManifest(videoPlaylistText);
         }
-        
+
         const videoFragments = parseLevelsPlaylist(
           videoPlaylistText,
           videoPlaylistUrl,
@@ -807,13 +816,13 @@ export class HlsDownloadHandler {
           audioPlaylistText = this.abortSignal
             ? await cancelIfAborted(
                 fetchText(audioPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal
+                this.abortSignal,
               )
             : await fetchText(audioPlaylistUrl, 3);
           // Validate audio playlist can be downloaded
           canDownloadHLSManifest(audioPlaylistText);
         }
-        
+
         const audioFragments = parseLevelsPlaylist(
           audioPlaylistText,
           audioPlaylistUrl,
@@ -856,14 +865,16 @@ export class HlsDownloadHandler {
       // Sanitize and extract base filename without extension
       const sanitizedFilename = sanitizeFilename(filename);
       logger.info(`Sanitized filename: "${sanitizedFilename}"`);
-      
+
       let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
-      
+
       // Fallback if base filename is empty or invalid
       if (!baseFileName || baseFileName.trim() === "") {
         const timestamp = Date.now();
         baseFileName = `video_${timestamp}`;
-        logger.warn(`Filename became empty after sanitization, using fallback: ${baseFileName}`);
+        logger.warn(
+          `Filename became empty after sanitization, using fallback: ${baseFileName}`,
+        );
       }
 
       // Process chunks using offscreen document and FFmpeg
@@ -919,7 +930,10 @@ export class HlsDownloadHandler {
 
         // Ensure state is persisted by reading it back and verifying
         const verifyState = await getDownload(stateId);
-        if (verifyState && verifyState.progress.stage !== DownloadStage.COMPLETED) {
+        if (
+          verifyState &&
+          verifyState.progress.stage !== DownloadStage.COMPLETED
+        ) {
           logger.warn(`State verification failed for ${stateId}, retrying...`);
           verifyState.progress.stage = DownloadStage.COMPLETED;
           verifyState.progress.message = "Download completed";
@@ -955,7 +969,10 @@ export class HlsDownloadHandler {
 
             // Compute effective lengths based on how many chunks were stored
             const effectiveVideoLength = Math.min(chunkCount, this.videoLength);
-            const effectiveAudioLength = Math.max(0, chunkCount - this.videoLength);
+            const effectiveAudioLength = Math.max(
+              0,
+              chunkCount - this.videoLength,
+            );
             this.videoLength = effectiveVideoLength;
             this.audioLength = effectiveAudioLength;
 
@@ -993,7 +1010,11 @@ export class HlsDownloadHandler {
             }
 
             const finalFilename = `${baseFileName}.mp4`;
-            const filePath = await this.saveBlobUrlToFile(blobUrl, finalFilename, stateId);
+            const filePath = await this.saveBlobUrlToFile(
+              blobUrl,
+              finalFilename,
+              stateId,
+            );
 
             const finalState = await getDownload(stateId);
             if (finalState) {
@@ -1001,7 +1022,8 @@ export class HlsDownloadHandler {
               finalState.progress.stage = DownloadStage.COMPLETED;
               finalState.progress.message = "Download completed (partial)";
               finalState.progress.percentage = 100;
-              finalState.progress.downloaded = finalState.progress.total || this.bytesDownloaded || 0;
+              finalState.progress.downloaded =
+                finalState.progress.total || this.bytesDownloaded || 0;
               finalState.updatedAt = Date.now();
               await storeDownload(finalState);
               this.notifyProgress(finalState);
@@ -1021,7 +1043,9 @@ export class HlsDownloadHandler {
       // Always clean up IndexedDB chunks regardless of success/failure/cancellation
       try {
         await deleteChunks(this.downloadId || stateId);
-        logger.info(`Cleaned up chunks for HLS download ${this.downloadId || stateId}`);
+        logger.info(
+          `Cleaned up chunks for HLS download ${this.downloadId || stateId}`,
+        );
       } catch (cleanupError) {
         logger.error("Failed to clean up chunks:", cleanupError);
         // Don't throw - cleanup errors shouldn't mask original errors
