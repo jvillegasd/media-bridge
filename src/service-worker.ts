@@ -696,7 +696,10 @@ async function startDownload(
     // Generate filename if not provided
     let finalFilename = filename;
     if (!finalFilename) {
-      const extension = metadata.fileExtension || "mp4";
+      // HLS/M3U8 formats always produce MP4 after FFmpeg processing
+      const extension = metadata.format === "hls" || metadata.format === "m3u8"
+        ? "mp4"
+        : metadata.fileExtension || "mp4";
       // Use tab info if available, otherwise fall back to URL-based generation
       if (tabTitle || website) {
         finalFilename = generateFilenameFromTabInfo(
@@ -898,7 +901,10 @@ async function handleStartRecordingMessage(payload: {
     // Resolve filename
     let finalFilename = filename;
     if (!finalFilename) {
-      const extension = metadata.fileExtension || "mp4";
+      // HLS/M3U8 formats always produce MP4 after FFmpeg processing
+      const extension = metadata.format === "hls" || metadata.format === "m3u8"
+        ? "mp4"
+        : metadata.fileExtension || "mp4";
       if (tabTitle || website) {
         finalFilename = generateFilenameFromTabInfo(tabTitle, website, extension);
       } else {

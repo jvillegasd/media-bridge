@@ -39,7 +39,11 @@ export async function fetchResource(
 ): Promise<Response> {
   // If we're in a service worker/background context, use native fetch
   if (isServiceWorkerContext()) {
-    return fetch(input, init);
+    const response = await fetch(input, init);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText} for ${typeof input === "string" ? input : input.href}`);
+    }
+    return response;
   }
 
   // In content script context, delegate to background script
@@ -112,10 +116,12 @@ async function fetchWithRetry<Data>(
   }
   let countdown = attempts;
   let retryTime = 100;
+  let lastError: unknown;
   while (countdown--) {
     try {
       return await fetchFn();
     } catch (e) {
+      lastError = e;
       // If aborted, don't retry - throw immediately
       if (e instanceof Error && e.name === "AbortError") {
         throw e;
@@ -126,7 +132,7 @@ async function fetchWithRetry<Data>(
       }
     }
   }
-  throw new Error("Fetch error");
+  throw lastError instanceof Error ? lastError : new Error("Fetch error");
 }
 
 export async function fetchText(
