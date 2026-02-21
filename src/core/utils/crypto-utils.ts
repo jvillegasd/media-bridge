@@ -35,7 +35,7 @@ export async function decrypt(
   const decryptData = await crypto.subtle.decrypt(
     {
       name: "aes-cbc",
-      iv: iv,
+      iv: iv as unknown as BufferSource,
     },
     rawKey,
     data,

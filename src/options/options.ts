@@ -29,7 +29,7 @@ const statusMessage = document.getElementById(
   "statusMessage",
 ) as HTMLDivElement;
 const themeToggle = document.getElementById("themeToggle") as HTMLButtonElement;
-const themeIcon = document.getElementById("themeIcon") as SVGElement;
+const themeIcon = document.getElementById("themeIcon") as unknown as SVGElement;
 
 const CONFIG_KEY = "storage_config";
 
