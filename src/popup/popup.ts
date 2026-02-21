@@ -646,6 +646,8 @@ function addDetectedVideo(video: VideoMetadata) {
  */
 async function loadDownloadStates() {
   downloadStates = await getAllDownloads();
+  // Sort once by createdAt (newest first) — stable order that won't jump on progress updates
+  downloadStates.sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /**
@@ -1050,10 +1052,6 @@ function renderDownloads() {
     (d) => d.progress.stage === DownloadStage.FAILED || d.progress.stage === DownloadStage.CANCELLED,
   );
 
-  // Sort by updatedAt (most recent first)
-  inProgress.sort((a, b) => b.updatedAt - a.updatedAt);
-  completed.sort((a, b) => b.updatedAt - a.updatedAt);
-  failed.sort((a, b) => b.updatedAt - a.updatedAt);
 
   if (inProgress.length === 0 && completed.length === 0 && failed.length === 0) {
     downloadsList.innerHTML = `
