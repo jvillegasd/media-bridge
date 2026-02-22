@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/jvillegasd/media-bridge/compare/v1.5.0...v1.6.0) (2026-02-22)
+
+
+### 🎉 New Features
+
+* drm validation ([#23](https://github.com/jvillegasd/media-bridge/issues/23)) ([d8f5acb](https://github.com/jvillegasd/media-bridge/commit/d8f5acb2afff013d70739295dc2f0bca650c6ac2))
+* hls-stream: Enable extension to download live streams in HLS protocol ([#25](https://github.com/jvillegasd/media-bridge/issues/25)) ([074cd7b](https://github.com/jvillegasd/media-bridge/commit/074cd7beb38d5e9ffd4fb5f4b9bc0e335575d66e))
+
 ## [1.5.0](https://github.com/jvillegasd/media-bridge/compare/v1.4.0...v1.5.0) (2025-12-01)
 
 
