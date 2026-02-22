@@ -69,3 +69,17 @@ FFmpeg WASM files are served from `public/ffmpeg/` and copied to `dist/ffmpeg/` 
 ### Format Detection
 
 `VideoFormat` is `"direct" | "hls" | "m3u8" | "unknown"`. The distinction between `hls` (master playlist with quality variants) and `m3u8` (direct media playlist with segments) is significant — they use different handlers and FFmpeg processing paths.
+
+### Live Stream Recording
+
+`HlsRecordingHandler` (`src/core/downloader/hls/hls-recording-handler.ts`) supports recording live HLS streams. It polls the media playlist at a fixed interval, downloads new segments as they appear, and merges them into an MP4 when the user stops recording or `#EXT-X-ENDLIST` is detected. Controlled via `AbortSignal` — aborting triggers the merge phase, not a discard. The popup UI shows a REC button (only for live streams) and a dedicated RECORDING stage with segment count.
+
+### Header Injection (declarativeNetRequest)
+
+`Origin` and `Referer` are **forbidden headers** — browsers silently strip them from `fetch()` calls, even in service worker context. CDNs that require these headers will 404 without them.
+
+The fix uses `chrome.declarativeNetRequest` dynamic rules (`src/core/utils/header-rules.ts`) to inject these headers at the network layer. Rules are scoped to the specific CDN path prefix and `initiatorDomains: [chrome.runtime.id]` so they only affect extension requests. Each download handler calls `addHeaderRules()` before downloading and `removeHeaderRules()` in its `finally` block. **Do not** attempt to set `Origin`/`Referer` via `fetch()` headers — it won't work.
+
+### Stop & Save (Partial Downloads)
+
+HLS and M3U8 handlers support saving partial downloads when cancelled. If `shouldSaveOnCancel()` returns true, the handler transitions to the MERGING stage with whatever chunks were collected, runs FFmpeg, and saves a partial MP4. The abort signal is cleared before FFmpeg processing to prevent immediate rejection.

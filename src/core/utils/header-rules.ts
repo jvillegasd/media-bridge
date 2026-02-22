@@ -27,9 +27,9 @@ function ruleIdsFromDownloadId(downloadId: string): [number, number] {
 /**
  * Build a `urlFilter` that matches all segment requests under the same
  * directory as `cdnUrl`. For example, given
- *   https://ev-h.phncdn.com/hls/videos/.../720P_4000K.mp4/seg-1-v1-a1.ts
+ *   https://cdn.example.com/hls/videos/.../720P_4000K.mp4/seg-1-v1-a1.ts
  * the filter becomes
- *   ||ev-h.phncdn.com/hls/videos/.../720P_4000K.mp4/
+ *   ||cdn.example.com/hls/videos/.../720P_4000K.mp4/
  * which matches every segment under that path.
  */
 function buildUrlFilter(cdnUrl: string): string {
