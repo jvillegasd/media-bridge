@@ -31,7 +31,10 @@ export function generateFilenameFromTabInfo(
     // Sanitize and truncate tab title if too long
     let sanitizedTitle = sanitizeFilename(tabTitle);
     if (sanitizedTitle.length > 100) {
-      sanitizedTitle = sanitizedTitle.substring(0, 100);
+      // Truncate at last space to avoid cutting words mid-way
+      const truncated = sanitizedTitle.substring(0, 100);
+      const lastSpace = truncated.lastIndexOf(" ");
+      sanitizedTitle = lastSpace > 50 ? truncated.substring(0, lastSpace) : truncated;
     }
     parts.push(sanitizedTitle);
   }

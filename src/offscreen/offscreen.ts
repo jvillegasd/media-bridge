@@ -35,6 +35,23 @@ async function getFFmpeg(): Promise<FFmpeg> {
 }
 
 /**
+ * Reset FFmpeg instance so the next call to getFFmpeg() creates a fresh one.
+ * Must be called after any FFmpeg failure (e.g. Aborted()) to avoid reusing
+ * a corrupted WASM instance.
+ */
+function resetFFmpeg(): void {
+  if (ffmpegInstance) {
+    try {
+      ffmpegInstance.terminate();
+    } catch {
+      // Instance may already be in a broken state
+    }
+    ffmpegInstance = null;
+    logger.info("FFmpeg instance reset after failure");
+  }
+}
+
+/**
  * Concatenate chunks from IndexedDB
  */
 async function concatenateChunks(
@@ -43,13 +60,21 @@ async function concatenateChunks(
   length: number,
 ): Promise<Blob> {
   const chunks: BlobPart[] = [];
+  let missingCount = 0;
+  let totalBytes = 0;
 
   for (let i = 0; i < length; i++) {
     const chunk = await readChunkByIndex(downloadId, startIndex + i);
     if (chunk) {
       chunks.push(chunk as BlobPart);
+      totalBytes += chunk.byteLength;
+    } else {
+      missingCount++;
+      logger.warn(`Missing chunk at index ${startIndex + i} for ${downloadId}`);
     }
   }
+
+  logger.info(`Concatenated ${chunks.length}/${length} chunks (${totalBytes} bytes, ${missingCount} missing) for ${downloadId}`);
 
   return new Blob(chunks, { type: "video/mp2t" });
 }
@@ -242,42 +267,40 @@ async function processHLSChunks(
 ): Promise<string> {
   const ffmpeg = await getFFmpeg();
 
-  // Extract base filename without extension
-  const baseFileName = filename.replace(/\.[^/.]+$/, "");
-  const outputFileName = `/tmp/${baseFileName}.mp4`;
+  const outputFileName = `/tmp/${downloadId}.mp4`;
 
   // Process based on available streams
-  if (videoLength > 0 && audioLength > 0) {
-    await processVideoAndAudio(
-      ffmpeg,
-      downloadId,
-      videoLength,
-      audioLength,
-      outputFileName,
-      onProgress,
-    );
-  } else if (videoLength > 0) {
-    await processVideoOnly(
-      ffmpeg,
-      downloadId,
-      videoLength,
-      outputFileName,
-      onProgress,
-    );
-  } else if (audioLength > 0) {
-    await processAudioOnly(
-      ffmpeg,
-      downloadId,
-      audioLength,
-      outputFileName,
-      onProgress,
-    );
-  } else {
-    throw new Error("No video or audio chunks to process");
-  }
-
-  // Read the output file
   try {
+    if (videoLength > 0 && audioLength > 0) {
+      await processVideoAndAudio(
+        ffmpeg,
+        downloadId,
+        videoLength,
+        audioLength,
+        outputFileName,
+        onProgress,
+      );
+    } else if (videoLength > 0) {
+      await processVideoOnly(
+        ffmpeg,
+        downloadId,
+        videoLength,
+        outputFileName,
+        onProgress,
+      );
+    } else if (audioLength > 0) {
+      await processAudioOnly(
+        ffmpeg,
+        downloadId,
+        audioLength,
+        outputFileName,
+        onProgress,
+      );
+    } else {
+      throw new Error("No video or audio chunks to process");
+    }
+
+    // Read the output file
     const data = await ffmpeg.readFile(outputFileName);
     onProgress?.(1, "Done");
 
@@ -288,14 +311,15 @@ async function processHLSChunks(
     // Cleanup output file
     try {
       await ffmpeg.deleteFile(outputFileName);
-    } catch (error) {
+    } catch {
       // File may not exist, ignore error
     }
 
     return blobUrl;
   } catch (error) {
-    logger.error(`Failed to read output file ${outputFileName}:`, error);
-    throw new Error(`Output file ${outputFileName} was not created by FFmpeg`);
+    resetFFmpeg();
+    logger.error(`FFmpeg processing failed for ${downloadId}:`, error);
+    throw error;
   }
 }
 
@@ -310,25 +334,23 @@ async function processM3u8Chunks(
 ): Promise<string> {
   const ffmpeg = await getFFmpeg();
 
-  // Extract base filename without extension
-  const baseFileName = filename.replace(/\.[^/.]+$/, "");
-  const outputFileName = `/tmp/${baseFileName}.mp4`;
+  const outputFileName = `/tmp/${downloadId}.mp4`;
 
   if (fragmentCount === 0) {
     throw new Error("No fragments to process");
   }
 
-  // Process M3U8 media playlist
-  await processM3u8MediaPlaylist(
-    ffmpeg,
-    downloadId,
-    fragmentCount,
-    outputFileName,
-    onProgress,
-  );
-
-  // Read the output file
   try {
+    // Process M3U8 media playlist
+    await processM3u8MediaPlaylist(
+      ffmpeg,
+      downloadId,
+      fragmentCount,
+      outputFileName,
+      onProgress,
+    );
+
+    // Read the output file
     const data = await ffmpeg.readFile(outputFileName);
     onProgress?.(1, "Done");
 
@@ -339,14 +361,15 @@ async function processM3u8Chunks(
     // Cleanup output file
     try {
       await ffmpeg.deleteFile(outputFileName);
-    } catch (error) {
+    } catch {
       // File may not exist, ignore error
     }
 
     return blobUrl;
   } catch (error) {
-    logger.error(`Failed to read output file ${outputFileName}:`, error);
-    throw new Error(`Output file ${outputFileName} was not created by FFmpeg`);
+    resetFFmpeg();
+    logger.error(`FFmpeg processing failed for ${downloadId}:`, error);
+    throw error;
   }
 }
 
@@ -505,6 +528,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Return true to indicate async response (we called sendResponse above)
     return true;
+  }
+
+  // Revoke a blob URL that was created in this offscreen document context
+  if (message.type === MessageType.REVOKE_BLOB_URL) {
+    const { blobUrl } = message.payload;
+    URL.revokeObjectURL(blobUrl);
+    sendResponse({ acknowledged: true });
+    return false;
   }
 
   // Return false for messages we don't handle (don't log warnings)

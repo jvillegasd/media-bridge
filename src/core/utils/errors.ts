@@ -6,7 +6,7 @@ export class MediaBridgeError extends Error {
   constructor(message: string, public code?: string) {
     super(message);
     this.name = this.constructor.name;
-    Object.setPrototypeOf(this, MediaBridgeError.prototype);
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 

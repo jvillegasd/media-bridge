@@ -49,9 +49,11 @@ let manifestUrlInput: HTMLInputElement | null = null;
 let manifestMediaPlaylistWarning: HTMLDivElement | null = null;
 let manifestDrmWarning: HTMLDivElement | null = null;
 let manifestUnsupportedWarning: HTMLDivElement | null = null;
+let manifestLiveStreamInfo: HTMLDivElement | null = null;
 let manifestQualitySelection: HTMLDivElement | null = null;
 let manifestProgress: HTMLDivElement | null = null;
 let isMediaPlaylistMode: boolean = false;
+let isLiveManifest: boolean = false;
 let currentManualManifestUrl: string | null = null;
 let hasDrmInManifest: boolean = false;
 let unsupportedManifest: boolean = false;
@@ -127,6 +129,9 @@ async function init() {
   ) as HTMLDivElement;
   manifestUnsupportedWarning = document.getElementById(
     "hlsUnsupportedWarning",
+  ) as HTMLDivElement;
+  manifestLiveStreamInfo = document.getElementById(
+    "hlsLiveStreamInfo",
   ) as HTMLDivElement;
   manifestQualitySelection = document.getElementById(
     "hlsQualitySelection",
@@ -641,6 +646,8 @@ function addDetectedVideo(video: VideoMetadata) {
  */
 async function loadDownloadStates() {
   downloadStates = await getAllDownloads();
+  // Sort once by createdAt (newest first) — stable order that won't jump on progress updates
+  downloadStates.sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /**
@@ -730,6 +737,34 @@ function renderDetectedVideos() {
           stage,
         )}</span>`;
 
+        // Recording stage: live HLS stream being collected
+        if (stage === DownloadStage.RECORDING) {
+          const segmentsCollected = downloadState.progress.segmentsCollected || 0;
+          const downloaded = downloadState.progress.downloaded || 0;
+          const downloadedText = formatFileSize(downloaded);
+
+          progressBar = `
+            <div class="manifest-progress-container">
+              <div class="manifest-progress-bar-wrapper">
+                <div class="manifest-progress-bar recording"></div>
+              </div>
+              <div class="manifest-progress-info">
+                <span class="manifest-progress-size">${segmentsCollected} segments &bull; ${downloadedText}</span>
+                <span class="rec-badge"><span class="rec-dot"></span>REC</span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+              <button class="btn-stop-rec"
+                      data-url="${escapeHtml(video.url)}">
+                Stop
+              </button>
+            </div>
+          `;
+          // Skip the normal "Hide button while downloading" logic below
+          buttonText = "";
+          buttonDisabled = true;
+        }
+
         // Check if this is a manifest or M3U8 download (format is 'hls' or 'm3u8')
         // Manifest/M3U8 downloads have speed tracking and show progress bar with real file size
         // Show detailed progress during downloading and merging stages
@@ -737,7 +772,9 @@ function renderDetectedVideos() {
           (video.format === "hls" || video.format === "m3u8") &&
           (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
-        if (isManifestDownload) {
+        if (stage === DownloadStage.RECORDING) {
+          // already handled above — no-op
+        } else if (isManifestDownload) {
           const percentage = downloadState.progress.percentage || 0;
 
           if (stage === DownloadStage.DOWNLOADING) {
@@ -766,6 +803,11 @@ function renderDetectedVideos() {
                     : ""
                 }
               </div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+              <button class="btn-stop-save" data-url="${escapeHtml(video.url)}">
+                Stop &amp; Save
+              </button>
             </div>
           `;
           } else if (stage === DownloadStage.MERGING) {
@@ -828,7 +870,6 @@ function renderDetectedVideos() {
             ? `
           <img src="${escapeHtml(video.thumbnail)}" 
                alt="Video preview" 
-               onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>🎬</div>'"
                loading="lazy">
         `
             : `
@@ -878,22 +919,31 @@ function renderDetectedVideos() {
           !isDownloading && !hasDrm && !unsupported
             ? `
           <div style="display: flex; gap: 6px; margin-top: 6px;">
-            <button class="video-btn ${buttonDisabled ? "disabled" : ""}" 
-                    data-url="${escapeHtml(video.url)}" 
-                    ${buttonDisabled ? "disabled" : ""}>
-              ${buttonText}
-            </button>
+            ${!video.isLive ? `
+              <button class="video-btn ${buttonDisabled ? "disabled" : ""}"
+                      data-url="${escapeHtml(video.url)}"
+                      ${buttonDisabled ? "disabled" : ""}>
+                ${buttonText}
+              </button>
+            ` : ""}
             ${
               (video.format === "hls" || video.format === "m3u8") && !hasDrm && !unsupported
                 ? `
-              <button class="video-btn-manifest" 
-                      data-url="${escapeHtml(video.url)}" 
+              <button class="video-btn-manifest"
+                      data-url="${escapeHtml(video.url)}"
                       title="Select quality">
                 Select Quality
               </button>
             `
                 : ""
             }
+            ${video.isLive ? `
+              <button class="btn-rec"
+                      data-url="${escapeHtml(video.url)}"
+                      title="Record live stream">
+                REC
+              </button>
+            ` : ""}
           </div>
         `
             : ""
@@ -903,6 +953,13 @@ function renderDetectedVideos() {
   `;
     })
     .join("");
+
+  // Handle thumbnail load errors (inline onerror is blocked by CSP)
+  detectedVideosList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
+    img.addEventListener("error", () => {
+      img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
+    });
+  });
 
   // Add click handlers for download buttons
   detectedVideosList.querySelectorAll(".video-btn").forEach((btn) => {
@@ -922,6 +979,61 @@ function renderDetectedVideos() {
       const button = e.target as HTMLButtonElement;
       const url = button.getAttribute("data-url")!;
       handleSendToManifestTab(url);
+    });
+  });
+
+  // Add click handlers for REC (start recording) buttons
+  detectedVideosList.querySelectorAll(".btn-rec").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const button = e.target as HTMLButtonElement;
+      if (button.disabled) return;
+      const url = button.getAttribute("data-url")!;
+      const normalizedUrl = normalizeUrl(url);
+      const videoMetadata = detectedVideos[normalizedUrl];
+
+      // Get tab info for filename, same as regular downloads
+      let tabTitle: string | undefined;
+      let website: string | undefined;
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) {
+          tabTitle = tab.title || undefined;
+          if (tab.url) {
+            try {
+              website = new URL(tab.url).hostname.replace(/^www\./, "");
+            } catch {}
+          }
+        }
+      } catch {}
+
+      chrome.runtime.sendMessage({
+        type: MessageType.START_RECORDING,
+        payload: { url, metadata: videoMetadata, tabTitle, website },
+      });
+    });
+  });
+
+  // Add click handlers for STOP (stop recording) buttons
+  detectedVideosList.querySelectorAll(".btn-stop-rec").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const button = e.target as HTMLButtonElement;
+      const url = button.getAttribute("data-url")!;
+      chrome.runtime.sendMessage({
+        type: MessageType.STOP_RECORDING,
+        payload: { url },
+      });
+    });
+  });
+
+  // Add click handlers for Stop & Save buttons
+  detectedVideosList.querySelectorAll(".btn-stop-save").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const button = e.target as HTMLButtonElement;
+      const url = button.getAttribute("data-url")!;
+      chrome.runtime.sendMessage({
+        type: MessageType.STOP_AND_SAVE_DOWNLOAD,
+        payload: { url },
+      });
     });
   });
 }
@@ -946,10 +1058,6 @@ function renderDownloads() {
     (d) => d.progress.stage === DownloadStage.FAILED || d.progress.stage === DownloadStage.CANCELLED,
   );
 
-  // Sort by updatedAt (most recent first)
-  inProgress.sort((a, b) => b.updatedAt - a.updatedAt);
-  completed.sort((a, b) => b.updatedAt - a.updatedAt);
-  failed.sort((a, b) => b.updatedAt - a.updatedAt);
 
   if (inProgress.length === 0 && completed.length === 0 && failed.length === 0) {
     downloadsList.innerHTML = `
@@ -1007,6 +1115,13 @@ function renderDownloads() {
 
   downloadsList.innerHTML = html;
 
+  // Handle thumbnail load errors (inline onerror is blocked by CSP)
+  downloadsList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
+    img.addEventListener("error", () => {
+      img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
+    });
+  });
+
   // Add event listeners for buttons
   downloadsList.querySelectorAll(".download-open-btn").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
@@ -1034,6 +1149,18 @@ function renderDownloads() {
       await handleRetryDownload(downloadId);
     });
   });
+
+  // Add click handlers for Stop recording buttons in downloads list
+  downloadsList.querySelectorAll(".download-stop-rec-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const button = e.target as HTMLButtonElement;
+      const url = button.getAttribute("data-url")!;
+      chrome.runtime.sendMessage({
+        type: MessageType.STOP_RECORDING,
+        payload: { url },
+      });
+    });
+  });
 }
 
 /**
@@ -1059,12 +1186,29 @@ function renderDownloadItem(download: DownloadState): string {
   )}</span>`;
 
   let progressBar = "";
+  const isRecording = stage === DownloadStage.RECORDING;
   const isManifestDownload =
     (download.metadata.format === "hls" ||
       download.metadata.format === "m3u8") &&
     (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
-  if (isInProgress && isManifestDownload) {
+  if (isRecording) {
+    const segmentsCollected = download.progress.segmentsCollected || 0;
+    const downloaded = download.progress.downloaded || 0;
+    const downloadedText = formatFileSize(downloaded);
+
+    progressBar = `
+      <div class="manifest-progress-container">
+        <div class="manifest-progress-bar-wrapper">
+          <div class="manifest-progress-bar recording"></div>
+        </div>
+        <div class="manifest-progress-info">
+          <span class="manifest-progress-size">${segmentsCollected} segments &bull; ${downloadedText}</span>
+          <span class="rec-badge"><span class="rec-dot"></span>REC</span>
+        </div>
+      </div>
+    `;
+  } else if (isInProgress && isManifestDownload) {
     const percentage = download.progress.percentage || 0;
 
     if (stage === DownloadStage.DOWNLOADING) {
@@ -1163,6 +1307,15 @@ function renderDownloadItem(download: DownloadState): string {
         </button>
       </div>
     `;
+  } else if (isRecording) {
+    actionButtons = `
+      <div style="display: flex; gap: 6px; margin-top: 6px;">
+        <button class="btn-stop-rec download-stop-rec-btn"
+                data-url="${escapeHtml(download.url)}">
+          Stop
+        </button>
+      </div>
+    `;
   } else if (isInProgress) {
     // Check if download can be cancelled based on its current stage
     if (!canCancelDownload(download.progress.stage)) {
@@ -1195,7 +1348,6 @@ function renderDownloadItem(download: DownloadState): string {
             ? `
           <img src="${escapeHtml(download.metadata.thumbnail)}" 
                alt="Video preview" 
-               onerror="this.parentElement.innerHTML='<div class=\\'no-thumbnail\\'>🎬</div>'"
                loading="lazy">
         `
             : `
@@ -1586,6 +1738,7 @@ function getStatusText(stage: DownloadStage): string {
   const statusMap: Record<DownloadStage, string> = {
     [DownloadStage.DETECTING]: "Detecting",
     [DownloadStage.DOWNLOADING]: "Downloading",
+    [DownloadStage.RECORDING]: "Recording",
     [DownloadStage.MERGING]: "Merging",
     [DownloadStage.SAVING]: "Saving",
     [DownloadStage.UPLOADING]: "Uploading",
@@ -1901,6 +2054,9 @@ function updateManualManifestFormState() {
 
   // Enable button if at least one quality is selected
   startManifestDownloadBtn.disabled = !(videoSelected || audioSelected);
+
+  // Update button text based on live stream status
+  startManifestDownloadBtn.textContent = isLiveManifest ? "Record" : "Download";
 }
 
 /**
@@ -1937,6 +2093,9 @@ async function handleLoadManifestPlaylist() {
   if (manifestMediaPlaylistWarning) {
     manifestMediaPlaylistWarning.style.display = "none";
   }
+  if (manifestLiveStreamInfo) {
+    manifestLiveStreamInfo.style.display = "none";
+  }
   if (manifestDrmWarning) {
     manifestDrmWarning.style.display = "none";
   }
@@ -1947,8 +2106,9 @@ async function handleLoadManifestPlaylist() {
     manifestQualitySelection.style.display = "none";
   }
 
-  // Reset DRM and unsupported flags
+  // Reset flags
   hasDrmInManifest = false;
+  isLiveManifest = false;
   unsupportedManifest = false;
 
   try {
@@ -1972,6 +2132,9 @@ async function handleLoadManifestPlaylist() {
       if (manifestMediaPlaylistWarning) {
         manifestMediaPlaylistWarning.style.display = "none";
       }
+      if (manifestLiveStreamInfo) {
+        manifestLiveStreamInfo.style.display = "none";
+      }
       if (manifestQualitySelection) {
         manifestQualitySelection.style.display = "none";
       }
@@ -1994,6 +2157,9 @@ async function handleLoadManifestPlaylist() {
       if (manifestMediaPlaylistWarning) {
         manifestMediaPlaylistWarning.style.display = "none";
       }
+      if (manifestLiveStreamInfo) {
+        manifestLiveStreamInfo.style.display = "none";
+      }
       if (manifestQualitySelection) {
         manifestQualitySelection.style.display = "none";
       }
@@ -2009,8 +2175,12 @@ async function handleLoadManifestPlaylist() {
     if (isMediaPlaylist(playlistText)) {
       // It's a media playlist - show warning and enable download
       isMediaPlaylistMode = true;
+      isLiveManifest = !playlistText.includes("#EXT-X-ENDLIST");
       if (manifestMediaPlaylistWarning) {
-        manifestMediaPlaylistWarning.style.display = "block";
+        manifestMediaPlaylistWarning.style.display = isLiveManifest ? "none" : "block";
+      }
+      if (manifestLiveStreamInfo) {
+        manifestLiveStreamInfo.style.display = isLiveManifest ? "block" : "none";
       }
       if (manifestQualitySelection) {
         manifestQualitySelection.style.display = "none";
@@ -2030,6 +2200,21 @@ async function handleLoadManifestPlaylist() {
         // Separate video and audio levels
         const videoLevels = levels.filter((level) => level.type === "stream");
         const audioLevels = levels.filter((level) => level.type === "audio");
+
+        // Check if the stream is live by fetching the first variant
+        isLiveManifest = false;
+        if (videoLevels.length > 0) {
+          try {
+            const variantText = await fetchTextViaBackground(videoLevels[0]!.uri);
+            isLiveManifest = !variantText.includes("#EXT-X-ENDLIST");
+          } catch {
+            // If we can't fetch, assume VOD
+          }
+        }
+
+        if (manifestLiveStreamInfo) {
+          manifestLiveStreamInfo.style.display = isLiveManifest ? "block" : "none";
+        }
 
         // Populate video quality select (we've already checked it's not null)
         if (videoQualitySelect) {
@@ -2089,6 +2274,9 @@ async function handleLoadManifestPlaylist() {
     if (manifestMediaPlaylistWarning) {
       manifestMediaPlaylistWarning.style.display = "none";
     }
+    if (manifestLiveStreamInfo) {
+      manifestLiveStreamInfo.style.display = "none";
+    }
     if (manifestDrmWarning) {
       manifestDrmWarning.style.display = "none";
     }
@@ -2098,9 +2286,10 @@ async function handleLoadManifestPlaylist() {
     if (manifestQualitySelection) {
       manifestQualitySelection.style.display = "none";
     }
-    // Reset DRM and unsupported flags on error
+    // Reset DRM, unsupported, and live flags on error
     hasDrmInManifest = false;
     unsupportedManifest = false;
+    isLiveManifest = false;
     // Update form state on error
     updateManualManifestFormState();
   } finally {
@@ -2222,27 +2411,39 @@ async function handleStartManifestDownload() {
       format: isMediaPlaylistMode ? "m3u8" : "hls",
       title: tabTitle || "Manifest Video",
       pageUrl: pageUrl || window.location.href,
+      isLive: isLiveManifest,
     };
 
-    // Send download request with quality preferences
+    // For live streams, send START_RECORDING instead of DOWNLOAD_REQUEST
+    const messageType = isLiveManifest
+      ? MessageType.START_RECORDING
+      : MessageType.DOWNLOAD_REQUEST;
+
+    // For live recordings from a master playlist, use the selected variant URL
+    // so the recording handler doesn't auto-select the highest bitrate
+    const recordingUrl = isLiveManifest && videoPlaylistUrl
+      ? videoPlaylistUrl
+      : playlistUrl;
+
+    const payload = isLiveManifest
+      ? { url: recordingUrl, metadata, tabTitle, website }
+      : {
+          url: playlistUrl,
+          metadata,
+          tabTitle,
+          website,
+          manifestQuality: isMediaPlaylistMode
+            ? undefined
+            : {
+                videoPlaylistUrl,
+                audioPlaylistUrl,
+              },
+          isManual: true,
+        };
+
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage(
-        {
-          type: MessageType.DOWNLOAD_REQUEST,
-          payload: {
-            url: playlistUrl,
-            metadata,
-            tabTitle,
-            website,
-            manifestQuality: isMediaPlaylistMode
-              ? undefined
-              : {
-                  videoPlaylistUrl,
-                  audioPlaylistUrl,
-                },
-            isManual: true, // Mark as manual download from manifest tab
-          },
-        },
+        { type: messageType, payload },
         (response) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -2253,34 +2454,29 @@ async function handleStartManifestDownload() {
       );
     });
 
+    const buttonLabel = isLiveManifest ? "Record" : "Download";
+
     if (response && response.success) {
-      // Clear the manual manifest URL so progress is no longer shown in manifest tab
       currentManualManifestUrl = null;
-      // Hide progress in manifest tab
       if (manifestProgress) {
         manifestProgress.style.display = "none";
       }
-      // Reset button text
       if (startManifestDownloadBtn) {
-        startManifestDownloadBtn.textContent = "Download";
+        startManifestDownloadBtn.textContent = buttonLabel;
       }
-      // Reset form state
       updateManualManifestFormState();
-      // Load download states and switch to downloads tab
       await loadDownloadStates();
       await switchTab("downloads");
       renderDownloads();
     } else if (response && response.error) {
       alert(response.error);
-      startManifestDownloadBtn.textContent = "Download";
-      // Re-enable form elements on error
+      startManifestDownloadBtn.textContent = buttonLabel;
       updateManualManifestFormState();
     }
   } catch (error: any) {
     console.error("Download request failed:", error);
     alert("Failed to start download: " + (error?.message || "Unknown error"));
-    startManifestDownloadBtn.textContent = "Download";
-    // Re-enable form elements on error
+    startManifestDownloadBtn.textContent = isLiveManifest ? "Record" : "Download";
     updateManualManifestFormState();
   }
 }

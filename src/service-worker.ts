@@ -4,6 +4,7 @@
  */
 
 import { DownloadManager } from "./core/downloader/download-manager";
+import { HlsRecordingHandler } from "./core/downloader/hls/hls-recording-handler";
 import {
   getAllDownloads,
   getDownload,
@@ -20,6 +21,7 @@ import {
   DownloadStage,
 } from "./core/types";
 import { CancellationError } from "./core/utils/errors";
+import { generateDownloadId } from "./core/utils/id-utils";
 import { logger } from "./core/utils/logger";
 import {
   canCancelDownload,
@@ -39,6 +41,8 @@ const DEFAULT_FFMPEG_TIMEOUT = 900000; // 15 minutes in milliseconds (stored int
 const activeDownloads = new Map<string, Promise<void>>();
 // Map to store AbortControllers for each download (keyed by normalized URL)
 const downloadAbortControllers = new Map<string, AbortController>();
+// Set of normalized URLs that should save partial progress on abort
+const savePartialDownloads = new Set<string>();
 
 /**
  * Keep-alive heartbeat mechanism to prevent service worker termination
@@ -329,6 +333,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleSetIconGray(sender.tab?.id);
         return false;
 
+      case MessageType.START_RECORDING:
+        handleStartRecordingMessage(message.payload).then(sendResponse);
+        return true;
+
+      case MessageType.STOP_RECORDING:
+        handleStopRecordingMessage(message.payload).then(sendResponse);
+        return true;
+
+      case MessageType.STOP_AND_SAVE_DOWNLOAD:
+        handleStopAndSaveMessage(message.payload).then(sendResponse);
+        return true;
+
       default:
         // Only log warnings for truly unknown message types
         // Some messages might be handled by other listeners (like content scripts)
@@ -443,13 +459,18 @@ async function handleDownloadRequest(payload: {
   const downloadManager = new DownloadManager({
     maxConcurrent,
     ffmpegTimeout,
+    shouldSaveOnCancel: () => savePartialDownloads.has(normalizedUrl),
     onProgress: async (state) => {
       const normalizedUrlForProgress = normalizeUrl(state.url);
 
       // Get abort controller and store signal reference ONCE to avoid stale reference issues
       const controller = downloadAbortControllers.get(normalizedUrlForProgress);
+      // Allow progress updates through if we're in stop-and-save mode (partial save in progress)
+      const isSavingPartial = savePartialDownloads.has(normalizedUrlForProgress);
+
       // If no controller exists (already cleaned up) or signal is aborted, skip update
-      if (!controller || controller.signal.aborted) {
+      // BUT allow updates through if we're saving a partial download
+      if (!isSavingPartial && (!controller || controller.signal.aborted)) {
         logger.info(
           `Download ${state.id} was aborted, ignoring progress update`,
         );
@@ -457,7 +478,7 @@ async function handleDownloadRequest(payload: {
       }
 
       // Store signal reference for consistent checks throughout this function
-      const signal = controller.signal;
+      const signal = controller?.signal;
 
       // Double-check cancellation state in database (defensive check)
       const currentState = await getDownload(state.id);
@@ -477,7 +498,8 @@ async function handleDownloadRequest(payload: {
 
       // Final abort check immediately before storing to minimize race window
       // Re-check abort signal after async database operation using stored reference
-      if (signal.aborted) {
+      // Skip this check if we're saving a partial download
+      if (!isSavingPartial && signal?.aborted) {
         logger.info(
           `Download ${state.id} was aborted, ignoring progress update`,
         );
@@ -617,6 +639,8 @@ function isDownloadFailed(downloadState: DownloadState): boolean {
 async function cleanupDownloadResources(normalizedUrl: string): Promise<void> {
   // Clean up AbortController
   downloadAbortControllers.delete(normalizedUrl);
+  // Clean up stop-and-save marker
+  savePartialDownloads.delete(normalizedUrl);
 
   // Note: activeDownloads cleanup is handled in the promise's finally block
   // to ensure it's removed regardless of success/failure/cancellation
@@ -673,7 +697,10 @@ async function startDownload(
     // Generate filename if not provided
     let finalFilename = filename;
     if (!finalFilename) {
-      const extension = metadata.fileExtension || "mp4";
+      // HLS/M3U8 formats always produce MP4 after FFmpeg processing
+      const extension = metadata.format === "hls" || metadata.format === "m3u8"
+        ? "mp4"
+        : metadata.fileExtension || "mp4";
       // Use tab info if available, otherwise fall back to URL-based generation
       if (tabTitle || website) {
         finalFilename = generateFilenameFromTabInfo(
@@ -711,6 +738,31 @@ async function startDownload(
 
     sendDownloadFailed(url, errorMessage);
     throw error;
+  }
+}
+
+/**
+ * Stop an active HLS/M3U8 download and save whatever segments have been downloaded so far
+ */
+async function handleStopAndSaveMessage(payload: {
+  url: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const normalizedUrl = normalizeUrl(payload.url);
+    const controller = downloadAbortControllers.get(normalizedUrl);
+    if (!controller) {
+      return { success: false, error: "No active download found for this URL." };
+    }
+    savePartialDownloads.add(normalizedUrl);
+    controller.abort();
+    logger.info(`Stop-and-save triggered for ${normalizedUrl}`);
+    return { success: true };
+  } catch (error) {
+    logger.error("Stop-and-save error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -775,6 +827,154 @@ async function handleCancelDownload(id: string): Promise<void> {
   // and clean itself up. The abort signal will cause the download to stop.
 
   logger.info(`Download cancelled and removed: ${id}`);
+}
+
+/**
+ * Start live HLS recording
+ */
+async function handleStartRecordingMessage(payload: {
+  url: string;
+  metadata: VideoMetadata;
+  filename?: string;
+  tabTitle?: string;
+  website?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { url, metadata, filename, tabTitle, website } = payload;
+    const normalizedUrl = normalizeUrl(url);
+
+    if (activeDownloads.has(normalizedUrl)) {
+      return { success: false, error: "Recording already in progress for this URL." };
+    }
+
+    const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
+    const maxConcurrent =
+      (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || 3;
+    const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT;
+
+    // Build initial download state
+    const stateId = generateDownloadId(normalizedUrl);
+    const initialState: DownloadState = {
+      id: stateId,
+      url,
+      metadata,
+      progress: {
+        url,
+        stage: DownloadStage.RECORDING,
+        segmentsCollected: 0,
+        message: "Recording...",
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await storeDownload(initialState);
+
+    const abortController = new AbortController();
+    downloadAbortControllers.set(normalizedUrl, abortController);
+
+    const onProgress = async (state: DownloadState) => {
+      const controller = downloadAbortControllers.get(normalizeUrl(state.url));
+      // Allow progress updates through when in post-recording stages (MERGING, SAVING, COMPLETED)
+      // since the abort signal is used to stop the recording loop, not to cancel the merge
+      const isPostRecording =
+        state.progress.stage === DownloadStage.MERGING ||
+        state.progress.stage === DownloadStage.SAVING ||
+        state.progress.stage === DownloadStage.COMPLETED;
+      if (!isPostRecording && (!controller || controller.signal.aborted)) return;
+      await storeDownload(state);
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: MessageType.DOWNLOAD_PROGRESS,
+            payload: { id: state.id, progress: state.progress },
+          },
+          () => { if (chrome.runtime.lastError) {} },
+        );
+      } catch (_) {}
+    };
+
+    const handler = new HlsRecordingHandler({
+      onProgress,
+      maxConcurrent,
+      ffmpegTimeout,
+    });
+
+    // Resolve filename
+    let finalFilename = filename;
+    if (!finalFilename) {
+      // HLS/M3U8 formats always produce MP4 after FFmpeg processing
+      const extension = metadata.format === "hls" || metadata.format === "m3u8"
+        ? "mp4"
+        : metadata.fileExtension || "mp4";
+      if (tabTitle || website) {
+        finalFilename = generateFilenameFromTabInfo(tabTitle, website, extension);
+      } else {
+        finalFilename = generateFilenameWithExtension(url, extension);
+      }
+    }
+
+    const recordingPromise = handler
+      .record(url, finalFilename, stateId, abortController.signal, metadata.pageUrl)
+      .then(async () => {
+        await cleanupDownloadResources(normalizedUrl);
+        sendDownloadComplete(stateId);
+      })
+      .catch(async (error: unknown) => {
+        // Persist FAILED state to IndexedDB so the downloads tab reflects the real status
+        const failedState = await getDownload(stateId);
+        if (failedState && failedState.progress.stage !== DownloadStage.COMPLETED) {
+          failedState.progress.stage = DownloadStage.FAILED;
+          failedState.progress.message =
+            error instanceof Error ? error.message : String(error);
+          failedState.updatedAt = Date.now();
+          await storeDownload(failedState);
+        }
+        if (!(error instanceof CancellationError)) {
+          logger.error(`Recording failed for ${url}:`, error);
+          sendDownloadFailed(url, error instanceof Error ? error.message : String(error));
+        }
+        await cleanupDownloadResources(normalizedUrl);
+      })
+      .finally(() => {
+        activeDownloads.delete(normalizedUrl);
+        if (activeDownloads.size === 0) keepAlive(false);
+      });
+
+    activeDownloads.set(normalizedUrl, recordingPromise);
+    if (activeDownloads.size === 1) keepAlive(true);
+
+    return { success: true };
+  } catch (error) {
+    logger.error("Start recording error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Stop live HLS recording (triggers merge + save inside handler)
+ */
+async function handleStopRecordingMessage(payload: {
+  url: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const normalizedUrl = normalizeUrl(payload.url);
+    const abortController = downloadAbortControllers.get(normalizedUrl);
+    if (!abortController) {
+      return { success: false, error: "No active recording found for this URL." };
+    }
+    abortController.abort();
+    logger.info(`Stopped recording for ${normalizedUrl}`);
+    return { success: true };
+  } catch (error) {
+    logger.error("Stop recording error:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /**

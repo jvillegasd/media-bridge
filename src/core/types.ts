@@ -19,6 +19,7 @@ export interface VideoMetadata {
   fileExtension?: string; // Detected file extension (e.g., "mp4", "webm")
   hasDrm?: boolean; // Indicates if the video is DRM-protected
   unsupported?: boolean; // Indicates if the manifest uses unsupported encryption methods
+  isLive?: boolean; // Indicates if the stream is a live stream (no #EXT-X-ENDLIST)
 }
 
 export interface VideoQuality {
@@ -37,6 +38,7 @@ export interface VideoQuality {
 export enum DownloadStage {
   DETECTING = "detecting",
   DOWNLOADING = "downloading",
+  RECORDING = "recording",
   MERGING = "merging",
   SAVING = "saving",
   UPLOADING = "uploading",
@@ -56,6 +58,7 @@ export interface DownloadProgress {
   speed?: number; // Download speed in bytes per second
   lastUpdateTime?: number; // Timestamp for speed calculation
   lastDownloaded?: number; // Last downloaded bytes for speed calculation
+  segmentsCollected?: number; // Number of segments collected during live recording
 }
 
 export interface DownloadState {

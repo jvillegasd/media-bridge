@@ -31,7 +31,13 @@ export function canCancelDownload(stage: DownloadStage): boolean {
   ) {
     return false;
   }
-  
+
+  // RECORDING stage cannot be cancelled via the standard cancel path
+  // Use STOP_RECORDING message instead, which triggers merge → save
+  if (stage === DownloadStage.RECORDING) {
+    return false;
+  }
+
   // DETECTING, DOWNLOADING, UPLOADING stages can be cancelled
   return true;
 }

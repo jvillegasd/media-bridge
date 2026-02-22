@@ -51,6 +51,16 @@ export enum MessageType {
   // Icon management
   SET_ICON_BLUE = "SET_ICON_BLUE",
   SET_ICON_GRAY = "SET_ICON_GRAY",
+
+  // Live recording
+  START_RECORDING = "START_RECORDING",
+  STOP_RECORDING = "STOP_RECORDING",
+
+  // Stop and save partial download
+  STOP_AND_SAVE_DOWNLOAD = "STOP_AND_SAVE_DOWNLOAD",
+
+  // Blob URL revocation (must be sent to offscreen document — not service worker)
+  REVOKE_BLOB_URL = "REVOKE_BLOB_URL",
 }
 
 export interface BaseMessage {

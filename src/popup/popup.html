@@ -510,6 +510,79 @@
       transition: width 0.3s ease;
     }
 
+    .manifest-progress-bar.recording {
+      width: 100% !important;
+      background: linear-gradient(
+        90deg,
+        #ea4335 0%, #ff6b6b 40%, #ea4335 60%, #c5221f 100%
+      );
+      background-size: 200% 100%;
+      animation: recordingShimmer 1.8s linear infinite;
+      transition: none;
+    }
+
+    @keyframes recordingShimmer {
+      0%   { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+
+    .rec-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: #ea4335;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .rec-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #ea4335;
+      animation: recPulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes recPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .btn-rec {
+      padding: 5px 10px;
+      background: #ea4335;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-rec:hover { background: #c5221f; }
+
+    .btn-stop-rec {
+      padding: 5px 10px;
+      background: #333;
+      color: #ea4335;
+      border: 1px solid #ea4335;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-stop-save {
+      padding: 5px 10px;
+      background: #2d2d2d;
+      color: #fbbc04;
+      border: 1px solid #fbbc04;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .btn-stop-save:hover { border-color: #f9ab00; color: #f9ab00; }
+
     .manifest-progress-info {
       display: flex;
       justify-content: space-between;
@@ -887,6 +960,10 @@
       <div id="hlsMediaPlaylistWarning" class="hls-quality-warning" style="display: none;">
         <strong>⚠️ Media Playlist Detected</strong>
         <p>This URL belongs to a media playlist. Quality selection is not available. The download will proceed with the available stream.</p>
+      </div>
+      <div id="hlsLiveStreamInfo" class="hls-quality-warning" style="display: none; border-color: #ea4335; background: rgba(234, 67, 53, 0.08);">
+        <strong><span style="color: #ea4335;">●</span> Live Stream Detected</strong>
+        <p>This is a live stream manifest. Select a quality and click Record to start capturing the stream.</p>
       </div>
       <div id="hlsDrmWarning" class="hls-quality-warning" style="display: none;">
         <strong>🔒 DRM Protected Content</strong>

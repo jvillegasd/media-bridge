@@ -32,7 +32,7 @@ import { logger } from "../../utils/logger";
 import { decryptFragment } from "../../utils/crypto-utils";
 import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
 import { parseLevelsPlaylist } from "../../utils/m3u8-parser";
-import { storeChunk, deleteChunks } from "../../database/chunks";
+import { storeChunk, deleteChunks, getChunkCount } from "../../database/chunks";
 import { createOffscreenDocument } from "../../utils/offscreen-manager";
 import { MessageType } from "../../../shared/messages";
 import { cancelIfAborted, throwIfAborted } from "../../utils/cancellation";
@@ -42,6 +42,7 @@ import {
 } from "../types";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { sanitizeFilename } from "../../utils/file-utils";
+import { addHeaderRules, removeHeaderRules } from "../../utils/header-rules";
 
 /** Configuration options for M3U8 download handler */
 export interface M3u8DownloadHandlerOptions {
@@ -51,6 +52,8 @@ export interface M3u8DownloadHandlerOptions {
   maxConcurrent?: number;
   /** FFmpeg processing timeout in milliseconds @default 900000 (15 minutes) */
   ffmpegTimeout?: number;
+  /** When cancelled, save partial progress instead of discarding */
+  shouldSaveOnCancel?: () => boolean;
 }
 
 /**
@@ -61,6 +64,7 @@ export class M3u8DownloadHandler {
   private readonly onProgress?: ProgressCallback;
   private readonly maxConcurrent: number;
   private readonly ffmpegTimeout: number;
+  private readonly shouldSaveOnCancel?: () => boolean;
   /** Download ID (same as stateId) */
   private downloadId: string = "";
   /** Total bytes downloaded across all fragments */
@@ -84,6 +88,7 @@ export class M3u8DownloadHandler {
     this.onProgress = options.onProgress;
     this.maxConcurrent = options.maxConcurrent || 3;
     this.ffmpegTimeout = options.ffmpegTimeout || 900000; // Default 15 minutes
+    this.shouldSaveOnCancel = options.shouldSaveOnCancel;
   }
 
   /**
@@ -556,14 +561,16 @@ export class M3u8DownloadHandler {
 
                 if (item.state === "complete") {
                   // Clean up blob URL after successful download
-                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                    URL.revokeObjectURL(blobUrl);
-                  }
+                  chrome.runtime.sendMessage(
+                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+                    () => { if (chrome.runtime.lastError) {} },
+                  );
                   resolve(item.filename);
                 } else if (item.state === "interrupted") {
-                  if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-                    URL.revokeObjectURL(blobUrl);
-                  }
+                  chrome.runtime.sendMessage(
+                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+                    () => { if (chrome.runtime.lastError) {} },
+                  );
                   reject(new Error(item.error || "Download interrupted"));
                 } else {
                   // Check again in a bit
@@ -578,9 +585,10 @@ export class M3u8DownloadHandler {
       });
     } catch (error) {
       // Clean up blob URL on error
-      if (typeof URL !== "undefined" && URL.revokeObjectURL) {
-        URL.revokeObjectURL(blobUrl);
-      }
+      chrome.runtime.sendMessage(
+        { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
+        () => { if (chrome.runtime.lastError) {} },
+      );
       throw error;
     }
   }
@@ -598,10 +606,21 @@ export class M3u8DownloadHandler {
     filename: string,
     stateId: string,
     abortSignal?: AbortSignal,
+    pageUrl?: string,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     // Reset all download-specific state to prevent pollution from previous downloads
     this.resetDownloadState(stateId, abortSignal);
-    
+
+    // Install DNR header rules so Origin/Referer reach the CDN
+    let headerRuleIds: number[] = [];
+    if (pageUrl) {
+      try {
+        headerRuleIds = await addHeaderRules(stateId, mediaPlaylistUrl, pageUrl);
+      } catch (err) {
+        logger.warn("Failed to add DNR header rules:", err);
+      }
+    }
+
     try {
       logger.info(
         `Starting M3U8 media playlist download from ${mediaPlaylistUrl}`,
@@ -616,7 +635,7 @@ export class M3u8DownloadHandler {
             fetchText(mediaPlaylistUrl, 3, this.abortSignal),
             this.abortSignal
           )
-        : await fetchText(mediaPlaylistUrl, 3);
+        : await fetchText(mediaPlaylistUrl);
 
       // Validate media playlist can be downloaded
       canDownloadHLSManifest(mediaPlaylistText);
@@ -734,10 +753,91 @@ export class M3u8DownloadHandler {
         fileExtension: "mp4",
       };
     } catch (error) {
+      if (error instanceof CancellationError && this.shouldSaveOnCancel?.()) {
+        try {
+          const chunkCount = await getChunkCount(this.downloadId);
+          if (chunkCount > 0) {
+            // Transition to MERGING immediately to block further cancellation
+            const mergingState = await getDownload(stateId);
+            if (mergingState) {
+              mergingState.progress.stage = DownloadStage.MERGING;
+              mergingState.progress.message = "Merging partial download...";
+              await storeDownload(mergingState);
+              this.notifyProgress(mergingState);
+            }
+
+            // Use actual stored count for FFmpeg
+            this.fragmentCount = chunkCount;
+
+            // Clear abort signal so FFmpeg processing is not immediately rejected
+            this.abortSignal = undefined;
+
+            const sanitizedFilename = sanitizeFilename(filename);
+            let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
+            if (!baseFileName || baseFileName.trim() === "") {
+              baseFileName = `video_${Date.now()}`;
+            }
+
+            const blobUrl = await this.streamToMp4Blob(
+              baseFileName,
+              stateId,
+              async (progress, message) => {
+                const state = await getDownload(stateId);
+                if (state) {
+                  state.progress.percentage = progress * 100;
+                  state.progress.message = message;
+                  state.progress.stage = DownloadStage.MERGING;
+                  await storeDownload(state);
+                  this.notifyProgress(state);
+                }
+              },
+            );
+
+            const savingState = await getDownload(stateId);
+            if (savingState) {
+              savingState.progress.stage = DownloadStage.SAVING;
+              savingState.progress.message = "Saving partial file...";
+              savingState.progress.percentage = 95;
+              await storeDownload(savingState);
+              this.notifyProgress(savingState);
+            }
+
+            const filePath = await this.saveBlobUrlToFile(
+              blobUrl,
+              `${baseFileName}.mp4`,
+              stateId,
+            );
+
+            const finalState = await getDownload(stateId);
+            if (finalState) {
+              finalState.localPath = filePath;
+              finalState.progress.stage = DownloadStage.COMPLETED;
+              finalState.progress.message = "Download completed (partial)";
+              finalState.progress.percentage = 100;
+              finalState.progress.downloaded = finalState.progress.total || this.bytesDownloaded || 0;
+              finalState.updatedAt = Date.now();
+              await storeDownload(finalState);
+              this.notifyProgress(finalState);
+            }
+
+            logger.info(`M3U8 partial download saved: ${filePath}`);
+            return { filePath, fileExtension: "mp4" };
+          }
+        } catch (saveError) {
+          logger.error("Failed to save partial M3U8 download:", saveError);
+        }
+      }
       logger.error("M3U8 media playlist download failed:", error);
       // Re-throw the original error (preserve CancellationError, DownloadError, etc.)
       throw error;
     } finally {
+      // Clean up DNR header rules
+      try {
+        await removeHeaderRules(headerRuleIds);
+      } catch (cleanupError) {
+        logger.error("Failed to remove DNR header rules:", cleanupError);
+      }
+
       // Always clean up IndexedDB chunks regardless of success/failure/cancellation
       try {
         await deleteChunks(this.downloadId || stateId);

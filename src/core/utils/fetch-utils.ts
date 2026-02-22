@@ -34,11 +34,16 @@ export async function fetchResource(
     body?: ArrayBuffer | string;
     mode?: RequestMode;
     signal?: AbortSignal;
+    cache?: RequestCache;
   },
 ): Promise<Response> {
   // If we're in a service worker/background context, use native fetch
   if (isServiceWorkerContext()) {
-    return fetch(input, init);
+    const response = await fetch(input, init);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText} for ${typeof input === "string" ? input : input.href}`);
+    }
+    return response;
   }
 
   // In content script context, delegate to background script
@@ -111,10 +116,12 @@ async function fetchWithRetry<Data>(
   }
   let countdown = attempts;
   let retryTime = 100;
+  let lastError: unknown;
   while (countdown--) {
     try {
       return await fetchFn();
     } catch (e) {
+      lastError = e;
       // If aborted, don't retry - throw immediately
       if (e instanceof Error && e.name === "AbortError") {
         throw e;
@@ -125,16 +132,18 @@ async function fetchWithRetry<Data>(
       }
     }
   }
-  throw new Error("Fetch error");
+  throw lastError instanceof Error ? lastError : new Error("Fetch error");
 }
 
 export async function fetchText(
   url: string,
   attempts: number = 1,
   signal?: AbortSignal,
+  noCache?: boolean,
+  headers?: Record<string, string>,
 ) {
   const fetchFn: FetchFn<string> = () =>
-    fetchResource(url, { signal }).then((res) => res.text());
+    fetchResource(url, { signal, headers, cache: noCache ? "no-store" : undefined }).then((res) => res.text());
   return fetchWithRetry(fetchFn, attempts);
 }
 
@@ -142,9 +151,10 @@ export async function fetchArrayBuffer(
   url: string,
   attempts: number = 1,
   signal?: AbortSignal,
+  headers?: Record<string, string>,
 ) {
   const fetchFn: FetchFn<ArrayBuffer> = () =>
-    fetchResource(url, { signal }).then((res) => res.arrayBuffer());
+    fetchResource(url, { signal, headers }).then((res) => res.arrayBuffer());
   return fetchWithRetry(fetchFn, attempts);
 }
 
