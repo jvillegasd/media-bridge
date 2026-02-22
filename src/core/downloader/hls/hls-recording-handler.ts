@@ -6,48 +6,43 @@
  * #EXT-X-ENDLIST is detected) — hands off to the existing M3U8/FFmpeg merge path
  * to produce an MP4 file.
  *
+ * Extends BasePlaylistHandler for shared constructor, state, notifyProgress,
+ * sanitizeBaseFilename, updateStage, and cleanupChunks.
+ *
  * The handler is controlled via an AbortSignal:
  *   - Normal abort (user clicks STOP) → polling loop exits, merge begins.
  *   - #EXT-X-ENDLIST detected         → polling loop exits naturally, merge begins.
  */
 
-import { DownloadState, DownloadStage, Fragment, Level } from "../../types";
+import { DownloadStage, Fragment } from "../../types";
 import { getDownload, storeDownload } from "../../database/downloads";
-import { storeChunk, deleteChunks } from "../../database/chunks";
-import { createOffscreenDocument } from "../../utils/offscreen-manager";
+import { storeChunk } from "../../database/chunks";
 import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
 import { decryptFragment } from "../../utils/crypto-utils";
 import {
   parseMasterPlaylist,
   parseLevelsPlaylist,
 } from "../../utils/m3u8-parser";
-import { sanitizeFilename } from "../../utils/file-utils";
 import { logger } from "../../utils/logger";
 import { CancellationError } from "../../utils/errors";
 import { MessageType } from "../../../shared/messages";
-import { DownloadProgressCallback } from "../types";
 import { addHeaderRules, removeHeaderRules } from "../../utils/header-rules";
+import { saveBlobUrlToFile } from "../../utils/blob-utils";
+import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
+import {
+  BasePlaylistHandler,
+  BasePlaylistHandlerOptions,
+} from "../base-playlist-handler";
 
 const POLL_INTERVAL_MS = 3000;
 
-export interface HlsRecordingHandlerOptions {
-  onProgress?: DownloadProgressCallback;
-  maxConcurrent?: number;
-  ffmpegTimeout?: number;
-}
+export type HlsRecordingHandlerOptions = BasePlaylistHandlerOptions;
 
-export class HlsRecordingHandler {
-  private readonly onProgress?: DownloadProgressCallback;
-  private readonly maxConcurrent: number;
-  private readonly ffmpegTimeout: number;
-  private downloadId: string = "";
-  private bytesDownloaded: number = 0;
+export class HlsRecordingHandler extends BasePlaylistHandler {
   private segmentIndex: number = 0;
 
   constructor(options: HlsRecordingHandlerOptions = {}) {
-    this.onProgress = options.onProgress;
-    this.maxConcurrent = options.maxConcurrent || 3;
-    this.ffmpegTimeout = options.ffmpegTimeout || 900000;
+    super(options);
   }
 
   /**
@@ -66,7 +61,6 @@ export class HlsRecordingHandler {
     this.bytesDownloaded = 0;
     this.segmentIndex = 0;
 
-    // Install DNR header rules so Origin/Referer reach the CDN
     let headerRuleIds: number[] = [];
     if (pageUrl) {
       try {
@@ -77,37 +71,53 @@ export class HlsRecordingHandler {
     }
 
     try {
-      // Resolve media playlist URL (handles master → variant selection)
       const mediaPlaylistUrl = await this.resolveMediaPlaylistUrl(
         manifestUrl,
         abortSignal,
       );
 
-      // Polling loop — collect segments until user stops or stream ends
       await this.collectSegments(mediaPlaylistUrl, stateId, abortSignal);
 
       if (this.segmentIndex === 0) {
         throw new Error("No segments were recorded");
       }
 
-      // Transition to MERGING stage
-      await this.updateStage(stateId, DownloadStage.MERGING, "Merging recorded segments...");
+      await this.updateStage(
+        stateId,
+        DownloadStage.MERGING,
+        "Merging recorded segments...",
+      );
 
-      const sanitizedFilename = sanitizeFilename(filename);
-      let baseFileName = sanitizedFilename.replace(/\.[^/.]+$/, "");
-      if (!baseFileName || baseFileName.trim() === "") {
-        baseFileName = `recording_${Date.now()}`;
-      }
+      const baseFileName = this.sanitizeBaseFilename(filename, "recording");
 
-      const blobUrl = await this.mergeToMp4(baseFileName, stateId);
+      const blobUrl = await processWithFFmpeg({
+        requestType: MessageType.OFFSCREEN_PROCESS_M3U8,
+        responseType: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
+        downloadId: this.downloadId,
+        payload: { fragmentCount: this.segmentIndex },
+        filename: baseFileName,
+        timeout: this.ffmpegTimeout,
+        onProgress: async (progress, message) => {
+          const state = await getDownload(stateId);
+          if (!state) return;
+          state.progress.percentage = (progress || 0) * 100;
+          state.progress.message = message || "Merging...";
+          state.progress.stage = DownloadStage.MERGING;
+          await storeDownload(state);
+          this.notifyProgress(state);
+        },
+      });
 
-      // Transition to SAVING stage
-      await this.updateStage(stateId, DownloadStage.SAVING, "Saving file...", 95);
+      await this.updateStage(
+        stateId,
+        DownloadStage.SAVING,
+        "Saving file...",
+        95,
+      );
 
       const finalFilename = `${baseFileName}.mp4`;
-      const filePath = await this.saveBlobUrl(blobUrl, finalFilename, stateId);
+      const filePath = await saveBlobUrlToFile(blobUrl, finalFilename, stateId);
 
-      // Mark completed
       const finalState = await getDownload(stateId);
       if (finalState) {
         finalState.localPath = filePath;
@@ -125,18 +135,13 @@ export class HlsRecordingHandler {
       logger.error("HLS recording failed:", error);
       throw error;
     } finally {
-      // Clean up DNR header rules
       try {
         await removeHeaderRules(headerRuleIds);
       } catch (cleanupError) {
         logger.error("Failed to remove DNR header rules:", cleanupError);
       }
 
-      try {
-        await deleteChunks(this.downloadId || stateId);
-      } catch (cleanupError) {
-        logger.error("Failed to clean up recording chunks:", cleanupError);
-      }
+      await this.cleanupChunks(this.downloadId || stateId);
     }
   }
 
@@ -144,40 +149,36 @@ export class HlsRecordingHandler {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  /**
-   * If `url` points to a master playlist, auto-select the best video variant.
-   * Otherwise, return `url` as-is (it is already a media playlist).
-   */
   private async resolveMediaPlaylistUrl(
     url: string,
     abortSignal: AbortSignal,
   ): Promise<string> {
     const text = await fetchText(url, 3, abortSignal);
 
-    // Detect master playlist by presence of #EXT-X-STREAM-INF
     if (!text.includes("#EXT-X-STREAM-INF")) {
-      logger.info(`[REC] URL is already a media playlist: ${url.substring(0, 100)}...`);
+      logger.info(
+        `[REC] URL is already a media playlist: ${url.substring(0, 100)}...`,
+      );
       return url;
     }
 
     const levels = parseMasterPlaylist(text, url);
     const videoLevels = levels.filter((l) => l.type === "stream");
     if (videoLevels.length === 0) {
-      logger.warn(`[REC] No video levels found in master playlist, using URL as-is`);
+      logger.warn(
+        `[REC] No video levels found in master playlist, using URL as-is`,
+      );
       return url;
     }
 
-    // Pick highest bitrate variant
     videoLevels.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
     const resolvedUrl = videoLevels[0]!.uri;
-    logger.info(`[REC] Resolved media playlist: ${resolvedUrl.substring(0, 100)}...`);
+    logger.info(
+      `[REC] Resolved media playlist: ${resolvedUrl.substring(0, 100)}...`,
+    );
     return resolvedUrl;
   }
 
-  /**
-   * Poll the media playlist and download any new segments.
-   * Exits when abortSignal fires or #EXT-X-ENDLIST is present.
-   */
   private async collectSegments(
     mediaPlaylistUrl: string,
     stateId: string,
@@ -185,7 +186,9 @@ export class HlsRecordingHandler {
   ): Promise<void> {
     const seenUris = new Set<string>();
 
-    logger.info(`[REC] Starting polling loop, abortSignal.aborted=${abortSignal.aborted}`);
+    logger.info(
+      `[REC] Starting polling loop, abortSignal.aborted=${abortSignal.aborted}`,
+    );
     let pollCount = 0;
 
     while (!abortSignal.aborted) {
@@ -195,41 +198,40 @@ export class HlsRecordingHandler {
         playlistText = await fetchText(mediaPlaylistUrl, 3, abortSignal, true);
       } catch (err) {
         if (abortSignal.aborted) break;
-        logger.warn("Failed to fetch manifest during recording, retrying...", err);
+        logger.warn(
+          "Failed to fetch manifest during recording, retrying...",
+          err,
+        );
         await this.sleep(POLL_INTERVAL_MS, abortSignal);
         continue;
       }
 
       if (abortSignal.aborted) break;
 
-      logger.info(`[REC] Poll #${pollCount}: playlist length=${playlistText.length}, aborted=${abortSignal.aborted}`);
+      logger.info(
+        `[REC] Poll #${pollCount}: playlist length=${playlistText.length}, aborted=${abortSignal.aborted}`,
+      );
 
-      // Parse new fragments
       const allFragments = parseLevelsPlaylist(playlistText, mediaPlaylistUrl);
       const newFragments = allFragments.filter((f) => !seenUris.has(f.uri));
 
-      logger.info(`[REC] Poll #${pollCount}: total fragments=${allFragments.length}, new=${newFragments.length}, seen=${seenUris.size}`);
+      logger.info(
+        `[REC] Poll #${pollCount}: total fragments=${allFragments.length}, new=${newFragments.length}, seen=${seenUris.size}`,
+      );
 
       if (newFragments.length > 0) {
-        // Assign sequential global indices
         const indexedFragments: Fragment[] = newFragments.map((f) => ({
           ...f,
           index: this.segmentIndex++,
         }));
 
-        // Mark URIs as seen before downloading to avoid double-download on retry
         indexedFragments.forEach((f) => seenUris.add(f.uri));
 
-        await this.downloadFragmentsConcurrently(
-          indexedFragments,
-          abortSignal,
-        );
+        await this.downloadFragmentsConcurrently(indexedFragments, abortSignal);
 
-        // Update progress
         await this.updateRecordingProgress(stateId);
       }
 
-      // Check for end-of-stream marker
       const hasEndList = playlistText.includes("#EXT-X-ENDLIST");
       logger.info(`[REC] Poll #${pollCount}: hasEndList=${hasEndList}`);
       if (hasEndList) {
@@ -237,15 +239,13 @@ export class HlsRecordingHandler {
         break;
       }
 
-      // Wait before next poll
       await this.sleep(POLL_INTERVAL_MS, abortSignal);
     }
-    logger.info(`[REC] Polling loop exited after ${pollCount} polls, segments=${this.segmentIndex}, aborted=${abortSignal.aborted}`);
+    logger.info(
+      `[REC] Polling loop exited after ${pollCount} polls, segments=${this.segmentIndex}, aborted=${abortSignal.aborted}`,
+    );
   }
 
-  /**
-   * Download a batch of fragments with concurrency limiting.
-   */
   private async downloadFragmentsConcurrently(
     fragments: Fragment[],
     abortSignal: AbortSignal,
@@ -283,9 +283,6 @@ export class HlsRecordingHandler {
     await Promise.all(workers);
   }
 
-  /**
-   * Update the download state to show recording progress.
-   */
   private async updateRecordingProgress(stateId: string): Promise<void> {
     const state = await getDownload(stateId);
     if (!state) return;
@@ -298,182 +295,6 @@ export class HlsRecordingHandler {
     this.notifyProgress(state);
   }
 
-  /**
-   * Set stage + optional message / percentage and persist.
-   */
-  private async updateStage(
-    stateId: string,
-    stage: DownloadStage,
-    message: string,
-    percentage?: number,
-  ): Promise<void> {
-    const state = await getDownload(stateId);
-    if (!state) return;
-    state.progress.stage = stage;
-    state.progress.message = message;
-    if (percentage !== undefined) state.progress.percentage = percentage;
-    state.updatedAt = Date.now();
-    await storeDownload(state);
-    this.notifyProgress(state);
-  }
-
-  /**
-   * Send collected segments to the offscreen document for FFmpeg muxing.
-   * Reuses the existing OFFSCREEN_PROCESS_M3U8 path.
-   */
-  private async mergeToMp4(fileName: string, stateId: string): Promise<string> {
-    await createOffscreenDocument();
-
-    return new Promise<string>((resolve, reject) => {
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      let isSettled = false;
-
-      const cleanup = () => {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-        chrome.runtime.onMessage.removeListener(messageListener);
-      };
-
-      const messageListener = (message: any) => {
-        if (
-          message.type !== MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE ||
-          message.payload?.downloadId !== this.downloadId
-        ) {
-          return;
-        }
-
-        const { type, blobUrl, error, progress, message: msg } = message.payload;
-
-        if (type === "success") {
-          if (isSettled) return;
-          isSettled = true;
-          cleanup();
-          resolve(blobUrl);
-        } else if (type === "error") {
-          if (isSettled) return;
-          isSettled = true;
-          cleanup();
-          reject(new Error(error || "FFmpeg processing failed"));
-        } else if (type === "progress") {
-          // Forward merging progress updates
-          getDownload(stateId).then((state) => {
-            if (!state) return;
-            state.progress.percentage = (progress || 0) * 100;
-            state.progress.message = msg || "Merging...";
-            state.progress.stage = DownloadStage.MERGING;
-            storeDownload(state).then(() => this.notifyProgress(state));
-          });
-        }
-      };
-
-      chrome.runtime.onMessage.addListener(messageListener);
-
-      chrome.runtime.sendMessage(
-        {
-          type: MessageType.OFFSCREEN_PROCESS_M3U8,
-          payload: {
-            downloadId: this.downloadId,
-            fragmentCount: this.segmentIndex,
-            filename: fileName,
-          },
-        },
-        () => {
-          if (chrome.runtime.lastError) {
-            if (isSettled) return;
-            isSettled = true;
-            cleanup();
-            reject(
-              new Error(
-                `Failed to send processing request: ${chrome.runtime.lastError.message}`,
-              ),
-            );
-          }
-        },
-      );
-
-      timeoutId = setTimeout(() => {
-        if (isSettled) return;
-        isSettled = true;
-        cleanup();
-        reject(new Error("FFmpeg processing timeout"));
-      }, this.ffmpegTimeout);
-    });
-  }
-
-  /**
-   * Save a blob URL via chrome.downloads and wait for completion.
-   */
-  private async saveBlobUrl(
-    blobUrl: string,
-    filename: string,
-    stateId: string,
-  ): Promise<string> {
-    try {
-      return await new Promise<string>((resolve, reject) => {
-        chrome.downloads.download(
-          { url: blobUrl, filename, saveAs: false },
-          async (downloadId) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-
-            const currentState = await getDownload(stateId);
-            if (currentState) {
-              currentState.chromeDownloadId = downloadId!;
-              await storeDownload(currentState);
-            }
-
-            const checkComplete = () => {
-              chrome.downloads.search({ id: downloadId }, (results) => {
-                if (chrome.runtime.lastError) {
-                  reject(new Error(chrome.runtime.lastError.message));
-                  return;
-                }
-                const item = results?.[0];
-                if (!item) {
-                  reject(new Error("Download item not found"));
-                  return;
-                }
-                if (item.state === "complete") {
-                  chrome.runtime.sendMessage(
-                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
-                    () => { if (chrome.runtime.lastError) {} },
-                  );
-                  resolve(item.filename);
-                } else if (item.state === "interrupted") {
-                  chrome.runtime.sendMessage(
-                    { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
-                    () => { if (chrome.runtime.lastError) {} },
-                  );
-                  reject(new Error(item.error || "Download interrupted"));
-                } else {
-                  setTimeout(checkComplete, 100);
-                }
-              });
-            };
-
-            checkComplete();
-          },
-        );
-      });
-    } catch (error) {
-      chrome.runtime.sendMessage(
-        { type: MessageType.REVOKE_BLOB_URL, payload: { blobUrl } },
-        () => { if (chrome.runtime.lastError) {} },
-      );
-      throw error;
-    }
-  }
-
-  private notifyProgress(state: DownloadState): void {
-    if (this.onProgress) {
-      this.onProgress(state);
-    }
-  }
-
   private sleep(ms: number, abortSignal: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
       if (abortSignal.aborted) {
@@ -481,10 +302,14 @@ export class HlsRecordingHandler {
         return;
       }
       const id = setTimeout(resolve, ms);
-      abortSignal.addEventListener("abort", () => {
-        clearTimeout(id);
-        resolve();
-      }, { once: true });
+      abortSignal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(id);
+          resolve();
+        },
+        { once: true },
+      );
     });
   }
 }

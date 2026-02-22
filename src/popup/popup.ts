@@ -25,6 +25,7 @@ import {
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "../core/utils/download-utils";
 import { hasDrm, canDecrypt } from "../core/utils/drm-utils";
+import { formatFileSize } from "../core/utils/format-utils";
 
 // DOM elements
 let noVideoBtn: HTMLButtonElement | null = null;
@@ -1844,18 +1845,6 @@ function formatDuration(seconds: number): string {
 /**
  * Format file size in bytes to readable format
  */
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes.toFixed(0)} B`;
-  } else if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  } else if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  } else {
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  }
-}
-
 /**
  * Format download speed in bytes per second to readable format
  */
