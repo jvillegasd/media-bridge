@@ -45,6 +45,7 @@ import {
 } from "../types";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { sanitizeFilename } from "../../utils/file-utils";
+import { addHeaderRules, removeHeaderRules } from "../../utils/header-rules";
 
 /** Configuration options for HLS download handler */
 export interface HlsDownloadHandlerOptions {
@@ -682,9 +683,20 @@ export class HlsDownloadHandler {
       audioPlaylistUrl?: string | null;
     },
     abortSignal?: AbortSignal,
+    pageUrl?: string,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     // Reset all download-specific state to prevent pollution from previous downloads
     this.resetDownloadState(stateId, abortSignal);
+
+    // Install DNR header rules so Origin/Referer reach the CDN
+    let headerRuleIds: number[] = [];
+    if (pageUrl) {
+      try {
+        headerRuleIds = await addHeaderRules(stateId, masterPlaylistUrl, pageUrl);
+      } catch (err) {
+        logger.warn("Failed to add DNR header rules:", err);
+      }
+    }
 
     try {
       logger.info(`Starting HLS download from ${masterPlaylistUrl}`);
@@ -703,7 +715,7 @@ export class HlsDownloadHandler {
             fetchText(masterPlaylistUrl, 3, this.abortSignal),
             this.abortSignal,
           )
-        : await fetchText(masterPlaylistUrl, 3);
+        : await fetchText(masterPlaylistUrl);
 
       // Validate master playlist can be downloaded
       canDownloadHLSManifest(masterPlaylistText);
@@ -725,7 +737,7 @@ export class HlsDownloadHandler {
                 fetchText(videoPlaylistUrl, 3, this.abortSignal),
                 this.abortSignal,
               )
-            : await fetchText(videoPlaylistUrl, 3);
+            : await fetchText(videoPlaylistUrl);
           canDownloadHLSManifest(videoPlaylistText);
         }
 
@@ -736,7 +748,7 @@ export class HlsDownloadHandler {
                 fetchText(audioPlaylistUrl, 3, this.abortSignal),
                 this.abortSignal,
               )
-            : await fetchText(audioPlaylistUrl, 3);
+            : await fetchText(audioPlaylistUrl);
           canDownloadHLSManifest(audioPlaylistText);
         }
       } else {
@@ -776,7 +788,7 @@ export class HlsDownloadHandler {
                 fetchText(videoPlaylistUrl, 3, this.abortSignal),
                 this.abortSignal,
               )
-            : await fetchText(videoPlaylistUrl, 3);
+            : await fetchText(videoPlaylistUrl);
           // Validate video playlist can be downloaded
           canDownloadHLSManifest(videoPlaylistText);
         }
@@ -818,7 +830,7 @@ export class HlsDownloadHandler {
                 fetchText(audioPlaylistUrl, 3, this.abortSignal),
                 this.abortSignal,
               )
-            : await fetchText(audioPlaylistUrl, 3);
+            : await fetchText(audioPlaylistUrl);
           // Validate audio playlist can be downloaded
           canDownloadHLSManifest(audioPlaylistText);
         }
@@ -1040,6 +1052,13 @@ export class HlsDownloadHandler {
       // Re-throw the original error (preserve CancellationError, DownloadError, etc.)
       throw error;
     } finally {
+      // Clean up DNR header rules
+      try {
+        await removeHeaderRules(headerRuleIds);
+      } catch (cleanupError) {
+        logger.error("Failed to remove DNR header rules:", cleanupError);
+      }
+
       // Always clean up IndexedDB chunks regardless of success/failure/cancellation
       try {
         await deleteChunks(this.downloadId || stateId);

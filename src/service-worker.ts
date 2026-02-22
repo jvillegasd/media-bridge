@@ -914,7 +914,7 @@ async function handleStartRecordingMessage(payload: {
     }
 
     const recordingPromise = handler
-      .record(url, finalFilename, stateId, abortController.signal)
+      .record(url, finalFilename, stateId, abortController.signal, metadata.pageUrl)
       .then(async () => {
         await cleanupDownloadResources(normalizedUrl);
         sendDownloadComplete(stateId);

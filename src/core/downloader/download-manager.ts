@@ -153,6 +153,7 @@ export class DownloadManager {
           state.id,
           manifestQuality,
           abortSignal,
+          metadata.pageUrl,
         );
       } else if (format === "m3u8") {
         // Use M3U8 download handler
@@ -161,6 +162,7 @@ export class DownloadManager {
           filename,
           state.id,
           abortSignal,
+          metadata.pageUrl,
         );
       } else {
         throw new Error(`Unsupported format: ${format}`);

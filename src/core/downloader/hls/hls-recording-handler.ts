@@ -26,6 +26,7 @@ import { logger } from "../../utils/logger";
 import { CancellationError } from "../../utils/errors";
 import { MessageType } from "../../../shared/messages";
 import { DownloadProgressCallback } from "../types";
+import { addHeaderRules, removeHeaderRules } from "../../utils/header-rules";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -59,10 +60,21 @@ export class HlsRecordingHandler {
     filename: string,
     stateId: string,
     abortSignal: AbortSignal,
+    pageUrl?: string,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     this.downloadId = stateId;
     this.bytesDownloaded = 0;
     this.segmentIndex = 0;
+
+    // Install DNR header rules so Origin/Referer reach the CDN
+    let headerRuleIds: number[] = [];
+    if (pageUrl) {
+      try {
+        headerRuleIds = await addHeaderRules(stateId, manifestUrl, pageUrl);
+      } catch (err) {
+        logger.warn("Failed to add DNR header rules:", err);
+      }
+    }
 
     try {
       // Resolve media playlist URL (handles master → variant selection)
@@ -113,6 +125,13 @@ export class HlsRecordingHandler {
       logger.error("HLS recording failed:", error);
       throw error;
     } finally {
+      // Clean up DNR header rules
+      try {
+        await removeHeaderRules(headerRuleIds);
+      } catch (cleanupError) {
+        logger.error("Failed to remove DNR header rules:", cleanupError);
+      }
+
       try {
         await deleteChunks(this.downloadId || stateId);
       } catch (cleanupError) {

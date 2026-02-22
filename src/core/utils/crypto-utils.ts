@@ -58,6 +58,7 @@ export async function decryptFragment(
   data: ArrayBuffer,
   fetchAttempts: number = 3,
   abortSignal?: AbortSignal,
+  headers?: Record<string, string>,
 ): Promise<ArrayBuffer> {
   // If no key URI or IV, fragment is not encrypted
   if (!key.uri || !key.iv) {
@@ -66,7 +67,7 @@ export async function decryptFragment(
 
   try {
     // Fetch the encryption key
-    const keyArrayBuffer = await fetchArrayBuffer(key.uri, fetchAttempts, abortSignal);
+    const keyArrayBuffer = await fetchArrayBuffer(key.uri, fetchAttempts, abortSignal, headers);
 
     // Convert IV from hex string to Uint8Array
     // IV should be 16 bytes for AES-128

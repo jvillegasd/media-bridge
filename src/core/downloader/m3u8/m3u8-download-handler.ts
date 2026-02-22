@@ -42,6 +42,7 @@ import {
 } from "../types";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { sanitizeFilename } from "../../utils/file-utils";
+import { addHeaderRules, removeHeaderRules } from "../../utils/header-rules";
 
 /** Configuration options for M3U8 download handler */
 export interface M3u8DownloadHandlerOptions {
@@ -605,10 +606,21 @@ export class M3u8DownloadHandler {
     filename: string,
     stateId: string,
     abortSignal?: AbortSignal,
+    pageUrl?: string,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     // Reset all download-specific state to prevent pollution from previous downloads
     this.resetDownloadState(stateId, abortSignal);
-    
+
+    // Install DNR header rules so Origin/Referer reach the CDN
+    let headerRuleIds: number[] = [];
+    if (pageUrl) {
+      try {
+        headerRuleIds = await addHeaderRules(stateId, mediaPlaylistUrl, pageUrl);
+      } catch (err) {
+        logger.warn("Failed to add DNR header rules:", err);
+      }
+    }
+
     try {
       logger.info(
         `Starting M3U8 media playlist download from ${mediaPlaylistUrl}`,
@@ -623,7 +635,7 @@ export class M3u8DownloadHandler {
             fetchText(mediaPlaylistUrl, 3, this.abortSignal),
             this.abortSignal
           )
-        : await fetchText(mediaPlaylistUrl, 3);
+        : await fetchText(mediaPlaylistUrl);
 
       // Validate media playlist can be downloaded
       canDownloadHLSManifest(mediaPlaylistText);
@@ -819,6 +831,13 @@ export class M3u8DownloadHandler {
       // Re-throw the original error (preserve CancellationError, DownloadError, etc.)
       throw error;
     } finally {
+      // Clean up DNR header rules
+      try {
+        await removeHeaderRules(headerRuleIds);
+      } catch (cleanupError) {
+        logger.error("Failed to remove DNR header rules:", cleanupError);
+      }
+
       // Always clean up IndexedDB chunks regardless of success/failure/cancellation
       try {
         await deleteChunks(this.downloadId || stateId);

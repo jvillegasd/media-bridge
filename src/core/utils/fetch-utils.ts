@@ -140,9 +140,10 @@ export async function fetchText(
   attempts: number = 1,
   signal?: AbortSignal,
   noCache?: boolean,
+  headers?: Record<string, string>,
 ) {
   const fetchFn: FetchFn<string> = () =>
-    fetchResource(url, { signal, cache: noCache ? "no-store" : undefined }).then((res) => res.text());
+    fetchResource(url, { signal, headers, cache: noCache ? "no-store" : undefined }).then((res) => res.text());
   return fetchWithRetry(fetchFn, attempts);
 }
 
@@ -150,9 +151,10 @@ export async function fetchArrayBuffer(
   url: string,
   attempts: number = 1,
   signal?: AbortSignal,
+  headers?: Record<string, string>,
 ) {
   const fetchFn: FetchFn<ArrayBuffer> = () =>
-    fetchResource(url, { signal }).then((res) => res.arrayBuffer());
+    fetchResource(url, { signal, headers }).then((res) => res.arrayBuffer());
   return fetchWithRetry(fetchFn, attempts);
 }
 
