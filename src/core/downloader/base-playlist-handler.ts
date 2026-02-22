@@ -11,11 +11,15 @@ import { getDownload, storeDownload } from "../database/downloads";
 import { DownloadState, Fragment, DownloadStage } from "../types";
 import { logger } from "../utils/logger";
 import { decryptFragment } from "../utils/crypto-utils";
-import { fetchArrayBuffer } from "../utils/fetch-utils";
-import { storeChunk, deleteChunks } from "../database/chunks";
+import { fetchArrayBuffer, fetchText } from "../utils/fetch-utils";
+import { storeChunk, deleteChunks, getChunkCount } from "../database/chunks";
 import { sanitizeFilename } from "../utils/file-utils";
 import { formatFileSize } from "../utils/format-utils";
 import { DownloadProgressCallback } from "./types";
+import { MessageType } from "../../shared/messages";
+import { processWithFFmpeg } from "../utils/ffmpeg-bridge";
+import { saveBlobUrlToFile } from "../utils/blob-utils";
+import { addHeaderRules, removeHeaderRules } from "../utils/header-rules";
 
 export interface BasePlaylistHandlerOptions {
   onProgress?: DownloadProgressCallback;
@@ -161,6 +165,41 @@ export abstract class BasePlaylistHandler {
     } catch (cleanupError) {
       logger.error("Failed to clean up chunks:", cleanupError);
     }
+  }
+
+  protected async tryAddHeaderRules(
+    stateId: string,
+    url: string,
+    pageUrl?: string,
+  ): Promise<number[]> {
+    if (!pageUrl) return [];
+    try {
+      return await addHeaderRules(stateId, url, pageUrl);
+    } catch (err) {
+      logger.warn("Failed to add DNR header rules:", err);
+      return [];
+    }
+  }
+
+  protected async tryRemoveHeaderRules(ruleIds: number[]): Promise<void> {
+    try {
+      await removeHeaderRules(ruleIds);
+    } catch (cleanupError) {
+      logger.error("Failed to remove DNR header rules:", cleanupError);
+    }
+  }
+
+  protected async fetchTextCancellable(
+    url: string,
+    retries: number = 3,
+  ): Promise<string> {
+    if (!this.abortSignal) {
+      throw new Error("AbortSignal is required for cancellable fetch");
+    }
+    return cancelIfAborted(
+      fetchText(url, retries, this.abortSignal),
+      this.abortSignal,
+    );
   }
 
   protected async downloadFragment(
@@ -365,6 +404,96 @@ export abstract class BasePlaylistHandler {
     if (downloadedFragments < totalFragments) {
       logger.warn(
         `Downloaded ${downloadedFragments}/${totalFragments} fragments. Some fragments failed.`,
+      );
+    }
+  }
+
+  protected async savePartialDownload(
+    stateId: string,
+    filename: string,
+    ffmpegOptions: {
+      requestType: MessageType;
+      responseType: MessageType;
+      payload: Record<string, unknown>;
+    },
+  ): Promise<{ filePath: string; fileExtension: string }> {
+    const chunkCount = await getChunkCount(this.downloadId);
+    if (chunkCount === 0) {
+      throw new CancellationError();
+    }
+
+    await this.updateStage(
+      stateId,
+      DownloadStage.MERGING,
+      "Merging partial download...",
+    );
+
+    this.abortSignal = undefined;
+
+    const baseFileName = this.sanitizeBaseFilename(filename);
+
+    const blobUrl = await processWithFFmpeg({
+      requestType: ffmpegOptions.requestType,
+      responseType: ffmpegOptions.responseType,
+      downloadId: this.downloadId,
+      payload: ffmpegOptions.payload,
+      filename: baseFileName,
+      timeout: this.ffmpegTimeout,
+      abortSignal: this.abortSignal,
+      onProgress: async (progress, message) => {
+        const state = await getDownload(stateId);
+        if (state) {
+          state.progress.percentage = progress * 100;
+          state.progress.message = message;
+          state.progress.stage = DownloadStage.MERGING;
+          await storeDownload(state);
+          this.notifyProgress(state);
+        }
+      },
+    });
+
+    await this.updateStage(
+      stateId,
+      DownloadStage.SAVING,
+      "Saving partial file...",
+      95,
+    );
+
+    const filePath = await saveBlobUrlToFile(
+      blobUrl,
+      `${baseFileName}.mp4`,
+      stateId,
+    );
+
+    await this.markCompleted(stateId, filePath, "Download completed (partial)");
+
+    return { filePath, fileExtension: "mp4" };
+  }
+
+  protected async markCompleted(
+    stateId: string,
+    filePath: string,
+    message: string = "Download completed",
+    options?: { verify?: boolean },
+  ): Promise<void> {
+    const state = await getDownload(stateId);
+    if (state) {
+      state.localPath = filePath;
+      state.progress.stage = DownloadStage.COMPLETED;
+      state.progress.message = message;
+      state.progress.percentage = 100;
+      state.progress.downloaded =
+        state.progress.total || this.bytesDownloaded || 0;
+      state.updatedAt = Date.now();
+      await storeDownload(state);
+      this.notifyProgress(state);
+
+      if (options?.verify) {
+        await this.verifyCompletedState(stateId);
+      }
+    } else {
+      logger.error(
+        `Could not find download state ${stateId} to mark as completed`,
       );
     }
   }

@@ -9,11 +9,10 @@
  */
 
 import { CancellationError } from "../../utils/errors";
-import { cancelIfAborted, throwIfAborted } from "../../utils/cancellation";
+import { throwIfAborted } from "../../utils/cancellation";
 import { getDownload, storeDownload } from "../../database/downloads";
 import { Level, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
-import { fetchText } from "../../utils/fetch-utils";
 import {
   parseMasterPlaylist,
   parseLevelsPlaylist,
@@ -23,7 +22,6 @@ import { MessageType } from "../../../shared/messages";
 import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { sanitizeFilename } from "../../utils/file-utils";
-import { addHeaderRules, removeHeaderRules } from "../../utils/header-rules";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import {
   BasePlaylistHandler,
@@ -97,14 +95,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
   ): Promise<{ filePath: string; fileExtension?: string }> {
     this.resetDownloadState(stateId, abortSignal);
 
-    let headerRuleIds: number[] = [];
-    if (pageUrl) {
-      try {
-        headerRuleIds = await addHeaderRules(stateId, masterPlaylistUrl, pageUrl);
-      } catch (err) {
-        logger.warn("Failed to add DNR header rules:", err);
-      }
-    }
+    const headerRuleIds = await this.tryAddHeaderRules(stateId, masterPlaylistUrl, pageUrl);
 
     try {
       logger.info(`Starting HLS download from ${masterPlaylistUrl}`);
@@ -116,12 +107,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
       let videoPlaylistText: string | null = null;
       let audioPlaylistText: string | null = null;
 
-      const masterPlaylistText = this.abortSignal
-        ? await cancelIfAborted(
-            fetchText(masterPlaylistUrl, 3, this.abortSignal),
-            this.abortSignal,
-          )
-        : await fetchText(masterPlaylistUrl);
+      const masterPlaylistText = await this.fetchTextCancellable(masterPlaylistUrl);
 
       canDownloadHLSManifest(masterPlaylistText);
 
@@ -135,22 +121,12 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         );
 
         if (videoPlaylistUrl) {
-          videoPlaylistText = this.abortSignal
-            ? await cancelIfAborted(
-                fetchText(videoPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal,
-              )
-            : await fetchText(videoPlaylistUrl);
+          videoPlaylistText = await this.fetchTextCancellable(videoPlaylistUrl);
           canDownloadHLSManifest(videoPlaylistText);
         }
 
         if (audioPlaylistUrl) {
-          audioPlaylistText = this.abortSignal
-            ? await cancelIfAborted(
-                fetchText(audioPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal,
-              )
-            : await fetchText(audioPlaylistUrl);
+          audioPlaylistText = await this.fetchTextCancellable(audioPlaylistUrl);
           canDownloadHLSManifest(audioPlaylistText);
         }
       } else {
@@ -182,12 +158,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
       // Process video playlist
       if (videoPlaylistUrl) {
         if (!videoPlaylistText) {
-          videoPlaylistText = this.abortSignal
-            ? await cancelIfAborted(
-                fetchText(videoPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal,
-              )
-            : await fetchText(videoPlaylistUrl);
+          videoPlaylistText = await this.fetchTextCancellable(videoPlaylistUrl);
           canDownloadHLSManifest(videoPlaylistText);
         }
 
@@ -221,12 +192,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
       // Process audio playlist
       if (audioPlaylistUrl) {
         if (!audioPlaylistText) {
-          audioPlaylistText = this.abortSignal
-            ? await cancelIfAborted(
-                fetchText(audioPlaylistUrl, 3, this.abortSignal),
-                this.abortSignal,
-              )
-            : await fetchText(audioPlaylistUrl);
+          audioPlaylistText = await this.fetchTextCancellable(audioPlaylistUrl);
           canDownloadHLSManifest(audioPlaylistText);
         }
 
@@ -292,24 +258,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         stateId,
       );
 
-      const finalState = await getDownload(stateId);
-      if (finalState) {
-        finalState.localPath = filePath;
-        finalState.progress.stage = DownloadStage.COMPLETED;
-        finalState.progress.message = "Download completed";
-        finalState.progress.percentage = 100;
-        finalState.progress.downloaded =
-          finalState.progress.total || this.bytesDownloaded || 0;
-        finalState.updatedAt = Date.now();
-        await storeDownload(finalState);
-        this.notifyProgress(finalState);
-
-        await this.verifyCompletedState(stateId);
-      } else {
-        logger.error(
-          `Could not find download state ${stateId} to mark as completed`,
-        );
-      }
+      await this.markCompleted(stateId, filePath, "Download completed", { verify: true });
 
       logger.info(`HLS download completed: ${filePath}`);
 
@@ -321,87 +270,30 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
       if (error instanceof CancellationError && this.shouldSaveOnCancel?.()) {
         try {
           const chunkCount = await getChunkCount(this.downloadId);
-          if (chunkCount > 0) {
-            await this.updateStage(
-              stateId,
-              DownloadStage.MERGING,
-              "Merging partial download...",
-            );
+          const effectiveVideoLength = Math.min(chunkCount, this.videoLength);
+          const effectiveAudioLength = Math.max(0, chunkCount - this.videoLength);
+          this.videoLength = effectiveVideoLength;
+          this.audioLength = effectiveAudioLength;
 
-            const effectiveVideoLength = Math.min(chunkCount, this.videoLength);
-            const effectiveAudioLength = Math.max(
-              0,
-              chunkCount - this.videoLength,
-            );
-            this.videoLength = effectiveVideoLength;
-            this.audioLength = effectiveAudioLength;
-
-            this.abortSignal = undefined;
-
-            const baseFileName = this.sanitizeBaseFilename(filename);
-
-            const blobUrl = await processWithFFmpeg({
-              requestType: MessageType.OFFSCREEN_PROCESS_HLS,
-              responseType: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-              downloadId: this.downloadId,
-              payload: { videoLength: this.videoLength, audioLength: this.audioLength },
-              filename: baseFileName,
-              timeout: this.ffmpegTimeout,
-              abortSignal: this.abortSignal,
-              onProgress: async (progress, message) => {
-                const state = await getDownload(stateId);
-                if (state) {
-                  state.progress.percentage = progress * 100;
-                  state.progress.message = message;
-                  state.progress.stage = DownloadStage.MERGING;
-                  await storeDownload(state);
-                  this.notifyProgress(state);
-                }
-              },
-            });
-
-            await this.updateStage(
-              stateId,
-              DownloadStage.SAVING,
-              "Saving partial file...",
-              95,
-            );
-
-            const filePath = await saveBlobUrlToFile(
-              blobUrl,
-              `${baseFileName}.mp4`,
-              stateId,
-            );
-
-            const finalState = await getDownload(stateId);
-            if (finalState) {
-              finalState.localPath = filePath;
-              finalState.progress.stage = DownloadStage.COMPLETED;
-              finalState.progress.message = "Download completed (partial)";
-              finalState.progress.percentage = 100;
-              finalState.progress.downloaded =
-                finalState.progress.total || this.bytesDownloaded || 0;
-              finalState.updatedAt = Date.now();
-              await storeDownload(finalState);
-              this.notifyProgress(finalState);
-            }
-
-            logger.info(`HLS partial download saved: ${filePath}`);
-            return { filePath, fileExtension: "mp4" };
-          }
+          const result = await this.savePartialDownload(stateId, filename, {
+            requestType: MessageType.OFFSCREEN_PROCESS_HLS,
+            responseType: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+            payload: { videoLength: this.videoLength, audioLength: this.audioLength },
+          });
+          logger.info(`HLS partial download saved: ${result.filePath}`);
+          return result;
         } catch (saveError) {
-          logger.error("Failed to save partial HLS download:", saveError);
+          if (saveError instanceof CancellationError) {
+            // No chunks to save — fall through to throw original error
+          } else {
+            logger.error("Failed to save partial HLS download:", saveError);
+          }
         }
       }
       logger.error("HLS download failed:", error);
       throw error;
     } finally {
-      try {
-        await removeHeaderRules(headerRuleIds);
-      } catch (cleanupError) {
-        logger.error("Failed to remove DNR header rules:", cleanupError);
-      }
-
+      await this.tryRemoveHeaderRules(headerRuleIds);
       await this.cleanupChunks(this.downloadId || stateId);
     }
   }

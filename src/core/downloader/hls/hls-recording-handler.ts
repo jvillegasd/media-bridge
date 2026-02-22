@@ -16,9 +16,7 @@
 
 import { DownloadStage, Fragment } from "../../types";
 import { getDownload, storeDownload } from "../../database/downloads";
-import { storeChunk } from "../../database/chunks";
-import { fetchText, fetchArrayBuffer } from "../../utils/fetch-utils";
-import { decryptFragment } from "../../utils/crypto-utils";
+import { fetchText } from "../../utils/fetch-utils";
 import {
   parseMasterPlaylist,
   parseLevelsPlaylist,
@@ -26,7 +24,6 @@ import {
 import { logger } from "../../utils/logger";
 import { CancellationError } from "../../utils/errors";
 import { MessageType } from "../../../shared/messages";
-import { addHeaderRules, removeHeaderRules } from "../../utils/header-rules";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
 import {
@@ -60,15 +57,9 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
     this.downloadId = stateId;
     this.bytesDownloaded = 0;
     this.segmentIndex = 0;
+    this.abortSignal = abortSignal;
 
-    let headerRuleIds: number[] = [];
-    if (pageUrl) {
-      try {
-        headerRuleIds = await addHeaderRules(stateId, manifestUrl, pageUrl);
-      } catch (err) {
-        logger.warn("Failed to add DNR header rules:", err);
-      }
-    }
+    const headerRuleIds = await this.tryAddHeaderRules(stateId, manifestUrl, pageUrl);
 
     try {
       const mediaPlaylistUrl = await this.resolveMediaPlaylistUrl(
@@ -118,16 +109,7 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
       const finalFilename = `${baseFileName}.mp4`;
       const filePath = await saveBlobUrlToFile(blobUrl, finalFilename, stateId);
 
-      const finalState = await getDownload(stateId);
-      if (finalState) {
-        finalState.localPath = filePath;
-        finalState.progress.stage = DownloadStage.COMPLETED;
-        finalState.progress.message = "Recording saved";
-        finalState.progress.percentage = 100;
-        finalState.updatedAt = Date.now();
-        await storeDownload(finalState);
-        this.notifyProgress(finalState);
-      }
+      await this.markCompleted(stateId, filePath, "Recording saved");
 
       logger.info(`HLS recording completed: ${filePath}`);
       return { filePath, fileExtension: "mp4" };
@@ -135,12 +117,7 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
       logger.error("HLS recording failed:", error);
       throw error;
     } finally {
-      try {
-        await removeHeaderRules(headerRuleIds);
-      } catch (cleanupError) {
-        logger.error("Failed to remove DNR header rules:", cleanupError);
-      }
-
+      await this.tryRemoveHeaderRules(headerRuleIds);
       await this.cleanupChunks(this.downloadId || stateId);
     }
   }
@@ -258,15 +235,8 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
         if (abortSignal.aborted) return;
         const fragment = fragments[idx++]!;
         try {
-          const data = await fetchArrayBuffer(fragment.uri, 3, abortSignal);
-          const decrypted = await decryptFragment(
-            fragment.key,
-            data,
-            3,
-            abortSignal,
-          );
-          await storeChunk(this.downloadId, fragment.index, decrypted);
-          this.bytesDownloaded += decrypted.byteLength;
+          const size = await this.downloadFragment(fragment, this.downloadId);
+          this.bytesDownloaded += size;
         } catch (err) {
           if (err instanceof CancellationError || abortSignal.aborted) return;
           const e = err instanceof Error ? err : new Error(String(err));

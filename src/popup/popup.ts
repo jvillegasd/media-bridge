@@ -1162,6 +1162,20 @@ function renderDownloads() {
       });
     });
   });
+
+  // Add click handlers for Stop & Save buttons
+  downloadsList.querySelectorAll('[data-action="stop-save"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const url = (btn as HTMLElement).dataset.url;
+      if (url) {
+        chrome.runtime.sendMessage({
+          type: MessageType.STOP_AND_SAVE_DOWNLOAD,
+          payload: { url },
+        });
+      }
+    });
+  });
 }
 
 /**
@@ -1331,11 +1345,15 @@ function renderDownloadItem(download: DownloadState): string {
         </div>
       `;
     } else {
+      const isDownloading = download.progress.stage === DownloadStage.DOWNLOADING;
+      const isManifestType = download.metadata.format === "hls" || download.metadata.format === "m3u8";
       actionButtons = `
         <div style="display: flex; gap: 6px; margin-top: 6px;">
-          <button class="video-btn download-remove-btn" data-download-id="${download.id}">
+          ${isDownloading && isManifestType ? `<button class="btn-stop-save" data-action="stop-save" data-url="${escapeHtml(download.metadata.url)}" title="Stop & Save">
+            Stop &amp; Save
+          </button>` : `<button class="video-btn download-remove-btn" data-download-id="${download.id}">
             Cancel
-          </button>
+          </button>`}
         </div>
       `;
     }
@@ -2170,6 +2188,10 @@ async function handleLoadManifestPlaylist() {
       }
       if (manifestLiveStreamInfo) {
         manifestLiveStreamInfo.style.display = isLiveManifest ? "block" : "none";
+        const infoText = document.getElementById("hlsLiveStreamInfoText");
+        if (infoText) {
+          infoText.textContent = "This is a live stream. Click Record to start capturing the stream.";
+        }
       }
       if (manifestQualitySelection) {
         manifestQualitySelection.style.display = "none";
@@ -2203,6 +2225,10 @@ async function handleLoadManifestPlaylist() {
 
         if (manifestLiveStreamInfo) {
           manifestLiveStreamInfo.style.display = isLiveManifest ? "block" : "none";
+          const infoText = document.getElementById("hlsLiveStreamInfoText");
+          if (infoText) {
+            infoText.textContent = "This is a live stream. Select a quality and click Record to start capturing the stream.";
+          }
         }
 
         // Populate video quality select (we've already checked it's not null)
