@@ -14,6 +14,7 @@ import {
   getDownload,
   deleteDownload,
   clearAllDownloads,
+  storeDownload,
 } from "../core/database/downloads";
 import { MessageType } from "../shared/messages";
 import { normalizeUrl, detectFormatFromUrl } from "../core/utils/url-utils";
@@ -869,8 +870,8 @@ function renderDetectedVideos() {
         ${
           video.thumbnail
             ? `
-          <img src="${escapeHtml(video.thumbnail)}" 
-               alt="Video preview" 
+          <img src="${escapeHtml(video.thumbnail)}"
+               alt="Video preview"
                loading="lazy">
         `
             : `
@@ -957,7 +958,13 @@ function renderDetectedVideos() {
 
   // Handle thumbnail load errors (inline onerror is blocked by CSP)
   detectedVideosList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
+    img.addEventListener("load", () => {
+      img.style.opacity = "1";
+    });
     img.addEventListener("error", () => {
+      // Remove thumbnail from source data so re-renders don't retry it
+      const video = Object.values(detectedVideos).find((v) => v.thumbnail === img.src);
+      if (video) video.thumbnail = undefined;
       img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
     });
   });
@@ -1118,7 +1125,16 @@ function renderDownloads() {
 
   // Handle thumbnail load errors (inline onerror is blocked by CSP)
   downloadsList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
+    img.addEventListener("load", () => {
+      img.style.opacity = "1";
+    });
     img.addEventListener("error", () => {
+      // Remove thumbnail from source data and persist so re-renders don't retry it
+      const dl = downloadStates.find((d) => d.metadata.thumbnail === img.src);
+      if (dl) {
+        dl.metadata.thumbnail = undefined;
+        storeDownload(dl);
+      }
       img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
     });
   });
@@ -1365,8 +1381,8 @@ function renderDownloadItem(download: DownloadState): string {
         ${
           download.metadata.thumbnail
             ? `
-          <img src="${escapeHtml(download.metadata.thumbnail)}" 
-               alt="Video preview" 
+          <img src="${escapeHtml(download.metadata.thumbnail)}"
+               alt="Video preview"
                loading="lazy">
         `
             : `
