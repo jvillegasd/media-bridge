@@ -34,6 +34,14 @@ function downloadStructureKey(d: DownloadState): string {
  */
 function updateDownloadCardProgress(card: HTMLElement, download: DownloadState): boolean {
   const stage = download.progress.stage;
+  if (
+    stage === DownloadStage.COMPLETED ||
+    stage === DownloadStage.FAILED ||
+    stage === DownloadStage.CANCELLED
+  ) {
+    return true;
+  }
+
   const isRecording = stage === DownloadStage.RECORDING;
   const isManifestDownload =
     (download.metadata.format === "hls" || download.metadata.format === "m3u8") &&
@@ -405,13 +413,17 @@ export function renderDownloads(forceFullRebuild = false): void {
   const structureChanged = structureSnapshot !== lastDownloadSnapshotJson;
 
   if (!structureChanged && !forceFullRebuild) {
+    let needsRebuild = false;
     for (const download of downloadStates) {
       const card = renderedDownloadCards.get(download.id);
       if (card) {
-        updateDownloadCardProgress(card, download);
+        if (!updateDownloadCardProgress(card, download)) {
+          needsRebuild = true;
+          break;
+        }
       }
     }
-    return;
+    if (!needsRebuild) return;
   }
 
   lastDownloadSnapshotJson = structureSnapshot;

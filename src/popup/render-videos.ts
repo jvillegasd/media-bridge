@@ -242,173 +242,210 @@ export function renderDetectedVideos(forceFullRebuild = false): void {
 
   const scrollTop = detectedVideosList.scrollTop;
 
-  detectedVideosList.innerHTML = uniqueVideos
-    .map((video) => {
-      const normalizedUrl = normalizeUrl(video.url);
-      const downloadState = getDownloadStateForVideo(video);
-      const isDownloading =
-        downloadState &&
-        downloadState.progress.stage !== DownloadStage.COMPLETED &&
-        downloadState.progress.stage !== DownloadStage.FAILED &&
-        downloadState.progress.stage !== DownloadStage.CANCELLED;
-      const isCompleted =
-        downloadState && downloadState.progress.stage === DownloadStage.COMPLETED;
-      const isFailed =
-        downloadState &&
-        (downloadState.progress.stage === DownloadStage.FAILED ||
-          downloadState.progress.stage === DownloadStage.CANCELLED);
-      const isCancelled =
-        downloadState && downloadState.progress.stage === DownloadStage.CANCELLED;
-      const actualFormat = getActualFileFormat(video, downloadState);
+  detectedVideosList.innerHTML = "";
+  renderedVideoCards.clear();
 
-      const displayResolution = (video.resolution || "").trim();
-      const displayWidth = video.width;
-      const displayHeight = video.height;
-      const displayDimensions =
-        !displayResolution && displayWidth && displayHeight
-          ? `${displayWidth}x${displayHeight}`
-          : "";
+  const fragment = document.createDocumentFragment();
+  for (const video of uniqueVideos) {
+    const normalizedUrl = normalizeUrl(video.url);
+    const card = createVideoCardElement(video);
+    renderedVideoCards.set(normalizedUrl, card);
+    fragment.appendChild(card);
+  }
+  detectedVideosList.appendChild(fragment);
 
-      let statusBadge = "";
-      let progressBar = "";
-      let buttonText = "Download";
-      let buttonDisabled = false;
+  detectedVideosList.scrollTop = scrollTop;
+}
 
-      const hasDrm = video.hasDrm === true;
-      if (hasDrm) {
-        statusBadge = `<span class="video-status status-drm">DRM Protected</span>`;
-        buttonDisabled = true;
-      }
+/**
+ * Create a DOM element for a video card with event listeners attached.
+ */
+function createVideoCardElement(video: VideoMetadata): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = renderVideoItem(video);
+  const card = wrapper.firstElementChild as HTMLElement;
+  card.dataset.videoUrl = normalizeUrl(video.url);
 
-      const unsupported = video.unsupported === true;
-      if (unsupported && !hasDrm) {
-        statusBadge = `<span class="video-status status-unsupported">Unsupported</span>`;
-        buttonDisabled = true;
-      }
+  const img = card.querySelector<HTMLImageElement>(".video-item-preview img");
+  if (img) {
+    img.addEventListener("load", () => { img.style.opacity = "1"; });
+    img.addEventListener("error", () => {
+      const v = Object.values(detectedVideos).find((d) => d.thumbnail === img.src);
+      if (v) v.thumbnail = undefined;
+      img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
+    });
+  }
 
-      if (isDownloading) {
-        const stage = downloadState.progress.stage;
-        statusBadge = `<span class="video-status status-${stage}">${getStatusText(
-          stage,
-        )}</span>`;
+  return card;
+}
 
-        if (stage === DownloadStage.RECORDING) {
-          const segmentsCollected = downloadState.progress.segmentsCollected || 0;
-          const downloaded = downloadState.progress.downloaded || 0;
-          const downloadedText = formatFileSize(downloaded);
+/**
+ * Render a single video item to HTML string.
+ */
+function renderVideoItem(video: VideoMetadata): string {
+  const normalizedUrl = normalizeUrl(video.url);
+  const downloadState = getDownloadStateForVideo(video);
+  const isDownloading =
+    downloadState &&
+    downloadState.progress.stage !== DownloadStage.COMPLETED &&
+    downloadState.progress.stage !== DownloadStage.FAILED &&
+    downloadState.progress.stage !== DownloadStage.CANCELLED;
+  const isCompleted =
+    downloadState && downloadState.progress.stage === DownloadStage.COMPLETED;
+  const isFailed =
+    downloadState &&
+    (downloadState.progress.stage === DownloadStage.FAILED ||
+      downloadState.progress.stage === DownloadStage.CANCELLED);
+  const actualFormat = getActualFileFormat(video, downloadState);
 
-          progressBar = `
-            <div class="manifest-progress-container">
-              <div class="manifest-progress-bar-wrapper">
-                <div class="manifest-progress-bar recording"></div>
-              </div>
-              <div class="manifest-progress-info">
-                <span class="manifest-progress-size">${segmentsCollected} segments &bull; ${downloadedText}</span>
-                <span class="rec-badge"><span class="rec-dot"></span>REC</span>
-              </div>
-            </div>
-            <div style="display: flex; gap: 6px; margin-top: 6px;">
-              <button class="btn-stop-rec"
-                      data-url="${escapeHtml(video.url)}">
-                Stop
-              </button>
-            </div>
-          `;
-          buttonText = "";
-          buttonDisabled = true;
-        }
+  const displayResolution = (video.resolution || "").trim();
+  const displayWidth = video.width;
+  const displayHeight = video.height;
+  const displayDimensions =
+    !displayResolution && displayWidth && displayHeight
+      ? `${displayWidth}x${displayHeight}`
+      : "";
 
-        const isManifestDownload =
-          (video.format === "hls" || video.format === "m3u8") &&
-          (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
+  let statusBadge = "";
+  let progressBar = "";
+  let buttonText = "Download";
+  let buttonDisabled = false;
 
-        if (stage === DownloadStage.RECORDING) {
-          // already handled above
-        } else if (isManifestDownload) {
-          const percentage = downloadState.progress.percentage || 0;
+  const hasDrm = video.hasDrm === true;
+  if (hasDrm) {
+    statusBadge = `<span class="video-status status-drm">DRM Protected</span>`;
+    buttonDisabled = true;
+  }
 
-          if (stage === DownloadStage.DOWNLOADING) {
-            const downloaded = downloadState.progress.downloaded || 0;
-            const total = downloadState.progress.total || 0;
-            const speed = downloadState.progress.speed || 0;
+  const unsupported = video.unsupported === true;
+  if (unsupported && !hasDrm) {
+    statusBadge = `<span class="video-status status-unsupported">Unsupported</span>`;
+    buttonDisabled = true;
+  }
 
-            const downloadedText = formatFileSize(downloaded);
-            const totalText = total > 0 ? formatFileSize(total) : "?";
-            const speedText = formatSpeed(speed);
+  if (isDownloading) {
+    const stage = downloadState.progress.stage;
+    statusBadge = `<span class="video-status status-${stage}">${getStatusText(
+      stage,
+    )}</span>`;
 
-            progressBar = `
-            <div class="manifest-progress-container">
-              <div class="manifest-progress-bar-wrapper">
-                <div class="manifest-progress-bar" style="width: ${Math.min(
-                  percentage,
-                  100,
-                )}%"></div>
-              </div>
-              <div class="manifest-progress-info">
-                <span class="manifest-progress-size">${downloadedText} / ${totalText}</span>
-                ${
-                  speed > 0
-                    ? `<span class="manifest-progress-speed">${speedText}</span>`
-                    : ""
-                }
-              </div>
-            </div>
-            <div style="display: flex; gap: 6px; margin-top: 6px;">
-              <button class="btn-stop-save" data-url="${escapeHtml(video.url)}">
-                Stop &amp; Save
-              </button>
-            </div>
-          `;
-          } else if (stage === DownloadStage.MERGING) {
-            const message =
-              downloadState.progress.message || "Merging streams...";
-            const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
+    if (stage === DownloadStage.RECORDING) {
+      const segmentsCollected = downloadState.progress.segmentsCollected || 0;
+      const downloaded = downloadState.progress.downloaded || 0;
+      const downloadedText = formatFileSize(downloaded);
 
-            progressBar = `
-            <div class="manifest-progress-container">
-              <div class="manifest-progress-bar-wrapper">
-                <div class="manifest-progress-bar" style="width: ${mergingPercentage}%"></div>
-              </div>
-              <div class="manifest-progress-info">
-                <span class="manifest-progress-size">${message}</span>
-                <span class="manifest-progress-speed">${Math.round(
-                  mergingPercentage,
-                )}%</span>
-              </div>
-            </div>
-          `;
-          }
-        } else {
-          const fileSize = downloadState.progress.total;
-          const fileSizeText = fileSize ? formatFileSize(fileSize) : "";
+      progressBar = `
+        <div class="manifest-progress-container">
+          <div class="manifest-progress-bar-wrapper">
+            <div class="manifest-progress-bar recording"></div>
+          </div>
+          <div class="manifest-progress-info">
+            <span class="manifest-progress-size">${segmentsCollected} segments &bull; ${downloadedText}</span>
+            <span class="rec-badge"><span class="rec-dot"></span>REC</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          <button class="btn-stop-rec"
+                  data-url="${escapeHtml(video.url)}">
+            Stop
+          </button>
+        </div>
+      `;
+      buttonText = "";
+      buttonDisabled = true;
+    }
 
-          progressBar = `
-          <div class="downloading-label">
-            <span class="downloading-dots">
-              <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-            </span>
+    const isManifestDownload =
+      (video.format === "hls" || video.format === "m3u8") &&
+      (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
+
+    if (stage === DownloadStage.RECORDING) {
+      // already handled above
+    } else if (isManifestDownload) {
+      const percentage = downloadState.progress.percentage || 0;
+
+      if (stage === DownloadStage.DOWNLOADING) {
+        const downloaded = downloadState.progress.downloaded || 0;
+        const total = downloadState.progress.total || 0;
+        const speed = downloadState.progress.speed || 0;
+
+        const downloadedText = formatFileSize(downloaded);
+        const totalText = total > 0 ? formatFileSize(total) : "?";
+        const speedText = formatSpeed(speed);
+
+        progressBar = `
+        <div class="manifest-progress-container">
+          <div class="manifest-progress-bar-wrapper">
+            <div class="manifest-progress-bar" style="width: ${Math.min(
+              percentage,
+              100,
+            )}%"></div>
+          </div>
+          <div class="manifest-progress-info">
+            <span class="manifest-progress-size">${downloadedText} / ${totalText}</span>
             ${
-              fileSizeText
-                ? `<span class="file-size">${fileSizeText}</span>`
+              speed > 0
+                ? `<span class="manifest-progress-speed">${speedText}</span>`
                 : ""
             }
           </div>
-        `;
-        }
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          <button class="btn-stop-save" data-url="${escapeHtml(video.url)}">
+            Stop &amp; Save
+          </button>
+        </div>
+      `;
+      } else if (stage === DownloadStage.MERGING) {
+        const message =
+          downloadState.progress.message || "Merging streams...";
+        const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
 
-        buttonText = "";
-        buttonDisabled = true;
-      } else if (isCompleted) {
-        statusBadge = `<span class="video-status status-completed">Completed</span>`;
-        buttonText = "Redownload";
-        buttonDisabled = false;
-      } else if (isFailed) {
-        statusBadge = `<span class="video-status status-failed">Failed</span>`;
-        buttonText = "Retry";
+        progressBar = `
+        <div class="manifest-progress-container">
+          <div class="manifest-progress-bar-wrapper">
+            <div class="manifest-progress-bar" style="width: ${mergingPercentage}%"></div>
+          </div>
+          <div class="manifest-progress-info">
+            <span class="manifest-progress-size">${message}</span>
+            <span class="manifest-progress-speed">${Math.round(
+              mergingPercentage,
+            )}%</span>
+          </div>
+        </div>
+      `;
       }
+    } else {
+      const fileSize = downloadState.progress.total;
+      const fileSizeText = fileSize ? formatFileSize(fileSize) : "";
 
-      return `
-    <div class="video-item" data-video-url="${escapeHtml(normalizedUrl)}">
+      progressBar = `
+      <div class="downloading-label">
+        <span class="downloading-dots">
+          <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+        </span>
+        ${
+          fileSizeText
+            ? `<span class="file-size">${fileSizeText}</span>`
+            : ""
+        }
+      </div>
+    `;
+    }
+
+    buttonText = "";
+    buttonDisabled = true;
+  } else if (isCompleted) {
+    statusBadge = `<span class="video-status status-completed">Completed</span>`;
+    buttonText = "Redownload";
+    buttonDisabled = false;
+  } else if (isFailed) {
+    statusBadge = `<span class="video-status status-failed">Failed</span>`;
+    buttonText = "Retry";
+  }
+
+  return `
+    <div class="video-item">
       <div class="video-item-preview">
         ${
           video.thumbnail
@@ -496,28 +533,4 @@ export function renderDetectedVideos(forceFullRebuild = false): void {
       </div>
     </div>
   `;
-    })
-    .join("");
-
-  // Populate card tracking map
-  renderedVideoCards.clear();
-  detectedVideosList.querySelectorAll<HTMLElement>(".video-item[data-video-url]").forEach((card) => {
-    const url = card.dataset.videoUrl;
-    if (url) renderedVideoCards.set(url, card);
-  });
-
-  // Restore scroll position
-  detectedVideosList.scrollTop = scrollTop;
-
-  // Handle thumbnail load errors
-  detectedVideosList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
-    img.addEventListener("load", () => {
-      img.style.opacity = "1";
-    });
-    img.addEventListener("error", () => {
-      const video = Object.values(detectedVideos).find((v) => v.thumbnail === img.src);
-      if (video) video.thumbnail = undefined;
-      img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
-    });
-  });
 }
