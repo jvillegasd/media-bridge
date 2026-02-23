@@ -19,6 +19,7 @@ import { throwIfAborted } from "../../utils/cancellation";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { BasePlaylistHandler } from "../base-playlist-handler";
+import { SAVING_STAGE_PERCENTAGE } from "../../../shared/constants";
 
 /**
  * M3U8 download handler for media playlists
@@ -93,7 +94,7 @@ export class M3u8DownloadHandler extends BasePlaylistHandler {
         onProgress: this.createMergingProgressCallback(stateId),
       });
 
-      await this.updateStage(stateId, DownloadStage.SAVING, "Saving file...", 95);
+      await this.updateStage(stateId, DownloadStage.SAVING, "Saving file...", SAVING_STAGE_PERCENTAGE);
 
       const filePath = await saveBlobUrlToFile(
         blobUrl,

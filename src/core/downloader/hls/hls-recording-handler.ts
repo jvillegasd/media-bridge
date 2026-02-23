@@ -27,8 +27,25 @@ import { MessageType } from "../../../shared/messages";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
 import { BasePlaylistHandler } from "../base-playlist-handler";
+import { runConcurrentWorkers } from "../concurrent-workers";
+import { SAVING_STAGE_PERCENTAGE } from "../../../shared/constants";
 
-const POLL_INTERVAL_MS = 3000;
+const DEFAULT_POLL_INTERVAL_MS = 3000;
+const MIN_POLL_INTERVAL_MS = 1000;
+const MAX_POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_FRACTION = 0.5;
+
+/**
+ * Extract #EXT-X-TARGETDURATION from playlist text and compute a poll interval.
+ * Polls at half the target duration to avoid missing segments.
+ */
+function computePollInterval(playlistText: string): number {
+  const match = playlistText.match(/#EXT-X-TARGETDURATION:\s*(\d+(?:\.\d+)?)/);
+  if (!match) return DEFAULT_POLL_INTERVAL_MS;
+  const targetDuration = parseFloat(match[1]!) * 1000; // convert to ms
+  const interval = Math.round(targetDuration * POLL_INTERVAL_FRACTION);
+  return Math.max(MIN_POLL_INTERVAL_MS, Math.min(interval, MAX_POLL_INTERVAL_MS));
+}
 
 export class HlsRecordingHandler extends BasePlaylistHandler {
   private segmentIndex: number = 0;
@@ -91,7 +108,7 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
         stateId,
         DownloadStage.SAVING,
         "Saving file...",
-        95,
+        SAVING_STAGE_PERCENTAGE,
       );
 
       const finalFilename = `${baseFileName}.mp4`;
@@ -153,6 +170,7 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
     abortSignal: AbortSignal,
   ): Promise<void> {
     const seenUris = new Set<string>();
+    let pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
 
     logger.info(
       `[REC] Starting polling loop, abortSignal.aborted=${abortSignal.aborted}`,
@@ -170,8 +188,14 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
           "Failed to fetch manifest during recording, retrying...",
           err,
         );
-        await this.sleep(POLL_INTERVAL_MS, abortSignal);
+        await this.sleep(pollIntervalMs, abortSignal);
         continue;
+      }
+
+      // Adapt poll interval from target duration on first successful fetch
+      if (pollCount === 1) {
+        pollIntervalMs = computePollInterval(playlistText);
+        logger.info(`[REC] Adaptive poll interval: ${pollIntervalMs}ms`);
       }
 
       if (abortSignal.aborted) break;
@@ -207,7 +231,7 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
         break;
       }
 
-      await this.sleep(POLL_INTERVAL_MS, abortSignal);
+      await this.sleep(pollIntervalMs, abortSignal);
     }
     logger.info(
       `[REC] Polling loop exited after ${pollCount} polls, segments=${this.segmentIndex}, aborted=${abortSignal.aborted}`,
@@ -218,30 +242,18 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
     fragments: Fragment[],
     abortSignal: AbortSignal,
   ): Promise<void> {
-    let idx = 0;
-    const errors: Error[] = [];
-
-    const worker = async (): Promise<void> => {
-      while (idx < fragments.length) {
-        if (abortSignal.aborted) return;
-        const fragment = fragments[idx++]!;
-        try {
-          const size = await this.downloadFragment(fragment, this.downloadId);
-          this.bytesDownloaded += size;
-        } catch (err) {
-          if (err instanceof CancellationError || abortSignal.aborted) return;
-          const e = err instanceof Error ? err : new Error(String(err));
-          errors.push(e);
-          logger.warn(`Failed to download segment ${fragment.index}:`, e);
-        }
-      }
-    };
-
-    const workers = Array.from(
-      { length: Math.min(this.maxConcurrent, fragments.length) },
-      () => worker(),
-    );
-    await Promise.all(workers);
+    await runConcurrentWorkers({
+      items: fragments,
+      maxConcurrent: this.maxConcurrent,
+      shouldStop: () => abortSignal.aborted,
+      processItem: async (fragment) => {
+        const size = await this.downloadFragment(fragment, this.downloadId);
+        this.bytesDownloaded += size;
+      },
+      onError: (fragment, err) => {
+        logger.warn(`Failed to download segment ${fragment.index}:`, err);
+      },
+    });
   }
 
   private async updateRecordingProgress(stateId: string): Promise<void> {

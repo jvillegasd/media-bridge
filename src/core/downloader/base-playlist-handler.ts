@@ -20,6 +20,12 @@ import { MessageType } from "../../shared/messages";
 import { processWithFFmpeg } from "../utils/ffmpeg-bridge";
 import { saveBlobUrlToFile } from "../utils/blob-utils";
 import { addHeaderRules, removeHeaderRules } from "../utils/header-rules";
+import {
+  DEFAULT_MAX_CONCURRENT,
+  DEFAULT_FFMPEG_TIMEOUT_MS,
+  MAX_FRAGMENT_FAILURE_RATE,
+  SAVING_STAGE_PERCENTAGE,
+} from "../../shared/constants";
 
 export interface BasePlaylistHandlerOptions {
   onProgress?: DownloadProgressCallback;
@@ -48,8 +54,8 @@ export abstract class BasePlaylistHandler {
 
   constructor(options: BasePlaylistHandlerOptions = {}) {
     this.onProgress = options.onProgress;
-    this.maxConcurrent = options.maxConcurrent || 3;
-    this.ffmpegTimeout = options.ffmpegTimeout || 900000;
+    this.maxConcurrent = options.maxConcurrent || DEFAULT_MAX_CONCURRENT;
+    this.ffmpegTimeout = options.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
     this.shouldSaveOnCancel = options.shouldSaveOnCancel;
   }
 
@@ -404,9 +410,17 @@ export abstract class BasePlaylistHandler {
     }
 
     if (downloadedFragments < totalFragments) {
+      const failedCount = totalFragments - downloadedFragments;
+      const failureRate = failedCount / totalFragments;
       logger.warn(
-        `Downloaded ${downloadedFragments}/${totalFragments} fragments. Some fragments failed.`,
+        `Downloaded ${downloadedFragments}/${totalFragments} fragments (${failedCount} failed).`,
       );
+      // Abort if more than 10% of fragments failed — output would be too corrupted
+      if (failureRate > MAX_FRAGMENT_FAILURE_RATE) {
+        throw new Error(
+          `Too many fragment failures: ${failedCount}/${totalFragments} failed (${Math.round(failureRate * 100)}%). Aborting to avoid corrupted output.`,
+        );
+      }
     }
   }
 
@@ -449,7 +463,7 @@ export abstract class BasePlaylistHandler {
       stateId,
       DownloadStage.SAVING,
       "Saving partial file...",
-      95,
+      SAVING_STAGE_PERCENTAGE,
     );
 
     const filePath = await saveBlobUrlToFile(

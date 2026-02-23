@@ -27,6 +27,10 @@ import { VideoMetadata } from "../../types";
 import { detectFormatFromUrl } from "../../utils/url-utils";
 import { extractThumbnail } from "../../utils/thumbnail-utils";
 
+const DOM_SCAN_DEBOUNCE_MS = 1000;
+const MAX_HEADING_SEARCH_DEPTH = 3;
+const MAX_HEADING_TITLE_LENGTH = 200;
+
 /** Configuration options for DirectDetectionHandler */
 export interface DirectDetectionHandlerOptions {
   /** Optional callback for detected videos */
@@ -225,7 +229,7 @@ export class DirectDetectionHandler {
         this.scanTimeout = setTimeout(() => {
           this.scanTimeout = null;
           this.scanDOMForVideos();
-        }, 1000);
+        }, DOM_SCAN_DEBOUNCE_MS);
       }
     });
 
@@ -385,14 +389,14 @@ export class DirectDetectionHandler {
         let container = videoElement.parentElement;
         let depth = 0;
 
-        while (container && depth < 3) {
+        while (container && depth < MAX_HEADING_SEARCH_DEPTH) {
           const heading = container.querySelector("h1, h2, h3, h4, h5, h6");
           if (heading) {
             const headingText = heading.textContent?.trim();
             if (
               headingText &&
               headingText.length > 0 &&
-              headingText.length < 200
+              headingText.length < MAX_HEADING_TITLE_LENGTH
             ) {
               metadata.title = headingText;
               break;

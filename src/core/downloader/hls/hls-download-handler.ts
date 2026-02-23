@@ -22,6 +22,7 @@ import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { BasePlaylistHandler } from "../base-playlist-handler";
+import { SAVING_STAGE_PERCENTAGE } from "../../../shared/constants";
 
 /**
  * HLS download handler for master playlists
@@ -226,7 +227,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         onProgress: this.createMergingProgressCallback(stateId),
       });
 
-      await this.updateStage(stateId, DownloadStage.SAVING, "Saving file...", 95);
+      await this.updateStage(stateId, DownloadStage.SAVING, "Saving file...", SAVING_STAGE_PERCENTAGE);
 
       const finalFilename = `${baseFileName}.mp4`;
       const filePath = await saveBlobUrlToFile(

@@ -81,9 +81,15 @@ export async function processWithFFmpeg(
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let isSettled = false;
 
-    /** Revokes blob URLs from late-arriving success messages after timeout/abort. */
+    /**
+     * Revokes blob URLs from late-arriving success messages after timeout/abort.
+     * Registered early (before sending request) so there's no race window between
+     * settlement and listener registration.
+     */
+    let shouldRevokeLateBlobs = false;
     const cleanupListener = (message: FFmpegResponseMessage) => {
       if (
+        shouldRevokeLateBlobs &&
         message.type === responseType &&
         message.payload?.downloadId === downloadId &&
         message.payload.type === "success" &&
@@ -93,6 +99,7 @@ export async function processWithFFmpeg(
         chrome.runtime.onMessage.removeListener(cleanupListener);
       }
     };
+    chrome.runtime.onMessage.addListener(cleanupListener);
 
     const cleanup = () => {
       if (timeoutId) {
@@ -108,8 +115,8 @@ export async function processWithFFmpeg(
     const settle = (error: Error) => {
       if (isSettled) return;
       isSettled = true;
+      shouldRevokeLateBlobs = true;
       cleanup();
-      chrome.runtime.onMessage.addListener(cleanupListener);
       reject(error);
     };
 
@@ -136,11 +143,13 @@ export async function processWithFFmpeg(
           if (isSettled) return;
           isSettled = true;
           cleanup();
+          chrome.runtime.onMessage.removeListener(cleanupListener);
           resolve({ blobUrl: blobUrl!, warning });
         } else if (type === "error") {
           if (isSettled) return;
           isSettled = true;
           cleanup();
+          chrome.runtime.onMessage.removeListener(cleanupListener);
           reject(new Error(error || "FFmpeg processing failed"));
         } else if (type === "progress") {
           onProgress?.(progress ?? 0, progressMessage || "");

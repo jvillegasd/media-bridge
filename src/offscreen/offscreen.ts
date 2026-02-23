@@ -6,7 +6,7 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 import { MessageType } from "../shared/messages";
-import { readChunkByIndex } from "../core/database/chunks";
+import { readChunkRange } from "../core/database/chunks";
 import { logger } from "../core/utils/logger";
 
 let ffmpegInstance: FFmpeg | null = null;
@@ -91,12 +91,14 @@ async function concatenateChunks(
   startIndex: number,
   length: number,
 ): Promise<ConcatenateResult> {
+  const chunkMap = await readChunkRange(downloadId, startIndex, length);
+
   const chunks: BlobPart[] = [];
   let missingCount = 0;
   let totalBytes = 0;
 
   for (let i = 0; i < length; i++) {
-    const chunk = await readChunkByIndex(downloadId, startIndex + i);
+    const chunk = chunkMap.get(startIndex + i);
     if (chunk) {
       chunks.push(chunk as BlobPart);
       totalBytes += chunk.byteLength;
@@ -154,15 +156,11 @@ async function processVideoAndAudio(
   const intermediateFiles = [videoFile, audioFile];
 
   try {
-    onProgress?.(0.1, "Concatenating video chunks");
-    const videoResult = await concatenateChunks(downloadId, 0, videoLength);
-
-    onProgress?.(0.3, "Concatenating audio chunks");
-    const audioResult = await concatenateChunks(
-      downloadId,
-      videoLength,
-      audioLength,
-    );
+    onProgress?.(0.1, "Concatenating chunks");
+    const [videoResult, audioResult] = await Promise.all([
+      concatenateChunks(downloadId, 0, videoLength),
+      concatenateChunks(downloadId, videoLength, audioLength),
+    ]);
 
     onProgress?.(0.5, "Writing video stream");
     await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));

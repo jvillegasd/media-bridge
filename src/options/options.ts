@@ -5,6 +5,16 @@
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { GoogleAuth } from "../core/cloud/google-auth";
 import { StorageConfig } from "../core/types";
+import {
+  DEFAULT_FFMPEG_TIMEOUT_MS,
+  DEFAULT_FFMPEG_TIMEOUT_MINUTES,
+  MIN_FFMPEG_TIMEOUT_MINUTES,
+  MAX_FFMPEG_TIMEOUT_MINUTES,
+  MS_PER_MINUTE,
+  DEFAULT_MAX_CONCURRENT,
+  STORAGE_CONFIG_KEY,
+  MAX_CONCURRENT_KEY,
+} from "../shared/constants";
 
 // DOM elements
 const driveEnabled = document.getElementById(
@@ -31,7 +41,7 @@ const statusMessage = document.getElementById(
 const themeToggle = document.getElementById("themeToggle") as HTMLButtonElement;
 const themeIcon = document.getElementById("themeIcon") as unknown as SVGElement;
 
-const CONFIG_KEY = "storage_config";
+const STATUS_MESSAGE_DURATION_MS = 5000;
 
 /**
  * Initialize options page
@@ -64,7 +74,7 @@ async function init() {
  * Load settings from storage
  */
 async function loadSettings() {
-  const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
+  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
 
   if (config?.googleDrive) {
     driveEnabled.checked = config.googleDrive.enabled || false;
@@ -72,14 +82,14 @@ async function loadSettings() {
     folderId.value = config.googleDrive.targetFolderId || "";
   }
 
-  const maxConcurrentValue = await ChromeStorage.get<number>("max_concurrent");
+  const maxConcurrentValue = await ChromeStorage.get<number>(MAX_CONCURRENT_KEY);
   if (maxConcurrentValue) {
     maxConcurrent.value = maxConcurrentValue.toString();
   }
 
   // Load FFmpeg timeout (stored internally as milliseconds, convert to minutes for UI)
-  const ffmpegTimeoutMs = config?.ffmpegTimeout || 900000; // Default 15 minutes in ms
-  ffmpegTimeout.value = Math.round(ffmpegTimeoutMs / 60000).toString(); // Convert ms to minutes
+  const ffmpegTimeoutMs = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
+  ffmpegTimeout.value = Math.round(ffmpegTimeoutMs / MS_PER_MINUTE).toString();
 }
 
 /**
@@ -165,14 +175,14 @@ async function handleSave() {
     };
 
     // Store FFmpeg timeout in config (convert from minutes to milliseconds for internal storage)
-    const timeoutMinutes = parseInt(ffmpegTimeout.value) || 15;
-    const timeoutMs = Math.max(5, Math.min(60, timeoutMinutes)) * 60000; // Clamp 5-60 minutes, convert to ms
+    const timeoutMinutes = parseInt(ffmpegTimeout.value) || DEFAULT_FFMPEG_TIMEOUT_MINUTES;
+    const timeoutMs = Math.max(MIN_FFMPEG_TIMEOUT_MINUTES, Math.min(MAX_FFMPEG_TIMEOUT_MINUTES, timeoutMinutes)) * MS_PER_MINUTE;
     config.ffmpegTimeout = timeoutMs; // Stored internally as milliseconds
 
-    await ChromeStorage.set(CONFIG_KEY, config);
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
     await ChromeStorage.set(
-      "max_concurrent",
-      parseInt(maxConcurrent.value) || 3,
+      MAX_CONCURRENT_KEY,
+      parseInt(maxConcurrent.value) || DEFAULT_MAX_CONCURRENT,
     );
 
     showStatus("Settings saved successfully!", "success");
@@ -200,7 +210,7 @@ function showStatus(message: string, type: "success" | "error" | "info") {
 
   setTimeout(() => {
     statusMessage.style.display = "none";
-  }, 5000);
+  }, STATUS_MESSAGE_DURATION_MS);
 }
 
 /**

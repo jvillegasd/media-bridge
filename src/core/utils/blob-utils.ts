@@ -62,39 +62,33 @@ export async function saveBlobUrlToFile(
             await storeDownload(currentState);
           }
 
-          // Wait for download to complete with a timeout guard
-          const pollStart = Date.now();
-          const checkComplete = () => {
-            if (Date.now() - pollStart > MAX_POLL_DURATION_MS) {
-              reject(new Error("Download polling timed out after 5 minutes"));
-              return;
+          // Wait for download to complete via onChanged event (no polling)
+          const timeoutId = setTimeout(() => {
+            chrome.downloads.onChanged.removeListener(onChange);
+            reject(new Error("Download timed out after 5 minutes"));
+          }, MAX_POLL_DURATION_MS);
+
+          function onChange(delta: chrome.downloads.DownloadDelta) {
+            if (delta.id !== downloadId || !delta.state) return;
+
+            if (delta.state.current === "complete") {
+              clearTimeout(timeoutId);
+              chrome.downloads.onChanged.removeListener(onChange);
+              revokeBlobUrl(blobUrl);
+              // Retrieve filename from the completed download
+              chrome.downloads.search({ id: downloadId }, (results) => {
+                const item = results?.[0];
+                resolve(item?.filename || filename);
+              });
+            } else if (delta.state.current === "interrupted") {
+              clearTimeout(timeoutId);
+              chrome.downloads.onChanged.removeListener(onChange);
+              revokeBlobUrl(blobUrl);
+              reject(new Error((delta as any).error?.current || "Download interrupted"));
             }
+          }
 
-            chrome.downloads.search({ id: downloadId }, (results) => {
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-              }
-
-              const item = results?.[0];
-              if (!item) {
-                reject(new Error("Download item not found"));
-                return;
-              }
-
-              if (item.state === "complete") {
-                revokeBlobUrl(blobUrl);
-                resolve(item.filename);
-              } else if (item.state === "interrupted") {
-                revokeBlobUrl(blobUrl);
-                reject(new Error(item.error || "Download interrupted"));
-              } else {
-                setTimeout(checkComplete, 100);
-              }
-            });
-          };
-
-          checkComplete();
+          chrome.downloads.onChanged.addListener(onChange);
         },
       );
     });
