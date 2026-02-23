@@ -345,6 +345,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleStopAndSaveMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE:
+      case MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE:
+        // Handled by ffmpeg-bridge's dynamic onMessage listener in processWithFFmpeg()
+        return false;
+
       default:
         // Only log warnings for truly unknown message types
         // Some messages might be handled by other listeners (like content scripts)
