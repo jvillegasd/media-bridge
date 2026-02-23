@@ -38,7 +38,7 @@ export async function storeChunk(
         reject(new Error(`Failed to store chunk: ${request.error}`));
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
   } catch (error) {
     logger.error(
       `Failed to store chunk ${index} for download ${downloadId}:`,
@@ -61,8 +61,7 @@ export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
     const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
       const request = index.getAll(downloadId);
       request.onsuccess = () => {
-        const records = request.result as ChunkRecord[];
-        // Sort by index to ensure correct order
+            const records = request.result as ChunkRecord[];
         records.sort((a, b) => a.index - b.index);
         resolve(records);
       };
@@ -70,7 +69,7 @@ export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
         reject(new Error(`Failed to get chunks: ${request.error}`));
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
 
     return chunks.map((chunk) => chunk.data);
   } catch (error) {
@@ -89,37 +88,29 @@ export async function deleteChunks(downloadId: string): Promise<void> {
     const store = transaction.objectStore(CHUNKS_STORE_NAME);
     const index = store.index("downloadId");
 
-    const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
-      const request = index.getAll(downloadId);
-      request.onsuccess = () => resolve(request.result as ChunkRecord[]);
-      request.onerror = () =>
-        reject(new Error(`Failed to get chunks: ${request.error}`));
-    });
-
     await new Promise<void>((resolve, reject) => {
-      let completed = 0;
-      const total = chunks.length;
+      const cursorRequest = index.openCursor(downloadId);
 
-      if (total === 0) {
-        resolve();
-        return;
-      }
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
 
-      chunks.forEach((chunk) => {
-        const deleteRequest = store.delete([downloadId, chunk.index]);
-        deleteRequest.onsuccess = () => {
-          completed++;
-          if (completed === total) {
-            resolve();
-          }
-        };
-        deleteRequest.onerror = () => {
-          reject(new Error(`Failed to delete chunk: ${deleteRequest.error}`));
-        };
-      });
+      cursorRequest.onerror = () => {
+        reject(new Error(`Failed to delete chunks: ${cursorRequest.error}`));
+      };
+
+      transaction.onerror = () => {
+        reject(new Error(`Chunk deletion transaction failed: ${transaction.error}`));
+      };
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
   } catch (error) {
     logger.error(`Failed to delete chunks for download ${downloadId}:`, error);
     throw error;
@@ -143,7 +134,7 @@ export async function getChunkCount(downloadId: string): Promise<number> {
         reject(new Error(`Failed to count chunks: ${request.error}`));
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
     return count;
   } catch (error) {
     logger.error(`Failed to count chunks for download ${downloadId}:`, error);
@@ -173,7 +164,7 @@ export async function readChunkByIndex(
       },
     );
 
-    db.close();
+    // Connection is reused via caching, no close needed
 
     if (!record) {
       return null;
@@ -186,6 +177,87 @@ export async function readChunkByIndex(
       error,
     );
     throw error;
+  }
+}
+
+/**
+ * Read a range of chunks by composite key range [downloadId, startIndex] to [downloadId, startIndex + length - 1].
+ * Uses a single IDB cursor instead of N individual get() calls.
+ */
+export async function readChunkRange(
+  downloadId: string,
+  startIndex: number,
+  length: number,
+): Promise<Map<number, Uint8Array>> {
+  if (length === 0) return new Map();
+
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([CHUNKS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(CHUNKS_STORE_NAME);
+
+    const lowerKey = [downloadId, startIndex];
+    const upperKey = [downloadId, startIndex + length - 1];
+    const range = IDBKeyRange.bound(lowerKey, upperKey);
+
+    const result = new Map<number, Uint8Array>();
+
+    await new Promise<void>((resolve, reject) => {
+      const cursorReq = store.openCursor(range);
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (cursor) {
+          const record = cursor.value as ChunkRecord;
+          result.set(record.index, new Uint8Array(record.data));
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      cursorReq.onerror = () =>
+        reject(new Error(`Failed to read chunk range: ${cursorReq.error}`));
+    });
+
+    return result;
+  } catch (error) {
+    logger.error(
+      `Failed to read chunk range [${startIndex}..${startIndex + length - 1}] for ${downloadId}:`,
+      error,
+    );
+    throw error;
+  }
+}
+
+/**
+ * Get all unique download IDs that have chunks stored
+ */
+export async function getAllChunkDownloadIds(): Promise<string[]> {
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([CHUNKS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(CHUNKS_STORE_NAME);
+    const idx = store.index("downloadId");
+
+    const ids = await new Promise<string[]>((resolve, reject) => {
+      const unique = new Set<string>();
+      const cursorReq = idx.openKeyCursor();
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (cursor) {
+          unique.add(cursor.key as string);
+          cursor.continue();
+        } else {
+          resolve(Array.from(unique));
+        }
+      };
+      cursorReq.onerror = () =>
+        reject(new Error(`Failed to list chunk download IDs: ${cursorReq.error}`));
+    });
+
+    return ids;
+  } catch (error) {
+    logger.error("Failed to get chunk download IDs:", error);
+    return [];
   }
 }
 

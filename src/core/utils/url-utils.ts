@@ -25,9 +25,6 @@ export function normalizeUrl(url: string): string {
  * Detect video format from URL
  */
 export function detectFormatFromUrl(url: string): VideoFormat {
-  // Check URL extension
-  const urlLower = url.toLowerCase();
-
   // Handle blob URLs - these are already video blobs, treat as direct
   if (url.startsWith("blob:")) {
     return "direct";
@@ -45,12 +42,14 @@ export function detectFormatFromUrl(url: string): VideoFormat {
     return "unknown";
   }
 
-  // Check for HLS playlist files (.m3u8)
-  if (urlLower.includes(".m3u8") || urlLower.match(/\.m3u8(\?|$|#)/)) {
+  const pathnameLower = urlObj.pathname.toLowerCase();
+
+  // Check for HLS playlist files (.m3u8) on pathname only
+  if (pathnameLower.endsWith(".m3u8")) {
     return "hls";
   }
 
-  // Check for common video extensions
+  // Check for common video extensions on pathname only
   const videoExtensions = [
     ".mp4",
     ".webm",
@@ -61,7 +60,7 @@ export function detectFormatFromUrl(url: string): VideoFormat {
     ".flv",
     ".wmv",
   ];
-  if (videoExtensions.some((ext) => urlLower.includes(ext))) {
+  if (videoExtensions.some((ext) => pathnameLower.endsWith(ext))) {
     return "direct";
   }
 

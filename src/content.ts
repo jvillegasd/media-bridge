@@ -11,7 +11,8 @@ import { logger } from "./core/utils/logger";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
-const sentToPopup = new Set<string>();
+let sentToPopup = new Set<string>();
+let lastUrl = location.href;
 
 function isInIframe(): boolean {
   return window.location !== window.parent.location;
@@ -178,6 +179,45 @@ function init() {
   // Initialize all detection mechanisms
   detectionManager.init();
 }
+
+/**
+ * Handle SPA navigation by resetting detection state
+ * Covers pushState/replaceState (popstate) and Navigation API
+ */
+function handleNavigation(): void {
+  const currentUrl = location.href;
+  if (currentUrl === lastUrl) return;
+  lastUrl = currentUrl;
+
+  logger.info("[Media Bridge] SPA navigation detected, resetting detection");
+
+  // Clean up old detection resources
+  if (detectionManager) {
+    detectionManager.destroy();
+  }
+
+  // Reset state
+  detectedVideos = {};
+  sentToPopup = new Set<string>();
+
+  // Re-initialize
+  init();
+}
+
+// Listen for SPA navigations (History API)
+window.addEventListener("popstate", handleNavigation);
+
+// Intercept pushState/replaceState since they don't fire popstate
+const origPushState = history.pushState.bind(history);
+const origReplaceState = history.replaceState.bind(history);
+history.pushState = function (...args) {
+  origPushState(...args);
+  handleNavigation();
+};
+history.replaceState = function (...args) {
+  origReplaceState(...args);
+  handleNavigation();
+};
 
 /**
  * Listen for messages from popup and service worker

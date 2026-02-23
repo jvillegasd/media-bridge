@@ -17,6 +17,9 @@ export function sanitizeFilename(filename: string): string {
     .trim();
 }
 
+const MAX_FILENAME_TITLE_LENGTH = 100;
+const MIN_WORD_BOUNDARY_POSITION = 50;
+
 /**
  * Generate filename from tab title and website with specific extension
  */
@@ -30,11 +33,11 @@ export function generateFilenameFromTabInfo(
   if (tabTitle) {
     // Sanitize and truncate tab title if too long
     let sanitizedTitle = sanitizeFilename(tabTitle);
-    if (sanitizedTitle.length > 100) {
+    if (sanitizedTitle.length > MAX_FILENAME_TITLE_LENGTH) {
       // Truncate at last space to avoid cutting words mid-way
-      const truncated = sanitizedTitle.substring(0, 100);
+      const truncated = sanitizedTitle.substring(0, MAX_FILENAME_TITLE_LENGTH);
       const lastSpace = truncated.lastIndexOf(" ");
-      sanitizedTitle = lastSpace > 50 ? truncated.substring(0, lastSpace) : truncated;
+      sanitizedTitle = lastSpace > MIN_WORD_BOUNDARY_POSITION ? truncated.substring(0, lastSpace) : truncated;
     }
     parts.push(sanitizedTitle);
   }

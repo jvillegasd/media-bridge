@@ -11,6 +11,10 @@
  * @module ThumbnailUtils
  */
 
+const THUMBNAIL_FALLBACK_WIDTH = 320;
+const THUMBNAIL_FALLBACK_HEIGHT = 180;
+const THUMBNAIL_JPEG_QUALITY = 0.8;
+
 /**
  * Extract thumbnail from video element or page
  * Uses multiple strategies with fallback priority
@@ -31,12 +35,12 @@ export function extractThumbnail(
     try {
       if (videoElement.readyState >= 2) {
         const canvas = document.createElement("canvas");
-        canvas.width = videoElement.videoWidth || 320;
-        canvas.height = videoElement.videoHeight || 180;
+        canvas.width = videoElement.videoWidth || THUMBNAIL_FALLBACK_WIDTH;
+        canvas.height = videoElement.videoHeight || THUMBNAIL_FALLBACK_HEIGHT;
         const ctx = canvas.getContext("2d");
         if (ctx) {
           ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-          return canvas.toDataURL("image/jpeg", 0.8);
+          return canvas.toDataURL("image/jpeg", THUMBNAIL_JPEG_QUALITY);
         }
       }
     } catch (error) {

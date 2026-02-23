@@ -25,7 +25,7 @@ Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution c
 
 2. **Content Script** (`src/content.ts` → `dist/content.js`): Built separately as IIFE (content scripts cannot use ES modules). Runs on all pages, uses `DetectionManager` to find videos via DOM observation and network request interception, and injects download buttons. Proxies fetch requests through the service worker to bypass CORS.
 
-3. **Offscreen Document** (`src/offscreen/` → `dist/offscreen/`): A hidden page created on demand for FFmpeg.wasm processing. Reads raw MPEG-TS chunks from IndexedDB, concatenates them, runs FFmpeg to mux into MP4, and returns a blob URL. Communicates with the service worker via messages since it can't use the Chrome downloads API directly.
+3. **Offscreen Document** (`src/offscreen/` → `dist/offscreen/`): A hidden page created on demand for FFmpeg.wasm processing. Reads raw MPEG-TS chunks from IndexedDB, concatenates them, runs FFmpeg to mux into MP4, and returns a blob URL. Communicates with the service worker via messages since it can't use the Chrome downloads API directly. FFmpeg.wasm is single-threaded — all processing calls are serialized through a promise-based `enqueue()` queue to prevent concurrent `ffmpeg.exec()` from corrupting shared WASM state. Intermediate filenames are prefixed with `downloadId` (e.g., `${downloadId}_video.ts`) to avoid collisions in FFmpeg's virtual filesystem.
 
 4. **Popup** (`src/popup/` → `dist/popup/`): The extension action UI for manual URL input and download progress display.
 
@@ -37,7 +37,7 @@ For HLS/M3U8 downloads:
 1. Service worker creates a `DownloadManager`, which delegates to `HlsDownloadHandler` or `M3u8DownloadHandler`
 2. Handler parses the playlist, downloads segments concurrently (up to `maxConcurrent`, default 3), stores raw chunks in IndexedDB (`core/database/chunks.ts`)
 3. Handler sends `OFFSCREEN_PROCESS_HLS` message to offscreen document
-4. Offscreen document concatenates chunks from IndexedDB, runs FFmpeg, returns blob URL
+4. Offscreen document enqueues the job — if another FFmpeg job is running, it waits. Once dequeued, it concatenates chunks from IndexedDB, runs FFmpeg, and returns a blob URL
 5. Service worker triggers Chrome download from the blob URL and saves the MP4
 
 For direct downloads: the service worker uses `chrome.downloads.download()` directly.

@@ -4,6 +4,7 @@
 
 import { FetchFn } from "../types";
 import { MessageType } from "../../shared/messages";
+import { INITIAL_RETRY_DELAY_MS, RETRY_BACKOFF_FACTOR } from "../../shared/constants";
 
 /**
  * Check if we're running in a service worker/background context
@@ -115,7 +116,7 @@ async function fetchWithRetry<Data>(
     throw new Error("Attempts less then 1");
   }
   let countdown = attempts;
-  let retryTime = 100;
+  let retryTime = INITIAL_RETRY_DELAY_MS;
   let lastError: unknown;
   while (countdown--) {
     try {
@@ -128,7 +129,7 @@ async function fetchWithRetry<Data>(
       }
       if (countdown > 0) {
         await new Promise((resolve) => setTimeout(resolve, retryTime));
-        retryTime *= 1.15;
+        retryTime *= RETRY_BACKOFF_FACTOR;
       }
     }
   }

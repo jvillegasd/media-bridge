@@ -16,6 +16,7 @@ import { DownloadProgressCallback } from "./types";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
 import { HlsDownloadHandler } from "./hls/hls-download-handler";
 import { M3u8DownloadHandler } from "./m3u8/m3u8-download-handler";
+import { DEFAULT_MAX_CONCURRENT, DEFAULT_FFMPEG_TIMEOUT_MS } from "../../shared/constants";
 
 /**
  * Configuration options for the DownloadManager
@@ -54,10 +55,10 @@ export class DownloadManager {
    * @param options - Configuration options
    */
   constructor(options: DownloadManagerOptions = {}) {
-    this.maxConcurrent = options.maxConcurrent || 3;
+    this.maxConcurrent = options.maxConcurrent || DEFAULT_MAX_CONCURRENT;
     this.onProgress = options.onProgress;
     this.uploadToDrive = options.uploadToDrive || false;
-    const ffmpegTimeout = options.ffmpegTimeout || 900000; // Default 15 minutes
+    const ffmpegTimeout = options.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
 
     // Initialize direct download handler
     this.directDownloadHandler = new DirectDownloadHandler({

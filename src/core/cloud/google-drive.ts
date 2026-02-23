@@ -7,6 +7,7 @@ import { UploadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
+const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export interface GoogleDriveConfig {
   targetFolderId?: string;
@@ -42,7 +43,7 @@ export class GoogleDriveClient {
       }
 
       // For files larger than 5MB, use resumable upload
-      if (blob.size > 5 * 1024 * 1024) {
+      if (blob.size > RESUMABLE_UPLOAD_THRESHOLD_BYTES) {
         return await this.resumableUpload(blob, filename, token, folderId);
       }
 

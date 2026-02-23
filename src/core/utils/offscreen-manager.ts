@@ -6,6 +6,7 @@
 import { logger } from "./logger";
 
 const OFFSCREEN_DOCUMENT_PATH = "offscreen/offscreen.html";
+const OFFSCREEN_LOAD_DELAY_MS = 100;
 
 /**
  * Check if offscreen document already exists
@@ -51,7 +52,7 @@ export async function createOffscreenDocument(): Promise<void> {
     logger.info("Offscreen document created");
 
     // Wait a bit for the offscreen document to fully load
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, OFFSCREEN_LOAD_DELAY_MS));
   } catch (error) {
     logger.error("Failed to create offscreen document:", error);
     throw error;

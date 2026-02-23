@@ -32,11 +32,14 @@ import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
-import { deleteChunks, getChunkCount } from "./core/database/chunks";
-
-const CONFIG_KEY = "storage_config";
-const MAX_CONCURRENT_KEY = "max_concurrent";
-const DEFAULT_FFMPEG_TIMEOUT = 900000; // 15 minutes in milliseconds (stored internally as ms)
+import { deleteChunks, getChunkCount, getAllChunkDownloadIds } from "./core/database/chunks";
+import {
+  DEFAULT_MAX_CONCURRENT,
+  DEFAULT_FFMPEG_TIMEOUT_MS,
+  KEEPALIVE_INTERVAL_MS,
+  STORAGE_CONFIG_KEY,
+  MAX_CONCURRENT_KEY,
+} from "./shared/constants";
 
 const activeDownloads = new Map<string, Promise<void>>();
 // Map to store AbortControllers for each download (keyed by normalized URL)
@@ -54,8 +57,8 @@ const savePartialDownloads = new Set<string>();
 const keepAlive = ((i?: ReturnType<typeof setInterval> | 0) => (state: boolean) => {
   if (state && !i) {
     // If service worker has been running for more than 20 seconds, call immediately
-    if (performance.now() > 20e3) chrome.runtime.getPlatformInfo();
-    i = setInterval(() => chrome.runtime.getPlatformInfo(), 20e3);
+    if (performance.now() > KEEPALIVE_INTERVAL_MS) chrome.runtime.getPlatformInfo();
+    i = setInterval(() => chrome.runtime.getPlatformInfo(), KEEPALIVE_INTERVAL_MS);
   } else if (!state && i) {
     clearInterval(i);
     i = 0;
@@ -68,6 +71,39 @@ const keepAlive = ((i?: ReturnType<typeof setInterval> | 0) => (state: boolean) 
 async function init() {
   logger.info("Service worker initialized");
   chrome.runtime.onInstalled.addListener(handleInstallation);
+
+  // Cleanup orphaned chunks from previous crashes (non-blocking)
+  cleanupStaleChunks().catch((err) =>
+    logger.error("Orphaned chunk cleanup failed:", err),
+  );
+}
+
+/**
+ * Remove chunks whose download no longer exists or is in a terminal state.
+ * Runs once at startup to reclaim IndexedDB storage from crashed downloads.
+ */
+async function cleanupStaleChunks(): Promise<void> {
+  const chunkDownloadIds = await getAllChunkDownloadIds();
+  if (chunkDownloadIds.length === 0) return;
+
+  let cleaned = 0;
+  for (const downloadId of chunkDownloadIds) {
+    const download = await getDownload(downloadId);
+    const isOrphaned =
+      !download ||
+      download.progress.stage === DownloadStage.COMPLETED ||
+      download.progress.stage === DownloadStage.FAILED ||
+      download.progress.stage === DownloadStage.CANCELLED;
+
+    if (isOrphaned) {
+      await deleteChunks(downloadId);
+      cleaned++;
+    }
+  }
+
+  if (cleaned > 0) {
+    logger.info(`Cleaned up orphaned chunks for ${cleaned} download(s)`);
+  }
 }
 
 /**
@@ -156,7 +192,7 @@ async function handleGetConfigMessage(): Promise<{
   error?: string;
 }> {
   try {
-    const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
+    const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
     return { success: true, data: config || undefined };
   } catch (error) {
     logger.error("Get config error:", error);
@@ -174,7 +210,7 @@ async function handleSaveConfigMessage(
   payload: StorageConfig,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await ChromeStorage.set(CONFIG_KEY, payload);
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, payload);
     return { success: true };
   } catch (error) {
     logger.error("Save config error:", error);
@@ -345,6 +381,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleStopAndSaveMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE:
+      case MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE:
+        // Handled by ffmpeg-bridge's dynamic onMessage listener in processWithFFmpeg()
+        return false;
+
       default:
         // Only log warnings for truly unknown message types
         // Some messages might be handled by other listeners (like content scripts)
@@ -450,18 +491,19 @@ async function handleDownloadRequest(payload: {
     };
   }
 
-  const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
+  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
   const maxConcurrent =
-    (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || 3;
+    (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || DEFAULT_MAX_CONCURRENT;
   // FFmpeg timeout is stored in milliseconds (converted from minutes in settings UI)
-  const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT;
+  const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
 
   const downloadManager = new DownloadManager({
     maxConcurrent,
     ffmpegTimeout,
     shouldSaveOnCancel: () => savePartialDownloads.has(normalizedUrl),
     onProgress: async (state) => {
-      const normalizedUrlForProgress = normalizeUrl(state.url);
+      // Use the pre-normalized URL from the outer scope instead of re-normalizing
+      const normalizedUrlForProgress = normalizedUrl;
 
       // Get abort controller and store signal reference ONCE to avoid stale reference issues
       const controller = downloadAbortControllers.get(normalizedUrlForProgress);
@@ -847,10 +889,10 @@ async function handleStartRecordingMessage(payload: {
       return { success: false, error: "Recording already in progress for this URL." };
     }
 
-    const config = await ChromeStorage.get<StorageConfig>(CONFIG_KEY);
+    const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
     const maxConcurrent =
-      (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || 3;
-    const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT;
+      (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || DEFAULT_MAX_CONCURRENT;
+    const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
 
     // Build initial download state
     const stateId = generateDownloadId(normalizedUrl);

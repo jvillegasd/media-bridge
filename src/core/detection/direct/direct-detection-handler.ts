@@ -27,6 +27,10 @@ import { VideoMetadata } from "../../types";
 import { detectFormatFromUrl } from "../../utils/url-utils";
 import { extractThumbnail } from "../../utils/thumbnail-utils";
 
+const DOM_SCAN_DEBOUNCE_MS = 1000;
+const MAX_HEADING_SEARCH_DEPTH = 3;
+const MAX_HEADING_TITLE_LENGTH = 200;
+
 /** Configuration options for DirectDetectionHandler */
 export interface DirectDetectionHandlerOptions {
   /** Optional callback for detected videos */
@@ -40,6 +44,9 @@ export interface DirectDetectionHandlerOptions {
 export class DirectDetectionHandler {
   private onVideoDetected?: (video: VideoMetadata) => void;
   private capturedUrls = new Map<HTMLVideoElement, string>();
+  private observer: MutationObserver | null = null;
+  private scanTimeout: ReturnType<typeof setTimeout> | null = null;
+  private knownVideos = new WeakSet<HTMLVideoElement>();
 
   /**
    * Create a new DirectDetectionHandler instance
@@ -47,6 +54,22 @@ export class DirectDetectionHandler {
    */
   constructor(options: DirectDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
+  }
+
+  /**
+   * Clean up all resources to prevent memory leaks
+   */
+  destroy(): void {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+    if (this.scanTimeout) {
+      clearTimeout(this.scanTimeout);
+      this.scanTimeout = null;
+    }
+    this.capturedUrls.clear();
+    this.knownVideos = new WeakSet();
   }
 
   /**
@@ -91,10 +114,12 @@ export class DirectDetectionHandler {
    */
   handleNetworkRequest(url: string): void {
     if (this.isDirectVideoUrl(url) && !this.isAudioOnlyUrl(url)) {
-      // Try to associate with video elements
-      const videoElements = document.querySelectorAll("video");
-      for (const video of Array.from(videoElements)) {
-        const vid = video as HTMLVideoElement;
+      // Query DOM for current video elements and filter to known ones
+      const videos = document.querySelectorAll("video");
+      for (const node of Array.from(videos)) {
+        const vid = node as HTMLVideoElement;
+        if (!this.knownVideos.has(vid)) continue;
+
         const existing = this.capturedUrls.get(vid);
 
         if (
@@ -103,7 +128,6 @@ export class DirectDetectionHandler {
           existing.startsWith("data:")
         ) {
           this.capturedUrls.set(vid, url);
-          // Trigger detection
           this.detect(url, vid);
         }
       }
@@ -147,26 +171,33 @@ export class DirectDetectionHandler {
    */
   async scanDOMForVideos(): Promise<void> {
     const videoElements = document.querySelectorAll("video");
+    const readyVideos: HTMLVideoElement[] = [];
 
     for (const video of Array.from(videoElements)) {
       const vid = video as HTMLVideoElement;
+      this.knownVideos.add(vid);
 
-      // Skip if video element isn't ready (check if it has any URL)
       const hasUrl = vid.currentSrc || vid.src || vid.querySelector("source");
       if (vid.readyState === 0 && !hasUrl) {
         continue;
       }
+      readyVideos.push(vid);
+    }
 
-      // Try to detect from video element
-      const metadata = await this.detectFromVideoElement(vid);
-      if (metadata) {
+    // Detect all ready videos in parallel
+    const results = await Promise.allSettled(
+      readyVideos.map((vid) => this.detectFromVideoElement(vid)),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
         console.log("[Media Bridge] Detected video:", {
-          url: metadata.url,
-          format: metadata.format,
-          pageUrl: metadata.pageUrl,
+          url: result.value.url,
+          format: result.value.format,
+          pageUrl: result.value.pageUrl,
         });
         if (this.onVideoDetected) {
-          this.onVideoDetected(metadata);
+          this.onVideoDetected(result.value);
         }
       }
     }
@@ -176,8 +207,7 @@ export class DirectDetectionHandler {
    * Set up MutationObserver to monitor DOM changes for dynamically added video elements
    */
   setupDOMObserver(): void {
-    const handler = this;
-    const observer = new MutationObserver((mutations) => {
+    this.observer = new MutationObserver((mutations) => {
       let shouldScan = false;
       for (const mutation of mutations) {
         for (const node of Array.from(mutation.addedNodes)) {
@@ -193,14 +223,17 @@ export class DirectDetectionHandler {
       }
 
       if (shouldScan) {
-        clearTimeout((observer as any).timeout);
-        (observer as any).timeout = setTimeout(() => {
-          handler.scanDOMForVideos();
-        }, 1000);
+        if (this.scanTimeout) {
+          clearTimeout(this.scanTimeout);
+        }
+        this.scanTimeout = setTimeout(() => {
+          this.scanTimeout = null;
+          this.scanDOMForVideos();
+        }, DOM_SCAN_DEBOUNCE_MS);
       }
     });
 
-    observer.observe(document.body, {
+    this.observer.observe(document.body, {
       childList: true,
       subtree: true,
     });
@@ -356,14 +389,14 @@ export class DirectDetectionHandler {
         let container = videoElement.parentElement;
         let depth = 0;
 
-        while (container && depth < 3) {
+        while (container && depth < MAX_HEADING_SEARCH_DEPTH) {
           const heading = container.querySelector("h1, h2, h3, h4, h5, h6");
           if (heading) {
             const headingText = heading.textContent?.trim();
             if (
               headingText &&
               headingText.length > 0 &&
-              headingText.length < 200
+              headingText.length < MAX_HEADING_TITLE_LENGTH
             ) {
               metadata.title = headingText;
               break;

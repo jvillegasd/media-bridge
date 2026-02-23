@@ -30,7 +30,7 @@ export async function getAllDownloads(): Promise<DownloadState[]> {
       };
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
     return downloads;
   } catch (error) {
     logger.error("Failed to get all downloads:", error);
@@ -59,7 +59,7 @@ export async function getDownload(id: string): Promise<DownloadState | null> {
       },
     );
 
-    db.close();
+    // Connection is reused via caching, no close needed
     return download;
   } catch (error) {
     logger.error(`Failed to get download ${id}:`, error);
@@ -75,11 +75,35 @@ export async function getDownloadByUrl(
   url: string,
 ): Promise<DownloadState | null> {
   try {
-    const downloads = await getAllDownloads();
     const normalizedUrl = normalizeUrl(url);
-    return (
-      downloads.find((d) => normalizeUrl(d.url) === normalizedUrl) ?? null
+    const db = await openDatabase();
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readonly");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
+    const urlIndex = store.index("url");
+
+    const download = await new Promise<DownloadState | null>(
+      (resolve, reject) => {
+        const request = urlIndex.get(normalizedUrl);
+        request.onsuccess = () => {
+          resolve((request.result as DownloadState) || null);
+        };
+        request.onerror = () => {
+          reject(new Error(`Failed to get download by URL: ${request.error}`));
+        };
+      },
     );
+
+    // Connection is reused via caching, no close needed
+
+    // If index lookup failed, fall back to scan (URLs may not be stored normalized)
+    if (!download) {
+      const allDownloads = await getAllDownloads();
+      return (
+        allDownloads.find((d) => normalizeUrl(d.url) === normalizedUrl) ?? null
+      );
+    }
+
+    return download;
   } catch (error) {
     logger.error(`Failed to get download by URL ${url}:`, error);
     return null;
@@ -126,7 +150,7 @@ export async function storeDownload(state: DownloadState): Promise<void> {
       };
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
     logger.debug(`Stored download state for ${state.id}`);
   } catch (error) {
     logger.error(`Failed to store download state:`, error);
@@ -173,7 +197,7 @@ export async function deleteDownload(id: string): Promise<void> {
       };
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
     logger.debug(`Deleted download state for ${id}`);
   } catch (error) {
     logger.error(`Failed to delete download state:`, error);
@@ -200,7 +224,7 @@ export async function clearAllDownloads(): Promise<void> {
       };
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
     // Also clear the queue
     await ChromeStorage.remove(STORAGE_KEY_DOWNLOAD_QUEUE);
   } catch (error) {
