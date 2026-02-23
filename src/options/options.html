@@ -5,370 +5,447 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Media Bridge Settings</title>
   <style>
+    /* ---- Font ---- */
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+      src: url('/fonts/inter-regular.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 500;
+      font-style: normal;
+      font-display: swap;
+      src: url('/fonts/inter-medium.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Inter';
+      font-weight: 600;
+      font-style: normal;
+      font-display: swap;
+      src: url('/fonts/inter-semibold.woff2') format('woff2');
+    }
+
+    /* ---- Design Tokens (Dark Default) ---- */
     :root {
-      /* Dark mode (default) */
-      --bg-primary: #1e1e1e;
-      --bg-secondary: #2d2d2d;
-      --bg-tertiary: #252525;
-      --bg-hover: #353535;
-      --bg-active: #404040;
-      --text-primary: #e0e0e0;
-      --text-secondary: #999;
-      --text-tertiary: #b0b0b0;
-      --border-color: #404040;
-      --border-color-light: #555;
-      --border-color-hover: #666;
+      --surface-0: #0f1117;
+      --surface-1: #181a22;
+      --surface-2: #1e2028;
+      --surface-3: #252830;
+
+      --text-primary: #e8eaf0;
+      --text-secondary: #8b8fa3;
+      --text-tertiary: #5c6070;
+
+      --accent: #22d3a7;
+      --accent-hover: #1ab892;
+      --accent-subtle: rgba(34, 211, 167, 0.10);
+
+      --success: #34d399;
+      --warning: #fbbf24;
+      --error: #f87171;
+      --info: #60a5fa;
+
+      --border: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-pill: 9999px;
     }
 
     :root.light-mode {
-      /* Light mode */
-      --bg-primary: #f5f5f5;
-      --bg-secondary: #ffffff;
-      --bg-tertiary: #f5f5f5;
-      --bg-hover: #f5f5f5;
-      --bg-active: #e8e8e8;
-      --text-primary: #333;
-      --text-secondary: #666;
-      --text-tertiary: #999;
-      --border-color: #ddd;
-      --border-color-light: #ccc;
-      --border-color-hover: #4285f4;
+      --surface-0: #f4f5f7;
+      --surface-1: #ffffff;
+      --surface-2: #f0f1f4;
+      --surface-3: #e8e9ed;
+
+      --text-primary: #1a1c24;
+      --text-secondary: #5c5f72;
+      --text-tertiary: #8b8fa3;
+
+      --accent: #0fa883;
+      --accent-hover: #0d9474;
+      --accent-subtle: rgba(15, 168, 131, 0.08);
+
+      --border: rgba(0, 0, 0, 0.08);
+      --border-hover: rgba(0, 0, 0, 0.15);
     }
 
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    /* ---- Reset & Base ---- */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      background: var(--surface-0);
       color: var(--text-primary);
-      padding: 20px;
-      max-width: 800px;
-      margin: 0 auto;
-      transition: background-color 0.3s, color 0.3s;
+      min-height: 100vh;
+      padding-bottom: 80px;
     }
 
-    /* Theme Toggle */
-    .theme-toggle {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
+    /* ---- Header ---- */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    .page-header-left h1 {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+    }
+
+    .page-header-left p {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .header-btn {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
       color: var(--text-secondary);
       cursor: pointer;
       padding: 8px;
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
-      z-index: 100;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      transition: all 0.15s;
     }
 
-    .theme-toggle:hover {
-      background: var(--bg-hover);
+    .header-btn:hover {
+      background: var(--surface-3);
       color: var(--text-primary);
-      border-color: var(--border-color-hover);
+      border-color: var(--border-hover);
     }
 
-    .theme-toggle svg {
-      width: 20px;
-      height: 20px;
+    .header-btn svg { width: 18px; height: 18px; }
+
+    /* ---- Content ---- */
+    .content {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 0 24px;
     }
 
-    .header {
-      margin-bottom: 30px;
-    }
-
-    .header h1 {
-      font-size: 24px;
-      color: var(--text-primary);
-      margin-bottom: 8px;
-    }
-
-    .header p {
-      color: var(--text-secondary);
-      font-size: 14px;
-    }
-
+    /* ---- Section Card ---- */
     .section {
-      background: var(--bg-secondary);
-      border-radius: 8px;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
       padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-      border: 1px solid var(--border-color);
+      margin-bottom: 16px;
     }
 
     .section-title {
-      font-size: 18px;
-      font-weight: 500;
+      font-size: 15px;
+      font-weight: 600;
       color: var(--text-primary);
       margin-bottom: 16px;
     }
 
+    /* ---- Form Elements ---- */
     .form-group {
       margin-bottom: 16px;
     }
 
     .form-label {
       display: block;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 500;
       color: var(--text-primary);
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     .form-input {
       width: 100%;
-      padding: 10px;
-      border: 1px solid var(--border-color-light);
-      border-radius: 4px;
-      font-size: 14px;
-      background: var(--bg-primary);
+      padding: 10px 12px;
+      border: 1px solid var(--border-hover);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: 13px;
+      background: var(--surface-2);
       color: var(--text-primary);
+      transition: border-color 0.15s;
     }
 
     .form-input:focus {
       outline: none;
-      border-color: #4285f4;
+      border-color: var(--accent);
+    }
+
+    .form-input::placeholder {
+      color: var(--text-tertiary);
     }
 
     .form-input option {
-      background: var(--bg-secondary);
+      background: var(--surface-1);
       color: var(--text-primary);
     }
 
     .form-checkbox {
       margin-right: 8px;
+      accent-color: var(--accent);
     }
 
     .form-help {
       font-size: 12px;
-      color: var(--text-secondary);
+      color: var(--text-tertiary);
       margin-top: 4px;
+      line-height: 1.4;
     }
 
+    /* ---- Buttons ---- */
     .btn {
       padding: 10px 20px;
       border: none;
-      border-radius: 4px;
-      font-size: 14px;
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: 13px;
       font-weight: 500;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: all 0.15s;
     }
 
     .btn-primary {
-      background: #4285f4;
+      background: var(--accent);
       color: white;
     }
 
-    .btn-primary:hover {
-      background: #3367d6;
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .btn-secondary {
-      background: var(--bg-secondary);
+      background: var(--surface-2);
       color: var(--text-primary);
-      border: 1px solid var(--border-color-light);
+      border: 1px solid var(--border-hover);
       margin-left: 8px;
     }
 
     .btn-secondary:hover {
-      background: var(--bg-hover);
-      border-color: var(--border-color-hover);
+      background: var(--surface-3);
+      border-color: var(--accent);
     }
 
-    .status {
-      padding: 10px;
-      border-radius: 4px;
-      margin-top: 12px;
-      font-size: 14px;
-    }
-
-    /* Status - dark mode */
-    .status-success {
-      background: #1e3a2e;
-      color: #66bb6a;
-    }
-
-    .status-error {
-      background: #4a1e1e;
-      color: #ef5350;
-    }
-
-    .status-info {
-      background: #1e3a5f;
-      color: #64b5f6;
-    }
-
-    /* Status - light mode */
-    :root.light-mode .status-success {
-      background: #e8f5e9;
-      color: #388e3c;
-    }
-
-    :root.light-mode .status-error {
-      background: #ffebee;
-      color: #d32f2f;
-    }
-
-    :root.light-mode .status-info {
-      background: #e3f2fd;
-      color: #1976d2;
-    }
-
+    /* ---- Auth Status ---- */
     .auth-section {
-      margin-top: 20px;
+      margin-top: 16px;
     }
 
     .auth-status {
       display: inline-block;
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: var(--radius-pill);
+      font-size: 11px;
       font-weight: 500;
       margin-left: 8px;
     }
 
-    /* Auth status - dark mode */
     .auth-status.authenticated {
-      background: #1e3a2e;
-      color: #66bb6a;
+      background: rgba(52, 211, 153, 0.12);
+      color: var(--success);
     }
 
     .auth-status.not-authenticated {
-      background: #4a1e1e;
-      color: #ef5350;
+      background: rgba(248, 113, 113, 0.12);
+      color: var(--error);
     }
 
-    /* Auth status - light mode */
     :root.light-mode .auth-status.authenticated {
-      background: #e8f5e9;
-      color: #388e3c;
+      background: rgba(22, 163, 74, 0.08);
+      color: #16a34a;
     }
 
     :root.light-mode .auth-status.not-authenticated {
-      background: #ffebee;
-      color: #d32f2f;
+      background: rgba(220, 38, 38, 0.08);
+      color: #dc2626;
+    }
+
+    /* ---- Status Messages ---- */
+    .status {
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      margin-top: 12px;
+      font-size: 13px;
+      border-left: 3px solid transparent;
+    }
+
+    .status-success {
+      background: var(--surface-1);
+      border-left-color: var(--success);
+      color: var(--success);
+    }
+
+    .status-error {
+      background: var(--surface-1);
+      border-left-color: var(--error);
+      color: var(--error);
+    }
+
+    .status-info {
+      background: var(--surface-1);
+      border-left-color: var(--info);
+      color: var(--info);
+    }
+
+    /* ---- Sticky Save Bar ---- */
+    .save-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--surface-1);
+      border-top: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .save-bar .btn-primary {
+      min-width: 200px;
+    }
+
+    /* ---- Scrollbar ---- */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: var(--surface-3);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-tertiary);
     }
   </style>
 </head>
 <body>
-  <button id="themeToggle" class="theme-toggle" title="Toggle theme">
-    <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <circle cx="12" cy="12" r="5"></circle>
-      <line x1="12" y1="1" x2="12" y2="3"></line>
-      <line x1="12" y1="21" x2="12" y2="23"></line>
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-      <line x1="1" y1="12" x2="3" y2="12"></line>
-      <line x1="21" y1="12" x2="23" y2="12"></line>
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-    </svg>
-  </button>
-  <div class="header">
-    <h1>Media Bridge Settings</h1>
-    <p>Configure Google Drive integration and download preferences</p>
+  <div class="page-header">
+    <div class="page-header-left">
+      <h1>Settings</h1>
+      <p>Configure Google Drive integration and download preferences</p>
+    </div>
+    <button id="themeToggle" class="header-btn" title="Toggle theme">
+      <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
   </div>
 
-  <div class="section">
-    <h2 class="section-title">Google Drive Integration</h2>
-    
-    <div class="form-group">
-      <label class="form-label">
-        <input type="checkbox" id="driveEnabled" class="form-checkbox">
-        Enable Google Drive uploads
-      </label>
-      <div class="form-help">
-        Automatically upload downloaded videos to Google Drive
-      </div>
-    </div>
-
-    <div id="driveSettings" style="display: none;">
-      <div class="form-group">
-        <label class="form-label" for="folderName">Folder Name</label>
-        <input 
-          type="text" 
-          id="folderName" 
-          class="form-input" 
-          placeholder="MediaBridge Uploads"
-        />
-        <div class="form-help">
-          Name of the folder to store uploads. Will be created if it doesn't exist.
-        </div>
-      </div>
+  <div class="content">
+    <div class="section">
+      <h2 class="section-title">Google Drive Integration</h2>
 
       <div class="form-group">
-        <label class="form-label" for="folderId">Target Folder ID (Optional)</label>
-        <input 
-          type="text" 
-          id="folderId" 
-          class="form-input" 
-          placeholder="Enter Google Drive folder ID"
-        />
-        <div class="form-help">
-          Upload to a specific folder. Leave empty to use the folder name above.
-        </div>
-      </div>
-
-      <div class="auth-section">
         <label class="form-label">
-          Authentication
-          <span id="authStatus" class="auth-status not-authenticated">Not Authenticated</span>
+          <input type="checkbox" id="driveEnabled" class="form-checkbox">
+          Enable Google Drive uploads
         </label>
-        <button id="authBtn" class="btn btn-primary">Sign in with Google</button>
-        <button id="signOutBtn" class="btn btn-secondary">Sign Out</button>
+        <div class="form-help">
+          Automatically upload downloaded videos to Google Drive
+        </div>
+      </div>
+
+      <div id="driveSettings" style="display: none;">
+        <div class="form-group">
+          <label class="form-label" for="folderName">Folder Name</label>
+          <input
+            type="text"
+            id="folderName"
+            class="form-input"
+            placeholder="MediaBridge Uploads"
+          />
+          <div class="form-help">
+            Name of the folder to store uploads. Will be created if it doesn't exist.
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="folderId">Target Folder ID (Optional)</label>
+          <input
+            type="text"
+            id="folderId"
+            class="form-input"
+            placeholder="Enter Google Drive folder ID"
+          />
+          <div class="form-help">
+            Upload to a specific folder. Leave empty to use the folder name above.
+          </div>
+        </div>
+
+        <div class="auth-section">
+          <label class="form-label">
+            Authentication
+            <span id="authStatus" class="auth-status not-authenticated">Not Authenticated</span>
+          </label>
+          <button id="authBtn" class="btn btn-primary">Sign in with Google</button>
+          <button id="signOutBtn" class="btn btn-secondary">Sign Out</button>
+        </div>
       </div>
     </div>
+
+    <div class="section">
+      <h2 class="section-title">Download Settings</h2>
+
+      <div class="form-group">
+        <label class="form-label" for="maxConcurrent">Max Concurrent Downloads</label>
+        <input
+          type="number"
+          id="maxConcurrent"
+          class="form-input"
+          min="1"
+          max="10"
+          value="3"
+        />
+        <div class="form-help">
+          Number of segments to download simultaneously (1-10)
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="ffmpegTimeout">FFmpeg Processing Timeout (minutes)</label>
+        <input
+          type="number"
+          id="ffmpegTimeout"
+          class="form-input"
+          min="5"
+          max="60"
+          value="15"
+        />
+        <div class="form-help">
+          Maximum time allowed for FFmpeg to process video files (5-60 minutes). Increase for very large files.
+        </div>
+      </div>
+    </div>
+
+    <div id="statusMessage"></div>
   </div>
 
-  <div class="section">
-    <h2 class="section-title">Download Settings</h2>
-    
-    <div class="form-group">
-      <label class="form-label" for="maxConcurrent">Max Concurrent Downloads</label>
-      <input 
-        type="number" 
-        id="maxConcurrent" 
-        class="form-input" 
-        min="1" 
-        max="10" 
-        value="3"
-      />
-      <div class="form-help">
-        Number of segments to download simultaneously (1-10)
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" for="ffmpegTimeout">FFmpeg Processing Timeout (minutes)</label>
-      <input 
-        type="number" 
-        id="ffmpegTimeout" 
-        class="form-input" 
-        min="5" 
-        max="60" 
-        value="15"
-      />
-      <div class="form-help">
-        Maximum time allowed for FFmpeg to process video files (5-60 minutes). Increase for very large files.
-      </div>
-    </div>
+  <div class="save-bar">
+    <button id="saveBtn" class="btn btn-primary">Save Settings</button>
   </div>
-
-  <div id="statusMessage"></div>
-
-  <button id="saveBtn" class="btn btn-primary">Save Settings</button>
 
   <script type="module" src="./options.ts"></script>
 </body>
 </html>
-
