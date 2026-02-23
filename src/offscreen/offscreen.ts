@@ -52,6 +52,24 @@ function resetFFmpeg(): void {
 }
 
 /**
+ * Promise-based processing queue to serialize FFmpeg jobs.
+ * FFmpeg.wasm is single-threaded — concurrent exec() calls corrupt shared WASM state.
+ */
+let processingQueue: Promise<void> = Promise.resolve();
+
+function enqueue<T>(job: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    processingQueue = processingQueue.then(async () => {
+      try {
+        resolve(await job());
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+/**
  * Concatenate chunks from IndexedDB
  */
 async function concatenateChunks(
@@ -100,19 +118,22 @@ async function processVideoAndAudio(
     audioLength,
   );
 
+  const videoFile = `${downloadId}_video.ts`;
+  const audioFile = `${downloadId}_audio.ts`;
+
   onProgress?.(0.5, "Writing video stream");
-  await ffmpeg.writeFile("video.ts", await fetchFile(videoBlob));
+  await ffmpeg.writeFile(videoFile, await fetchFile(videoBlob));
 
   onProgress?.(0.6, "Writing audio stream");
-  await ffmpeg.writeFile("audio.ts", await fetchFile(audioBlob));
+  await ffmpeg.writeFile(audioFile, await fetchFile(audioBlob));
 
   onProgress?.(0.7, "Merging video and audio");
   await ffmpeg.exec([
     "-y",
     "-i",
-    "video.ts",
+    videoFile,
     "-i",
-    "audio.ts",
+    audioFile,
     "-c:v",
     "copy",
     "-c:a",
@@ -127,8 +148,8 @@ async function processVideoAndAudio(
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile("video.ts");
-    await ffmpeg.deleteFile("audio.ts");
+    await ffmpeg.deleteFile(videoFile);
+    await ffmpeg.deleteFile(audioFile);
   } catch (error) {
     // Files may not exist, ignore error
   }
@@ -151,8 +172,10 @@ async function processVideoOnly(
   onProgress?.(0.2, "Concatenating video chunks");
   const videoBlob = await concatenateChunks(downloadId, 0, videoLength);
 
+  const videoFile = `${downloadId}_video.ts`;
+
   onProgress?.(0.5, "Writing video stream");
-  await ffmpeg.writeFile("video.ts", await fetchFile(videoBlob));
+  await ffmpeg.writeFile(videoFile, await fetchFile(videoBlob));
 
   onProgress?.(0.7, "Converting to MP4");
   // Use -c copy to copy ALL streams (video + any embedded audio)
@@ -160,7 +183,7 @@ async function processVideoOnly(
   await ffmpeg.exec([
     "-y",
     "-i",
-    "video.ts",
+    videoFile,
     "-c",
     "copy",
     "-bsf:a",
@@ -172,7 +195,7 @@ async function processVideoOnly(
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile("video.ts");
+    await ffmpeg.deleteFile(videoFile);
   } catch (error) {
     // File may not exist, ignore error
   }
@@ -192,8 +215,10 @@ async function processM3u8MediaPlaylist(
   onProgress?.(0.2, "Concatenating media playlist chunks");
   const mediaBlob = await concatenateChunks(downloadId, 0, fragmentCount);
 
+  const mediaFile = `${downloadId}_media.ts`;
+
   onProgress?.(0.5, "Writing media stream");
-  await ffmpeg.writeFile("media.ts", await fetchFile(mediaBlob));
+  await ffmpeg.writeFile(mediaFile, await fetchFile(mediaBlob));
 
   onProgress?.(0.7, "Converting to MP4");
   // Use -c copy to copy all streams (video and audio) since media playlists
@@ -201,7 +226,7 @@ async function processM3u8MediaPlaylist(
   await ffmpeg.exec([
     "-y",
     "-i",
-    "media.ts",
+    mediaFile,
     "-c",
     "copy", // Copy all codecs (video and audio)
     "-bsf:a",
@@ -213,7 +238,7 @@ async function processM3u8MediaPlaylist(
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile("media.ts");
+    await ffmpeg.deleteFile(mediaFile);
   } catch (error) {
     // File may not exist, ignore error
   }
@@ -232,14 +257,16 @@ async function processAudioOnly(
   onProgress?.(0.2, "Concatenating audio chunks");
   const audioBlob = await concatenateChunks(downloadId, 0, audioLength);
 
+  const audioFile = `${downloadId}_audio.ts`;
+
   onProgress?.(0.5, "Writing audio stream");
-  await ffmpeg.writeFile("audio.ts", await fetchFile(audioBlob));
+  await ffmpeg.writeFile(audioFile, await fetchFile(audioBlob));
 
   onProgress?.(0.7, "Converting to MP4");
   await ffmpeg.exec([
     "-y",
     "-i",
-    "audio.ts",
+    audioFile,
     "-c:a",
     "copy",
     "-movflags",
@@ -249,7 +276,7 @@ async function processAudioOnly(
 
   // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile("audio.ts");
+    await ffmpeg.deleteFile(audioFile);
   } catch (error) {
     // File may not exist, ignore error
   }
@@ -384,8 +411,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Acknowledge receipt immediately
     sendResponse({ acknowledged: true });
 
-    // Process asynchronously and send responses via separate messages
-    processHLSChunks(
+    // Process asynchronously via queue to prevent concurrent FFmpeg jobs
+    enqueue(() => processHLSChunks(
       downloadId,
       videoLength,
       audioLength,
@@ -410,7 +437,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
         );
       },
-    )
+    ))
       .then((blobUrl) => {
         // Send success response
         chrome.runtime.sendMessage(
@@ -461,8 +488,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Acknowledge receipt immediately
     sendResponse({ acknowledged: true });
 
-    // Process asynchronously and send responses via separate messages
-    processM3u8Chunks(
+    // Process asynchronously via queue to prevent concurrent FFmpeg jobs
+    enqueue(() => processM3u8Chunks(
       downloadId,
       fragmentCount,
       filename,
@@ -486,7 +513,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
         );
       },
-    )
+    ))
       .then((blobUrl) => {
         // Send success response
         chrome.runtime.sendMessage(
