@@ -40,6 +40,11 @@ export abstract class BasePlaylistHandler {
   protected lastUpdateTime: number = 0;
   protected lastDownloadedBytes: number = 0;
   protected abortSignal?: AbortSignal;
+  private smoothedSpeed: number = 0;
+  private cachedState: DownloadState | null = null;
+  private lastDbSyncTime: number = 0;
+  private static readonly SPEED_EMA_ALPHA = 0.3;
+  private static readonly DB_SYNC_INTERVAL_MS = 500;
 
   constructor(options: BasePlaylistHandlerOptions = {}) {
     this.onProgress = options.onProgress;
@@ -66,6 +71,9 @@ export abstract class BasePlaylistHandler {
     this.lastUpdateTime = 0;
     this.lastDownloadedBytes = 0;
     this.abortSignal = abortSignal;
+    this.smoothedSpeed = 0;
+    this.cachedState = null;
+    this.lastDbSyncTime = 0;
   }
 
   protected async updateProgress(
@@ -76,17 +84,17 @@ export abstract class BasePlaylistHandler {
   ): Promise<void> {
     throwIfAborted(this.abortSignal);
 
-    const state = await getDownload(stateId);
-    if (!state) return;
-
     const now = Date.now();
-    let speed = 0;
 
+    // Calculate speed with exponential moving average for smoother display
     if (this.lastUpdateTime > 0 && this.lastDownloadedBytes > 0) {
       const timeDelta = (now - this.lastUpdateTime) / 1000;
       const bytesDelta = downloadedBytes - this.lastDownloadedBytes;
       if (timeDelta > 0) {
-        speed = bytesDelta / timeDelta;
+        const currentSpeed = bytesDelta / timeDelta;
+        this.smoothedSpeed =
+          BasePlaylistHandler.SPEED_EMA_ALPHA * currentSpeed +
+          (1 - BasePlaylistHandler.SPEED_EMA_ALPHA) * this.smoothedSpeed;
       }
     }
 
@@ -95,6 +103,13 @@ export abstract class BasePlaylistHandler {
     this.bytesDownloaded = downloadedBytes;
     this.totalBytes = totalBytes;
 
+    // Use cached state to reduce DB reads; sync to DB on a throttled interval
+    if (!this.cachedState) {
+      this.cachedState = await getDownload(stateId);
+      if (!this.cachedState) return;
+    }
+
+    const state = this.cachedState;
     const percentage =
       totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
     state.progress.downloaded = downloadedBytes;
@@ -104,11 +119,15 @@ export abstract class BasePlaylistHandler {
     state.progress.message =
       message ||
       `Downloaded ${formatFileSize(downloadedBytes)}/${formatFileSize(totalBytes)}`;
-    state.progress.speed = speed;
+    state.progress.speed = this.smoothedSpeed;
     state.progress.lastUpdateTime = now;
     state.progress.lastDownloaded = downloadedBytes;
 
-    await storeDownload(state);
+    // Throttle DB writes to reduce I/O during fragment downloads
+    if (now - this.lastDbSyncTime >= BasePlaylistHandler.DB_SYNC_INTERVAL_MS) {
+      this.lastDbSyncTime = now;
+      await storeDownload(state);
+    }
     this.notifyProgress(state);
   }
 
@@ -127,12 +146,28 @@ export abstract class BasePlaylistHandler {
     return base;
   }
 
+  protected createMergingProgressCallback(
+    stateId: string,
+  ): (progress: number, message: string) => Promise<void> {
+    return async (progress: number, message: string) => {
+      const state = await getDownload(stateId);
+      if (!state) return;
+      state.progress.percentage = progress * 100;
+      state.progress.message = message;
+      state.progress.stage = DownloadStage.MERGING;
+      await storeDownload(state);
+      this.notifyProgress(state);
+    };
+  }
+
   protected async updateStage(
     stateId: string,
     stage: DownloadStage,
     message: string,
     percentage?: number,
   ): Promise<void> {
+    // Invalidate cached state on stage transitions
+    this.cachedState = null;
     const state = await getDownload(stateId);
     if (!state) return;
     state.progress.stage = stage;
@@ -141,21 +176,6 @@ export abstract class BasePlaylistHandler {
     state.updatedAt = Date.now();
     await storeDownload(state);
     this.notifyProgress(state);
-  }
-
-  protected async verifyCompletedState(stateId: string): Promise<void> {
-    const verifyState = await getDownload(stateId);
-    if (
-      verifyState &&
-      verifyState.progress.stage !== DownloadStage.COMPLETED
-    ) {
-      logger.warn(`State verification failed for ${stateId}, retrying...`);
-      verifyState.progress.stage = DownloadStage.COMPLETED;
-      verifyState.progress.message = "Download completed";
-      verifyState.progress.percentage = 100;
-      await storeDownload(verifyState);
-      this.notifyProgress(verifyState);
-    }
   }
 
   protected async cleanupChunks(downloadId: string): Promise<void> {
@@ -261,24 +281,15 @@ export abstract class BasePlaylistHandler {
         }
         this.totalBytes = Math.max(this.totalBytes, estimatedTotalBytes);
 
-        if (this.abortSignal) {
-          await cancelIfAborted(
-            this.updateProgress(
-              stateId,
-              this.bytesDownloaded,
-              this.totalBytes,
-              `Downloading fragments...`,
-            ),
-            this.abortSignal,
-          );
-        } else {
-          await this.updateProgress(
+        await cancelIfAborted(
+          this.updateProgress(
             stateId,
             this.bytesDownloaded,
             this.totalBytes,
             `Downloading fragments...`,
-          );
-        }
+          ),
+          this.abortSignal!,
+        );
       } catch (error) {
         logger.error(
           `Failed to download first fragment for size estimation:`,
@@ -376,24 +387,15 @@ export abstract class BasePlaylistHandler {
     throwIfAborted(this.abortSignal);
 
     this.totalBytes = Math.max(this.totalBytes, this.bytesDownloaded);
-    if (this.abortSignal) {
-      await cancelIfAborted(
-        this.updateProgress(
-          stateId,
-          this.bytesDownloaded,
-          this.totalBytes,
-          `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
-        ),
-        this.abortSignal,
-      );
-    } else {
-      await this.updateProgress(
+    await cancelIfAborted(
+      this.updateProgress(
         stateId,
         this.bytesDownloaded,
         this.totalBytes,
         `Downloaded ${downloadedFragments}/${totalFragments} fragments`,
-      );
-    }
+      ),
+      this.abortSignal!,
+    );
 
     if (errors.length > 0 && downloadedFragments === 0) {
       throw new Error(
@@ -432,7 +434,7 @@ export abstract class BasePlaylistHandler {
 
     const baseFileName = this.sanitizeBaseFilename(filename);
 
-    const blobUrl = await processWithFFmpeg({
+    const { blobUrl, warning } = await processWithFFmpeg({
       requestType: ffmpegOptions.requestType,
       responseType: ffmpegOptions.responseType,
       downloadId: this.downloadId,
@@ -440,16 +442,7 @@ export abstract class BasePlaylistHandler {
       filename: baseFileName,
       timeout: this.ffmpegTimeout,
       abortSignal: this.abortSignal,
-      onProgress: async (progress, message) => {
-        const state = await getDownload(stateId);
-        if (state) {
-          state.progress.percentage = progress * 100;
-          state.progress.message = message;
-          state.progress.stage = DownloadStage.MERGING;
-          await storeDownload(state);
-          this.notifyProgress(state);
-        }
-      },
+      onProgress: this.createMergingProgressCallback(stateId),
     });
 
     await this.updateStage(
@@ -465,7 +458,10 @@ export abstract class BasePlaylistHandler {
       stateId,
     );
 
-    await this.markCompleted(stateId, filePath, "Download completed (partial)");
+    const completionMessage = warning
+      ? `Download completed (partial) — ${warning}`
+      : "Download completed (partial)";
+    await this.markCompleted(stateId, filePath, completionMessage);
 
     return { filePath, fileExtension: "mp4" };
   }
@@ -474,8 +470,8 @@ export abstract class BasePlaylistHandler {
     stateId: string,
     filePath: string,
     message: string = "Download completed",
-    options?: { verify?: boolean },
   ): Promise<void> {
+    this.cachedState = null;
     const state = await getDownload(stateId);
     if (state) {
       state.localPath = filePath;
@@ -487,10 +483,6 @@ export abstract class BasePlaylistHandler {
       state.updatedAt = Date.now();
       await storeDownload(state);
       this.notifyProgress(state);
-
-      if (options?.verify) {
-        await this.verifyCompletedState(stateId);
-      }
     } else {
       logger.error(
         `Could not find download state ${stateId} to mark as completed`,

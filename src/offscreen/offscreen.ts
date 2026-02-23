@@ -60,23 +60,37 @@ let processingQueue: Promise<void> = Promise.resolve();
 function enqueue<T>(job: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     processingQueue = processingQueue.then(async () => {
-      try {
-        resolve(await job());
-      } catch (error) {
-        reject(error);
-      }
-    });
+        try {
+          resolve(await job());
+        } catch (error) {
+          reject(error);
+        }
+      });
   });
+}
+
+const VALID_DOWNLOAD_ID = /^[a-zA-Z0-9_-]+$/;
+
+function validateDownloadId(downloadId: string): void {
+  if (!downloadId || !VALID_DOWNLOAD_ID.test(downloadId)) {
+    throw new Error(`Invalid downloadId: ${downloadId}`);
+  }
 }
 
 /**
  * Concatenate chunks from IndexedDB
  */
+interface ConcatenateResult {
+  blob: Blob;
+  missingCount: number;
+  totalCount: number;
+}
+
 async function concatenateChunks(
   downloadId: string,
   startIndex: number,
   length: number,
-): Promise<Blob> {
+): Promise<ConcatenateResult> {
   const chunks: BlobPart[] = [];
   let missingCount = 0;
   let totalBytes = 0;
@@ -94,12 +108,39 @@ async function concatenateChunks(
 
   logger.info(`Concatenated ${chunks.length}/${length} chunks (${totalBytes} bytes, ${missingCount} missing) for ${downloadId}`);
 
-  return new Blob(chunks, { type: "video/mp2t" });
+  return {
+    blob: new Blob(chunks, { type: "video/mp2t" }),
+    missingCount,
+    totalCount: length,
+  };
 }
 
 /**
  * Process video and audio streams with FFmpeg
  */
+/**
+ * Safely clean up intermediate files from FFmpeg's virtual filesystem
+ */
+async function cleanupFiles(ffmpeg: FFmpeg, filenames: string[]): Promise<void> {
+  for (const name of filenames) {
+    try {
+      await ffmpeg.deleteFile(name);
+    } catch {
+      logger.debug(`Could not delete intermediate file ${name} (may not exist)`);
+    }
+  }
+}
+
+/**
+ * Build a user-facing warning string from missing chunk counts.
+ * Returns undefined if no chunks are missing.
+ */
+function buildMissingChunksWarning(missingCount: number, totalCount: number): string | undefined {
+  if (missingCount === 0 || totalCount === 0) return undefined;
+  const pct = ((missingCount / totalCount) * 100).toFixed(1);
+  return `${missingCount} of ${totalCount} chunks were missing (${pct}%) — video may have gaps`;
+}
+
 async function processVideoAndAudio(
   ffmpeg: FFmpeg,
   downloadId: string,
@@ -107,140 +148,88 @@ async function processVideoAndAudio(
   audioLength: number,
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
-): Promise<void> {
-  onProgress?.(0.1, "Concatenating video chunks");
-  const videoBlob = await concatenateChunks(downloadId, 0, videoLength);
-
-  onProgress?.(0.3, "Concatenating audio chunks");
-  const audioBlob = await concatenateChunks(
-    downloadId,
-    videoLength,
-    audioLength,
-  );
-
+): Promise<string | undefined> {
   const videoFile = `${downloadId}_video.ts`;
   const audioFile = `${downloadId}_audio.ts`;
+  const intermediateFiles = [videoFile, audioFile];
 
-  onProgress?.(0.5, "Writing video stream");
-  await ffmpeg.writeFile(videoFile, await fetchFile(videoBlob));
-
-  onProgress?.(0.6, "Writing audio stream");
-  await ffmpeg.writeFile(audioFile, await fetchFile(audioBlob));
-
-  onProgress?.(0.7, "Merging video and audio");
-  await ffmpeg.exec([
-    "-y",
-    "-i",
-    videoFile,
-    "-i",
-    audioFile,
-    "-c:v",
-    "copy",
-    "-c:a",
-    "copy",
-    "-bsf:a",
-    "aac_adtstoasc",
-    "-shortest",
-    "-movflags",
-    "+faststart",
-    outputFileName,
-  ]);
-
-  // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile(videoFile);
-    await ffmpeg.deleteFile(audioFile);
-  } catch (error) {
-    // Files may not exist, ignore error
+    onProgress?.(0.1, "Concatenating video chunks");
+    const videoResult = await concatenateChunks(downloadId, 0, videoLength);
+
+    onProgress?.(0.3, "Concatenating audio chunks");
+    const audioResult = await concatenateChunks(
+      downloadId,
+      videoLength,
+      audioLength,
+    );
+
+    onProgress?.(0.5, "Writing video stream");
+    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
+
+    onProgress?.(0.6, "Writing audio stream");
+    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
+
+    onProgress?.(0.7, "Merging video and audio");
+    await ffmpeg.exec([
+      "-y",
+      "-i",
+      videoFile,
+      "-i",
+      audioFile,
+      "-c:v",
+      "copy",
+      "-c:a",
+      "copy",
+      "-bsf:a",
+      "aac_adtstoasc",
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      outputFileName,
+    ]);
+
+    const totalMissing = videoResult.missingCount + audioResult.missingCount;
+    const totalChunks = videoResult.totalCount + audioResult.totalCount;
+    return buildMissingChunksWarning(totalMissing, totalChunks);
+  } finally {
+    await cleanupFiles(ffmpeg, intermediateFiles);
   }
 }
 
 /**
- * Process video stream with FFmpeg (handles muxed video+audio or video-only)
- * 
+ * Process a single stream (video-only, media playlist, or audio-only muxed content).
+ * Handles concatenation, writing, and converting to MP4.
+ *
  * Note: HLS streams from master playlists often have audio muxed into the video
  * segments (indicated by codecs like "avc1.64001e,mp4a.40.2"). When there's no
  * separate audio playlist, we copy ALL streams to preserve the embedded audio.
  */
-async function processVideoOnly(
+async function processSingleStream(
   ffmpeg: FFmpeg,
   downloadId: string,
-  videoLength: number,
+  length: number,
+  startIndex: number,
+  streamLabel: string,
   outputFileName: string,
+  ffmpegArgs: string[],
   onProgress?: (progress: number, message: string) => void,
-): Promise<void> {
-  onProgress?.(0.2, "Concatenating video chunks");
-  const videoBlob = await concatenateChunks(downloadId, 0, videoLength);
+): Promise<string | undefined> {
+  const inputFile = `${downloadId}_${streamLabel}.ts`;
 
-  const videoFile = `${downloadId}_video.ts`;
-
-  onProgress?.(0.5, "Writing video stream");
-  await ffmpeg.writeFile(videoFile, await fetchFile(videoBlob));
-
-  onProgress?.(0.7, "Converting to MP4");
-  // Use -c copy to copy ALL streams (video + any embedded audio)
-  // This handles muxed HLS streams where audio is embedded in video segments
-  await ffmpeg.exec([
-    "-y",
-    "-i",
-    videoFile,
-    "-c",
-    "copy",
-    "-bsf:a",
-    "aac_adtstoasc", // Convert AAC ADTS to ASC for MP4 compatibility
-    "-movflags",
-    "+faststart",
-    outputFileName,
-  ]);
-
-  // Cleanup intermediate files
   try {
-    await ffmpeg.deleteFile(videoFile);
-  } catch (error) {
-    // File may not exist, ignore error
-  }
-}
+    onProgress?.(0.2, `Concatenating ${streamLabel} chunks`);
+    const result = await concatenateChunks(downloadId, startIndex, length);
 
-/**
- * Process M3U8 media playlist with FFmpeg
- * Media playlists contain MPEG-TS segments with combined video+audio streams
- */
-async function processM3u8MediaPlaylist(
-  ffmpeg: FFmpeg,
-  downloadId: string,
-  fragmentCount: number,
-  outputFileName: string,
-  onProgress?: (progress: number, message: string) => void,
-): Promise<void> {
-  onProgress?.(0.2, "Concatenating media playlist chunks");
-  const mediaBlob = await concatenateChunks(downloadId, 0, fragmentCount);
+    onProgress?.(0.5, `Writing ${streamLabel} stream`);
+    await ffmpeg.writeFile(inputFile, await fetchFile(result.blob));
 
-  const mediaFile = `${downloadId}_media.ts`;
+    onProgress?.(0.7, "Converting to MP4");
+    await ffmpeg.exec(["-y", "-i", inputFile, ...ffmpegArgs, outputFileName]);
 
-  onProgress?.(0.5, "Writing media stream");
-  await ffmpeg.writeFile(mediaFile, await fetchFile(mediaBlob));
-
-  onProgress?.(0.7, "Converting to MP4");
-  // Use -c copy to copy all streams (video and audio) since media playlists
-  // contain combined MPEG-TS streams with both video and audio
-  await ffmpeg.exec([
-    "-y",
-    "-i",
-    mediaFile,
-    "-c",
-    "copy", // Copy all codecs (video and audio)
-    "-bsf:a",
-    "aac_adtstoasc", // Convert AAC ADTS to ASC for better compatibility
-    "-movflags",
-    "+faststart",
-    outputFileName,
-  ]);
-
-  // Cleanup intermediate files
-  try {
-    await ffmpeg.deleteFile(mediaFile);
-  } catch (error) {
-    // File may not exist, ignore error
+    return buildMissingChunksWarning(result.missingCount, result.totalCount);
+  } finally {
+    await cleanupFiles(ffmpeg, [inputFile]);
   }
 }
 
@@ -253,53 +242,39 @@ async function processAudioOnly(
   audioLength: number,
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
-): Promise<void> {
-  onProgress?.(0.2, "Concatenating audio chunks");
-  const audioBlob = await concatenateChunks(downloadId, 0, audioLength);
-
-  const audioFile = `${downloadId}_audio.ts`;
-
-  onProgress?.(0.5, "Writing audio stream");
-  await ffmpeg.writeFile(audioFile, await fetchFile(audioBlob));
-
-  onProgress?.(0.7, "Converting to MP4");
-  await ffmpeg.exec([
-    "-y",
-    "-i",
-    audioFile,
-    "-c:a",
-    "copy",
-    "-movflags",
-    "+faststart",
-    outputFileName,
-  ]);
-
-  // Cleanup intermediate files
-  try {
-    await ffmpeg.deleteFile(audioFile);
-  } catch (error) {
-    // File may not exist, ignore error
-  }
+): Promise<string | undefined> {
+  return processSingleStream(
+    ffmpeg, downloadId, audioLength, 0, "audio", outputFileName,
+    ["-c:a", "copy", "-movflags", "+faststart"],
+    onProgress,
+  );
 }
 
 /**
  * Process HLS chunks and convert to MP4
  */
+interface ProcessResult {
+  blobUrl: string;
+  warning?: string;
+}
+
 async function processHLSChunks(
   downloadId: string,
   videoLength: number,
   audioLength: number,
-  filename: string,
   onProgress?: (progress: number, message: string) => void,
-): Promise<string> {
+): Promise<ProcessResult> {
+  validateDownloadId(downloadId);
   const ffmpeg = await getFFmpeg();
 
   const outputFileName = `/tmp/${downloadId}.mp4`;
 
   // Process based on available streams
   try {
+    let warning: string | undefined;
+
     if (videoLength > 0 && audioLength > 0) {
-      await processVideoAndAudio(
+      warning = await processVideoAndAudio(
         ffmpeg,
         downloadId,
         videoLength,
@@ -308,15 +283,13 @@ async function processHLSChunks(
         onProgress,
       );
     } else if (videoLength > 0) {
-      await processVideoOnly(
-        ffmpeg,
-        downloadId,
-        videoLength,
-        outputFileName,
+      warning = await processSingleStream(
+        ffmpeg, downloadId, videoLength, 0, "video", outputFileName,
+        ["-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"],
         onProgress,
       );
     } else if (audioLength > 0) {
-      await processAudioOnly(
+      warning = await processAudioOnly(
         ffmpeg,
         downloadId,
         audioLength,
@@ -342,7 +315,7 @@ async function processHLSChunks(
       // File may not exist, ignore error
     }
 
-    return blobUrl;
+    return { blobUrl, warning };
   } catch (error) {
     resetFFmpeg();
     logger.error(`FFmpeg processing failed for ${downloadId}:`, error);
@@ -356,9 +329,9 @@ async function processHLSChunks(
 async function processM3u8Chunks(
   downloadId: string,
   fragmentCount: number,
-  filename: string,
   onProgress?: (progress: number, message: string) => void,
-): Promise<string> {
+): Promise<ProcessResult> {
+  validateDownloadId(downloadId);
   const ffmpeg = await getFFmpeg();
 
   const outputFileName = `/tmp/${downloadId}.mp4`;
@@ -369,11 +342,9 @@ async function processM3u8Chunks(
 
   try {
     // Process M3U8 media playlist
-    await processM3u8MediaPlaylist(
-      ffmpeg,
-      downloadId,
-      fragmentCount,
-      outputFileName,
+    const warning = await processSingleStream(
+      ffmpeg, downloadId, fragmentCount, 0, "media", outputFileName,
+      ["-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"],
       onProgress,
     );
 
@@ -392,7 +363,7 @@ async function processM3u8Chunks(
       // File may not exist, ignore error
     }
 
-    return blobUrl;
+    return { blobUrl, warning };
   } catch (error) {
     resetFFmpeg();
     logger.error(`FFmpeg processing failed for ${downloadId}:`, error);
@@ -401,161 +372,89 @@ async function processM3u8Chunks(
 }
 
 /**
+ * Send a message to the service worker, swallowing any errors
+ * (the service worker might not be listening).
+ */
+function sendToServiceWorker(msg: object): void {
+  chrome.runtime.sendMessage(msg, () => {
+    if (chrome.runtime.lastError) { /* intentionally swallowed */ }
+  });
+}
+
+/**
+ * Wire up an async FFmpeg processing handler for a given message type.
+ * Returns true if the message was handled, false otherwise.
+ */
+function handleProcessingMessage(
+  message: { type: string; payload: Record<string, unknown> },
+  sendResponse: (response: unknown) => void,
+  requestType: MessageType,
+  responseType: MessageType,
+  processFn: (
+    payload: Record<string, unknown>,
+    onProgress: (progress: number, message: string) => void,
+  ) => Promise<ProcessResult>,
+): boolean {
+  if (message.type !== requestType) return false;
+
+  const { downloadId } = message.payload;
+  sendResponse({ acknowledged: true });
+
+  enqueue(() => processFn(
+    message.payload,
+    (progress, msg) => {
+      sendToServiceWorker({
+        type: responseType,
+        payload: { downloadId, type: "progress", progress, message: msg },
+      });
+    },
+  ))
+    .then(({ blobUrl, warning }) => {
+      sendToServiceWorker({
+        type: responseType,
+        payload: { downloadId, type: "success", blobUrl, warning },
+      });
+    })
+    .catch((error) => {
+      sendToServiceWorker({
+        type: responseType,
+        payload: {
+          downloadId,
+          type: "error",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    });
+
+  return true;
+}
+
+/**
  * Handle messages from service worker
  */
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Handle OFFSCREEN_PROCESS_HLS messages
-  if (message.type === MessageType.OFFSCREEN_PROCESS_HLS) {
-    const { downloadId, videoLength, audioLength, filename } = message.payload;
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (handleProcessingMessage(
+    message, sendResponse,
+    MessageType.OFFSCREEN_PROCESS_HLS,
+    MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+    (payload, onProgress) => processHLSChunks(
+      payload.downloadId as string,
+      payload.videoLength as number,
+      payload.audioLength as number,
+      onProgress,
+    ),
+  )) return true;
 
-    // Acknowledge receipt immediately
-    sendResponse({ acknowledged: true });
-
-    // Process asynchronously via queue to prevent concurrent FFmpeg jobs
-    enqueue(() => processHLSChunks(
-      downloadId,
-      videoLength,
-      audioLength,
-      filename,
-      (progress, message) => {
-        // Send progress updates back to service worker
-        chrome.runtime.sendMessage(
-          {
-            type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-            payload: {
-              downloadId,
-              type: "progress",
-              progress,
-              message,
-            },
-          },
-          () => {
-            // Check for errors to prevent "unchecked runtime.lastError" warning
-            if (chrome.runtime.lastError) {
-              // Ignore - service worker might not be listening
-            }
-          },
-        );
-      },
-    ))
-      .then((blobUrl) => {
-        // Send success response
-        chrome.runtime.sendMessage(
-          {
-            type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-            payload: {
-              downloadId,
-              type: "success",
-              blobUrl,
-            },
-          },
-          () => {
-            // Check for errors to prevent "unchecked runtime.lastError" warning
-            if (chrome.runtime.lastError) {
-              // Ignore - service worker might not be listening
-            }
-          },
-        );
-      })
-      .catch((error) => {
-        // Send error response
-        chrome.runtime.sendMessage(
-          {
-            type: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-            payload: {
-              downloadId,
-              type: "error",
-              error: error instanceof Error ? error.message : String(error),
-            },
-          },
-          () => {
-            // Check for errors to prevent "unchecked runtime.lastError" warning
-            if (chrome.runtime.lastError) {
-              // Ignore - service worker might not be listening
-            }
-          },
-        );
-      });
-
-    // Return true to indicate async response (we called sendResponse above)
-    return true;
-  }
-
-  // Handle OFFSCREEN_PROCESS_M3U8 messages
-  if (message.type === MessageType.OFFSCREEN_PROCESS_M3U8) {
-    const { downloadId, fragmentCount, filename } = message.payload;
-
-    // Acknowledge receipt immediately
-    sendResponse({ acknowledged: true });
-
-    // Process asynchronously via queue to prevent concurrent FFmpeg jobs
-    enqueue(() => processM3u8Chunks(
-      downloadId,
-      fragmentCount,
-      filename,
-      (progress, message) => {
-        // Send progress updates back to service worker
-        chrome.runtime.sendMessage(
-          {
-            type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-            payload: {
-              downloadId,
-              type: "progress",
-              progress,
-              message,
-            },
-          },
-          () => {
-            // Check for errors to prevent "unchecked runtime.lastError" warning
-            if (chrome.runtime.lastError) {
-              // Ignore - service worker might not be listening
-            }
-          },
-        );
-      },
-    ))
-      .then((blobUrl) => {
-        // Send success response
-        chrome.runtime.sendMessage(
-          {
-            type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-            payload: {
-              downloadId,
-              type: "success",
-              blobUrl,
-            },
-          },
-          () => {
-            // Check for errors to prevent "unchecked runtime.lastError" warning
-            if (chrome.runtime.lastError) {
-              // Ignore - service worker might not be listening
-            }
-          },
-        );
-      })
-      .catch((error) => {
-        // Send error response
-        chrome.runtime.sendMessage(
-          {
-            type: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-            payload: {
-              downloadId,
-              type: "error",
-              error: error instanceof Error ? error.message : String(error),
-            },
-          },
-          () => {
-            // Check for errors to prevent "unchecked runtime.lastError" warning
-            if (chrome.runtime.lastError) {
-              // Ignore - service worker might not be listening
-            }
-          },
-        );
-      });
-
-    // Return true to indicate async response (we called sendResponse above)
-    return true;
-  }
+  if (handleProcessingMessage(
+    message, sendResponse,
+    MessageType.OFFSCREEN_PROCESS_M3U8,
+    MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
+    (payload, onProgress) => processM3u8Chunks(
+      payload.downloadId as string,
+      payload.fragmentCount as number,
+      onProgress,
+    ),
+  )) return true;
 
   // Revoke a blob URL that was created in this offscreen document context
   if (message.type === MessageType.REVOKE_BLOB_URL) {
@@ -565,7 +464,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // Return false for messages we don't handle (don't log warnings)
+  // Return false for messages we don't handle
   return false;
 });
 

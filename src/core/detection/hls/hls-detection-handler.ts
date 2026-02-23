@@ -30,7 +30,6 @@ import {
   isMasterPlaylist,
   isMediaPlaylist,
   parseMasterPlaylist,
-  belongsToMasterPlaylist,
 } from "../../utils/m3u8-parser";
 import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
@@ -50,8 +49,11 @@ export interface HlsDetectionHandlerOptions {
 interface MasterPlaylistInfo {
   url: string;
   variantUrls: Set<string>;
-  playlistText: string;
+  variantPathKeys: Set<string>;
 }
+
+const MAX_SEEN_PATH_KEYS = 500;
+const MAX_MASTER_PLAYLISTS = 50;
 
 /**
  * HLS detection handler
@@ -75,6 +77,14 @@ export class HlsDetectionHandler {
   }
 
   /**
+   * Clean up all resources to prevent memory leaks
+   */
+  destroy(): void {
+    this.seenPathKeys.clear();
+    this.masterPlaylists.clear();
+  }
+
+  /**
    * Detect HLS playlist from URL
    * @param url - Playlist URL to detect
    * @returns Promise resolving to VideoMetadata or null if not detected
@@ -89,6 +99,11 @@ export class HlsDetectionHandler {
     const pathKey = this.getPathKey(url);
     if (this.seenPathKeys.has(pathKey)) {
       return null;
+    }
+    // Evict oldest entries if over limit
+    if (this.seenPathKeys.size >= MAX_SEEN_PATH_KEYS) {
+      const first = this.seenPathKeys.values().next().value;
+      if (first) this.seenPathKeys.delete(first);
     }
     this.seenPathKeys.add(pathKey);
 
@@ -167,17 +182,20 @@ export class HlsDetectionHandler {
   ): Promise<VideoMetadata | null> {
     logger.info("[Media Bridge] Detected HLS Master Playlist", { url });
 
-    const variantUrls = this.trackMasterPlaylist(
+    // Parse once, reuse for tracking and liveness check
+    const levels = parseMasterPlaylist(playlistText, url);
+
+    const variantUrls = this.trackMasterPlaylistWithLevels(
       url,
       normalizedUrl,
-      playlistText,
+      levels,
     );
 
     // Remove any existing detected videos that are variants of this master playlist
     this.removeVariantVideos(variantUrls);
 
     // Determine liveness by fetching the first variant playlist and checking for #EXT-X-ENDLIST
-    const isLive = await this.checkMasterIsLive(playlistText, url);
+    const isLive = await this.checkMasterIsLive(levels);
 
     return await this.addDetectedVideo(url, "hls", playlistText, isLive);
   }
@@ -188,11 +206,9 @@ export class HlsDetectionHandler {
    * @private
    */
   private async checkMasterIsLive(
-    masterPlaylistText: string,
-    masterUrl: string,
+    levels: ReturnType<typeof parseMasterPlaylist>,
   ): Promise<boolean> {
     try {
-      const levels = parseMasterPlaylist(masterPlaylistText, masterUrl);
       const firstVariant = levels.find((l) => l.type === "stream");
       if (!firstVariant) return false;
       const variantText = await fetchText(firstVariant.uri, 1);
@@ -207,23 +223,30 @@ export class HlsDetectionHandler {
    * Track master playlist and extract variant URLs
    * @private
    */
-  private trackMasterPlaylist(
+  private trackMasterPlaylistWithLevels(
     url: string,
     normalizedUrl: string,
-    playlistText: string,
+    levels: ReturnType<typeof parseMasterPlaylist>,
   ): Set<string> {
-    const levels = parseMasterPlaylist(playlistText, url);
     const variantUrls = new Set<string>();
+    const variantPathKeys = new Set<string>();
 
     levels.forEach((level) => {
       const normalizedVariantUrl = normalizeUrl(level.uri);
       variantUrls.add(normalizedVariantUrl);
+      variantPathKeys.add(this.getPathKey(normalizedVariantUrl));
     });
+
+    // Evict oldest master playlists if over limit
+    if (this.masterPlaylists.size >= MAX_MASTER_PLAYLISTS) {
+      const firstKey = this.masterPlaylists.keys().next().value;
+      if (firstKey) this.masterPlaylists.delete(firstKey);
+    }
 
     this.masterPlaylists.set(normalizedUrl, {
       url,
       variantUrls,
-      playlistText,
+      variantPathKeys,
     });
 
     return variantUrls;
@@ -311,32 +334,14 @@ export class HlsDetectionHandler {
    */
   private checkIfBelongsToMasterPlaylist(mediaPlaylistUrl: string): boolean {
     const mediaPathKey = this.getPathKey(mediaPlaylistUrl);
-    for (const [masterUrl, masterInfo] of this.masterPlaylists.entries()) {
+    for (const masterInfo of this.masterPlaylists.values()) {
+      // O(1) exact URL match
       if (masterInfo.variantUrls.has(mediaPlaylistUrl)) {
         return true;
       }
-      // Also compare by path key to handle variant URLs with different query params
-      for (const variantUrl of masterInfo.variantUrls) {
-        if (this.getPathKey(variantUrl) === mediaPathKey) {
-          return true;
-        }
-      }
-      // Also check using the parser function for more robust matching
-      try {
-        if (
-          belongsToMasterPlaylist(
-            masterInfo.playlistText,
-            masterInfo.url,
-            mediaPlaylistUrl,
-          )
-        ) {
-          return true;
-        }
-      } catch (error) {
-        logger.error(
-          "[Media Bridge] Error checking master playlist membership",
-          { error },
-        );
+      // O(1) path key match (handles different query params)
+      if (masterInfo.variantPathKeys.has(mediaPathKey)) {
+        return true;
       }
     }
     return false;

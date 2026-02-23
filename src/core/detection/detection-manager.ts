@@ -98,6 +98,14 @@ export class DetectionManager {
   }
 
   /**
+   * Clean up all detection resources to prevent memory leaks
+   */
+  destroy(): void {
+    this.directHandler.destroy();
+    this.hlsHandler.destroy();
+  }
+
+  /**
    * Handle detected video
    * @private
    */

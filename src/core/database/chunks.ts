@@ -38,7 +38,7 @@ export async function storeChunk(
         reject(new Error(`Failed to store chunk: ${request.error}`));
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
   } catch (error) {
     logger.error(
       `Failed to store chunk ${index} for download ${downloadId}:`,
@@ -61,16 +61,14 @@ export async function getAllChunks(downloadId: string): Promise<ArrayBuffer[]> {
     const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
       const request = index.getAll(downloadId);
       request.onsuccess = () => {
-        const records = request.result as ChunkRecord[];
-        // Sort by index to ensure correct order
-        records.sort((a, b) => a.index - b.index);
-        resolve(records);
+        // Records from the downloadId index come pre-sorted by composite key [downloadId, index]
+        resolve(request.result as ChunkRecord[]);
       };
       request.onerror = () =>
         reject(new Error(`Failed to get chunks: ${request.error}`));
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
 
     return chunks.map((chunk) => chunk.data);
   } catch (error) {
@@ -89,37 +87,29 @@ export async function deleteChunks(downloadId: string): Promise<void> {
     const store = transaction.objectStore(CHUNKS_STORE_NAME);
     const index = store.index("downloadId");
 
-    const chunks = await new Promise<ChunkRecord[]>((resolve, reject) => {
-      const request = index.getAll(downloadId);
-      request.onsuccess = () => resolve(request.result as ChunkRecord[]);
-      request.onerror = () =>
-        reject(new Error(`Failed to get chunks: ${request.error}`));
-    });
-
     await new Promise<void>((resolve, reject) => {
-      let completed = 0;
-      const total = chunks.length;
+      const cursorRequest = index.openCursor(downloadId);
 
-      if (total === 0) {
-        resolve();
-        return;
-      }
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
 
-      chunks.forEach((chunk) => {
-        const deleteRequest = store.delete([downloadId, chunk.index]);
-        deleteRequest.onsuccess = () => {
-          completed++;
-          if (completed === total) {
-            resolve();
-          }
-        };
-        deleteRequest.onerror = () => {
-          reject(new Error(`Failed to delete chunk: ${deleteRequest.error}`));
-        };
-      });
+      cursorRequest.onerror = () => {
+        reject(new Error(`Failed to delete chunks: ${cursorRequest.error}`));
+      };
+
+      transaction.onerror = () => {
+        reject(new Error(`Chunk deletion transaction failed: ${transaction.error}`));
+      };
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
   } catch (error) {
     logger.error(`Failed to delete chunks for download ${downloadId}:`, error);
     throw error;
@@ -143,7 +133,7 @@ export async function getChunkCount(downloadId: string): Promise<number> {
         reject(new Error(`Failed to count chunks: ${request.error}`));
     });
 
-    db.close();
+    // Connection is reused via caching, no close needed
     return count;
   } catch (error) {
     logger.error(`Failed to count chunks for download ${downloadId}:`, error);
@@ -173,7 +163,7 @@ export async function readChunkByIndex(
       },
     );
 
-    db.close();
+    // Connection is reused via caching, no close needed
 
     if (!record) {
       return null;

@@ -8,6 +8,7 @@
 
 import { CancellationError } from "./errors";
 import { createOffscreenDocument } from "./offscreen-manager";
+import { revokeBlobUrl } from "./blob-utils";
 import { MessageType } from "../../shared/messages";
 
 export interface ProcessWithFFmpegOptions {
@@ -29,12 +30,34 @@ export interface ProcessWithFFmpegOptions {
   onProgress?: (progress: number, message: string) => void;
 }
 
+export interface ProcessWithFFmpegResult {
+  blobUrl: string;
+  /** Warning about missing chunks, if any */
+  warning?: string;
+}
+
+/** Discriminated union for FFmpeg response message payloads */
+interface FFmpegResponsePayload {
+  downloadId: string;
+  type: "success" | "error" | "progress";
+  blobUrl?: string;
+  warning?: string;
+  error?: string;
+  progress?: number;
+  message?: string;
+}
+
+interface FFmpegResponseMessage {
+  type: MessageType;
+  payload: FFmpegResponsePayload;
+}
+
 /**
  * Send a processing request to the offscreen document and return the blob URL.
  */
 export async function processWithFFmpeg(
   options: ProcessWithFFmpegOptions,
-): Promise<string> {
+): Promise<ProcessWithFFmpegResult> {
   const {
     requestType,
     responseType,
@@ -48,7 +71,7 @@ export async function processWithFFmpeg(
 
   await createOffscreenDocument();
 
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<ProcessWithFFmpegResult>((resolve, reject) => {
     // Check if already aborted before setting up listeners
     if (abortSignal?.aborted) {
       reject(new CancellationError());
@@ -57,6 +80,19 @@ export async function processWithFFmpeg(
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let isSettled = false;
+
+    /** Revokes blob URLs from late-arriving success messages after timeout/abort. */
+    const cleanupListener = (message: FFmpegResponseMessage) => {
+      if (
+        message.type === responseType &&
+        message.payload?.downloadId === downloadId &&
+        message.payload.type === "success" &&
+        message.payload.blobUrl
+      ) {
+        revokeBlobUrl(message.payload.blobUrl);
+        chrome.runtime.onMessage.removeListener(cleanupListener);
+      }
+    };
 
     const cleanup = () => {
       if (timeoutId) {
@@ -69,14 +105,20 @@ export async function processWithFFmpeg(
       }
     };
 
-    const abortHandler = () => {
+    const settle = (error: Error) => {
       if (isSettled) return;
       isSettled = true;
       cleanup();
-      reject(new CancellationError());
+      chrome.runtime.onMessage.addListener(cleanupListener);
+      reject(error);
     };
 
-    const messageListener = (message: any) => {
+    const abortHandler = () => {
+      settle(new CancellationError());
+    };
+
+    /** Handles success/error/progress during active processing. */
+    const messageListener = (message: FFmpegResponseMessage) => {
       if (
         message.type === responseType &&
         message.payload?.downloadId === downloadId
@@ -84,6 +126,7 @@ export async function processWithFFmpeg(
         const {
           type,
           blobUrl,
+          warning,
           error,
           progress,
           message: progressMessage,
@@ -93,14 +136,14 @@ export async function processWithFFmpeg(
           if (isSettled) return;
           isSettled = true;
           cleanup();
-          resolve(blobUrl);
+          resolve({ blobUrl: blobUrl!, warning });
         } else if (type === "error") {
           if (isSettled) return;
           isSettled = true;
           cleanup();
           reject(new Error(error || "FFmpeg processing failed"));
         } else if (type === "progress") {
-          onProgress?.(progress, progressMessage || "");
+          onProgress?.(progress ?? 0, progressMessage || "");
         }
       }
     };
@@ -122,10 +165,7 @@ export async function processWithFFmpeg(
       },
       () => {
         if (chrome.runtime.lastError) {
-          if (isSettled) return;
-          isSettled = true;
-          cleanup();
-          reject(
+          settle(
             new Error(
               `Failed to send processing request: ${chrome.runtime.lastError.message}`,
             ),
@@ -135,15 +175,11 @@ export async function processWithFFmpeg(
     );
 
     timeoutId = setTimeout(() => {
-      if (isSettled) return;
-      isSettled = true;
       if (abortSignal?.aborted) {
-        cleanup();
-        reject(new CancellationError());
+        settle(new CancellationError());
         return;
       }
-      cleanup();
-      reject(new Error("FFmpeg processing timeout"));
+      settle(new Error("FFmpeg processing timeout"));
     }, timeout);
   });
 }

@@ -25,6 +25,9 @@ export function revokeBlobUrl(blobUrl: string): void {
  * Save a blob URL to a file via the Chrome downloads API.
  * Stores the chromeDownloadId in the download state for reliable cancellation.
  */
+/** Maximum time to poll for download completion (5 minutes) */
+const MAX_POLL_DURATION_MS = 5 * 60 * 1000;
+
 export async function saveBlobUrlToFile(
   blobUrl: string,
   filename: string,
@@ -47,15 +50,26 @@ export async function saveBlobUrlToFile(
             return;
           }
 
+          if (downloadId === undefined) {
+            reject(new Error("Chrome downloads API returned no download ID"));
+            return;
+          }
+
           // Store chromeDownloadId in download state immediately
           const currentState = await getDownload(stateId);
           if (currentState) {
-            currentState.chromeDownloadId = downloadId!;
+            currentState.chromeDownloadId = downloadId;
             await storeDownload(currentState);
           }
 
-          // Wait for download to complete
+          // Wait for download to complete with a timeout guard
+          const pollStart = Date.now();
           const checkComplete = () => {
+            if (Date.now() - pollStart > MAX_POLL_DURATION_MS) {
+              reject(new Error("Download polling timed out after 5 minutes"));
+              return;
+            }
+
             chrome.downloads.search({ id: downloadId }, (results) => {
               if (chrome.runtime.lastError) {
                 reject(new Error(chrome.runtime.lastError.message));

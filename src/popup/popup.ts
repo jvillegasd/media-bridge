@@ -1319,10 +1319,10 @@ function renderDownloadItem(download: DownloadState): string {
   if (isCompleted && download.localPath) {
     actionButtons = `
       <div style="display: flex; gap: 6px; margin-top: 6px;">
-        <button class="video-btn download-open-btn" data-download-id="${download.id}">
+        <button class="video-btn download-open-btn" data-download-id="${escapeHtml(download.id)}">
           Open File
         </button>
-        <button class="video-btn download-remove-btn" data-download-id="${download.id}">
+        <button class="video-btn download-remove-btn" data-download-id="${escapeHtml(download.id)}">
           Remove
         </button>
       </div>
@@ -1330,10 +1330,10 @@ function renderDownloadItem(download: DownloadState): string {
   } else if (isFailed) {
     actionButtons = `
       <div style="display: flex; gap: 6px; margin-top: 6px;">
-        <button class="video-btn download-retry-btn" data-download-id="${download.id}">
+        <button class="video-btn download-retry-btn" data-download-id="${escapeHtml(download.id)}">
           Retry
         </button>
-        <button class="video-btn download-remove-btn" data-download-id="${download.id}">
+        <button class="video-btn download-remove-btn" data-download-id="${escapeHtml(download.id)}">
           Remove
         </button>
       </div>
@@ -1352,7 +1352,7 @@ function renderDownloadItem(download: DownloadState): string {
     if (!canCancelDownload(download.progress.stage)) {
       actionButtons = `
         <div style="display: flex; gap: 6px; margin-top: 6px;">
-          <button class="video-btn download-remove-btn" data-download-id="${download.id}" disabled title="${CANNOT_CANCEL_MESSAGE}" style="opacity: 0.6; cursor: not-allowed;">
+          <button class="video-btn download-remove-btn" data-download-id="${escapeHtml(download.id)}" disabled title="${CANNOT_CANCEL_MESSAGE}" style="opacity: 0.6; cursor: not-allowed;">
             Cancel
           </button>
         </div>
@@ -1367,7 +1367,7 @@ function renderDownloadItem(download: DownloadState): string {
         <div style="display: flex; gap: 6px; margin-top: 6px;">
           ${isDownloading && isManifestType ? `<button class="btn-stop-save" data-action="stop-save" data-url="${escapeHtml(download.metadata.url)}" title="Stop & Save">
             Stop &amp; Save
-          </button>` : `<button class="video-btn download-remove-btn" data-download-id="${download.id}">
+          </button>` : `<button class="video-btn download-remove-btn" data-download-id="${escapeHtml(download.id)}">
             Cancel
           </button>`}
         </div>

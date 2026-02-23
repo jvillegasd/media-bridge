@@ -461,7 +461,8 @@ async function handleDownloadRequest(payload: {
     ffmpegTimeout,
     shouldSaveOnCancel: () => savePartialDownloads.has(normalizedUrl),
     onProgress: async (state) => {
-      const normalizedUrlForProgress = normalizeUrl(state.url);
+      // Use the pre-normalized URL from the outer scope instead of re-normalizing
+      const normalizedUrlForProgress = normalizedUrl;
 
       // Get abort controller and store signal reference ONCE to avoid stale reference issues
       const controller = downloadAbortControllers.get(normalizedUrlForProgress);

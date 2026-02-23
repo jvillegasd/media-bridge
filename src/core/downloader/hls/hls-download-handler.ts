@@ -10,7 +10,6 @@
 
 import { CancellationError } from "../../utils/errors";
 import { throwIfAborted } from "../../utils/cancellation";
-import { getDownload, storeDownload } from "../../database/downloads";
 import { Level, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import {
@@ -21,15 +20,8 @@ import { getChunkCount } from "../../database/chunks";
 import { MessageType } from "../../../shared/messages";
 import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
-import { sanitizeFilename } from "../../utils/file-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
-import {
-  BasePlaylistHandler,
-  BasePlaylistHandlerOptions,
-} from "../base-playlist-handler";
-
-/** Configuration options for HLS download handler */
-export type HlsDownloadHandlerOptions = BasePlaylistHandlerOptions;
+import { BasePlaylistHandler } from "../base-playlist-handler";
 
 /**
  * HLS download handler for master playlists
@@ -38,10 +30,6 @@ export type HlsDownloadHandlerOptions = BasePlaylistHandlerOptions;
 export class HlsDownloadHandler extends BasePlaylistHandler {
   private videoLength: number = 0;
   private audioLength: number = 0;
-
-  constructor(options: HlsDownloadHandlerOptions = {}) {
-    super(options);
-  }
 
   protected override resetDownloadState(
     stateId: string,
@@ -225,11 +213,9 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
 
       await this.updateStage(stateId, DownloadStage.MERGING, "Merging streams...");
 
-      const sanitizedFilename = sanitizeFilename(filename);
-      logger.info(`Sanitized filename: "${sanitizedFilename}"`);
       const baseFileName = this.sanitizeBaseFilename(filename);
 
-      const blobUrl = await processWithFFmpeg({
+      const { blobUrl, warning } = await processWithFFmpeg({
         requestType: MessageType.OFFSCREEN_PROCESS_HLS,
         responseType: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
         downloadId: this.downloadId,
@@ -237,16 +223,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         filename: baseFileName,
         timeout: this.ffmpegTimeout,
         abortSignal: this.abortSignal,
-        onProgress: async (progress, message) => {
-          const state = await getDownload(stateId);
-          if (state) {
-            state.progress.percentage = progress * 100;
-            state.progress.message = message;
-            state.progress.stage = DownloadStage.MERGING;
-            await storeDownload(state);
-            this.notifyProgress(state);
-          }
-        },
+        onProgress: this.createMergingProgressCallback(stateId),
       });
 
       await this.updateStage(stateId, DownloadStage.SAVING, "Saving file...", 95);
@@ -258,7 +235,10 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         stateId,
       );
 
-      await this.markCompleted(stateId, filePath, "Download completed", { verify: true });
+      const completionMessage = warning
+        ? `Download completed — ${warning}`
+        : "Download completed";
+      await this.markCompleted(stateId, filePath, completionMessage);
 
       logger.info(`HLS download completed: ${filePath}`);
 

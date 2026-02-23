@@ -26,20 +26,19 @@ import { CancellationError } from "../../utils/errors";
 import { MessageType } from "../../../shared/messages";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
-import {
-  BasePlaylistHandler,
-  BasePlaylistHandlerOptions,
-} from "../base-playlist-handler";
+import { BasePlaylistHandler } from "../base-playlist-handler";
 
 const POLL_INTERVAL_MS = 3000;
-
-export type HlsRecordingHandlerOptions = BasePlaylistHandlerOptions;
 
 export class HlsRecordingHandler extends BasePlaylistHandler {
   private segmentIndex: number = 0;
 
-  constructor(options: HlsRecordingHandlerOptions = {}) {
-    super(options);
+  protected override resetDownloadState(
+    stateId: string,
+    abortSignal?: AbortSignal,
+  ): void {
+    super.resetDownloadState(stateId, abortSignal);
+    this.segmentIndex = 0;
   }
 
   /**
@@ -54,10 +53,7 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
     abortSignal: AbortSignal,
     pageUrl?: string,
   ): Promise<{ filePath: string; fileExtension?: string }> {
-    this.downloadId = stateId;
-    this.bytesDownloaded = 0;
-    this.segmentIndex = 0;
-    this.abortSignal = abortSignal;
+    this.resetDownloadState(stateId, abortSignal);
 
     const headerRuleIds = await this.tryAddHeaderRules(stateId, manifestUrl, pageUrl);
 
@@ -81,22 +77,14 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
 
       const baseFileName = this.sanitizeBaseFilename(filename, "recording");
 
-      const blobUrl = await processWithFFmpeg({
+      const { blobUrl, warning } = await processWithFFmpeg({
         requestType: MessageType.OFFSCREEN_PROCESS_M3U8,
         responseType: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
         downloadId: this.downloadId,
         payload: { fragmentCount: this.segmentIndex },
         filename: baseFileName,
         timeout: this.ffmpegTimeout,
-        onProgress: async (progress, message) => {
-          const state = await getDownload(stateId);
-          if (!state) return;
-          state.progress.percentage = (progress || 0) * 100;
-          state.progress.message = message || "Merging...";
-          state.progress.stage = DownloadStage.MERGING;
-          await storeDownload(state);
-          this.notifyProgress(state);
-        },
+        onProgress: this.createMergingProgressCallback(stateId),
       });
 
       await this.updateStage(
@@ -109,7 +97,10 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
       const finalFilename = `${baseFileName}.mp4`;
       const filePath = await saveBlobUrlToFile(blobUrl, finalFilename, stateId);
 
-      await this.markCompleted(stateId, filePath, "Recording saved");
+      const completionMessage = warning
+        ? `Recording saved — ${warning}`
+        : "Recording saved";
+      await this.markCompleted(stateId, filePath, completionMessage);
 
       logger.info(`HLS recording completed: ${filePath}`);
       return { filePath, fileExtension: "mp4" };

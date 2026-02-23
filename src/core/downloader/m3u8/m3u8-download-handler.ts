@@ -9,7 +9,6 @@
  */
 
 import { CancellationError } from "../../utils/errors";
-import { getDownload, storeDownload } from "../../database/downloads";
 import { DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import { parseLevelsPlaylist } from "../../utils/m3u8-parser";
@@ -19,23 +18,13 @@ import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
 import { throwIfAborted } from "../../utils/cancellation";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
-import {
-  BasePlaylistHandler,
-  BasePlaylistHandlerOptions,
-} from "../base-playlist-handler";
-
-/** Configuration options for M3U8 download handler */
-export type M3u8DownloadHandlerOptions = BasePlaylistHandlerOptions;
+import { BasePlaylistHandler } from "../base-playlist-handler";
 
 /**
  * M3U8 download handler for media playlists
  */
 export class M3u8DownloadHandler extends BasePlaylistHandler {
   private fragmentCount: number = 0;
-
-  constructor(options: M3u8DownloadHandlerOptions = {}) {
-    super(options);
-  }
 
   protected override resetDownloadState(
     stateId: string,
@@ -93,7 +82,7 @@ export class M3u8DownloadHandler extends BasePlaylistHandler {
 
       const baseFileName = this.sanitizeBaseFilename(filename);
 
-      const blobUrl = await processWithFFmpeg({
+      const { blobUrl, warning } = await processWithFFmpeg({
         requestType: MessageType.OFFSCREEN_PROCESS_M3U8,
         responseType: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
         downloadId: this.downloadId,
@@ -101,16 +90,7 @@ export class M3u8DownloadHandler extends BasePlaylistHandler {
         filename: baseFileName,
         timeout: this.ffmpegTimeout,
         abortSignal: this.abortSignal,
-        onProgress: async (progress, message) => {
-          const state = await getDownload(stateId);
-          if (state) {
-            state.progress.percentage = progress * 100;
-            state.progress.message = message;
-            state.progress.stage = DownloadStage.MERGING;
-            await storeDownload(state);
-            this.notifyProgress(state);
-          }
-        },
+        onProgress: this.createMergingProgressCallback(stateId),
       });
 
       await this.updateStage(stateId, DownloadStage.SAVING, "Saving file...", 95);
@@ -121,7 +101,10 @@ export class M3u8DownloadHandler extends BasePlaylistHandler {
         stateId,
       );
 
-      await this.markCompleted(stateId, filePath, "Download completed", { verify: true });
+      const completionMessage = warning
+        ? `Download completed — ${warning}`
+        : "Download completed";
+      await this.markCompleted(stateId, filePath, completionMessage);
 
       logger.info(`M3U8 media playlist download completed: ${filePath}`);
 
