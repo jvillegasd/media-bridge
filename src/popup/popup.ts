@@ -43,8 +43,8 @@ function scheduleDebouncedRender(needsFullRender: boolean): void {
 
     await loadDownloadStates();
 
+    renderDetectedVideos(doFull);
     if (doFull) {
-      renderDetectedVideos();
       renderDownloads(true);
       updateManualManifestFormState();
     } else {

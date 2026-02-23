@@ -2,7 +2,7 @@
  * Detected videos tab rendering.
  */
 
-import { DownloadStage } from "../core/types";
+import { DownloadState, DownloadStage, VideoMetadata } from "../core/types";
 import { normalizeUrl } from "../core/utils/url-utils";
 import { MessageType } from "../shared/messages";
 import { dom, detectedVideos, downloadStates } from "./state";
@@ -20,6 +20,90 @@ import {
 } from "./utils";
 import { startDownload } from "./download-actions";
 import { handleSendToManifestTab } from "./render-manifest";
+
+// Incremental rendering state
+const renderedVideoCards = new Map<string, HTMLElement>();
+let lastVideoSnapshotJson = "";
+
+/**
+ * Build a snapshot key for a detected video to detect structural changes.
+ */
+function videoStructureKey(video: VideoMetadata, downloadState?: DownloadState): string {
+  const stage = downloadState?.progress.stage ?? "none";
+  return `${video.url}:${video.format}:${stage}:${video.thumbnail ?? ""}:${video.hasDrm}:${video.unsupported}:${video.isLive}`;
+}
+
+/**
+ * Update only the progress-related elements inside an existing video card.
+ * Returns false if expected elements are missing (triggers full rebuild).
+ */
+function updateVideoCardProgress(card: HTMLElement, video: VideoMetadata): boolean {
+  const downloadState = getDownloadStateForVideo(video);
+  if (!downloadState) return true; // No download in progress, nothing to update
+
+  const stage = downloadState.progress.stage;
+  if (
+    stage === DownloadStage.COMPLETED ||
+    stage === DownloadStage.FAILED ||
+    stage === DownloadStage.CANCELLED
+  ) {
+    return true; // Terminal states don't need progress updates
+  }
+
+  if (stage === DownloadStage.RECORDING) {
+    const sizeEl = card.querySelector(".manifest-progress-size");
+    if (!sizeEl) return false;
+    const segmentsCollected = downloadState.progress.segmentsCollected || 0;
+    const downloaded = downloadState.progress.downloaded || 0;
+    sizeEl.textContent = `${segmentsCollected} segments \u2022 ${formatFileSize(downloaded)}`;
+    return true;
+  }
+
+  const isManifestDownload =
+    (video.format === "hls" || video.format === "m3u8") &&
+    (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
+
+  if (isManifestDownload && stage === DownloadStage.DOWNLOADING) {
+    const bar = card.querySelector<HTMLElement>(".manifest-progress-bar");
+    const sizeEl = card.querySelector(".manifest-progress-size");
+    const speedEl = card.querySelector(".manifest-progress-speed");
+    if (!bar || !sizeEl) return false;
+
+    const percentage = downloadState.progress.percentage || 0;
+    const downloaded = downloadState.progress.downloaded || 0;
+    const total = downloadState.progress.total || 0;
+    const speed = downloadState.progress.speed || 0;
+
+    bar.style.width = `${Math.min(percentage, 100)}%`;
+    sizeEl.textContent = `${formatFileSize(downloaded)} / ${total > 0 ? formatFileSize(total) : "?"}`;
+    if (speedEl) {
+      speedEl.textContent = speed > 0 ? formatSpeed(speed) : "";
+    }
+    return true;
+  }
+
+  if (isManifestDownload && stage === DownloadStage.MERGING) {
+    const bar = card.querySelector<HTMLElement>(".manifest-progress-bar");
+    const sizeEl = card.querySelector(".manifest-progress-size");
+    const speedEl = card.querySelector(".manifest-progress-speed");
+    if (!bar || !sizeEl) return false;
+
+    const percentage = Math.min(Math.max(downloadState.progress.percentage || 0, 0), 100);
+    const message = downloadState.progress.message || "Merging streams...";
+
+    bar.style.width = `${percentage}%`;
+    sizeEl.textContent = message;
+    if (speedEl) speedEl.textContent = `${Math.round(percentage)}%`;
+    return true;
+  }
+
+  // Direct/other downloading stages
+  const fileSizeEl = card.querySelector(".file-size");
+  if (fileSizeEl && downloadState.progress.total) {
+    fileSizeEl.textContent = formatFileSize(downloadState.progress.total);
+  }
+  return true;
+}
 
 /**
  * Setup delegated event listeners for the detected videos list (called once at init).
@@ -109,8 +193,9 @@ export function setupDetectedVideosEventDelegation(): void {
 
 /**
  * Render detected videos with download status and progress.
+ * Uses incremental DOM updates when only progress has changed.
  */
-export function renderDetectedVideos(): void {
+export function renderDetectedVideos(forceFullRebuild = false): void {
   const { detectedVideosList, noVideoBtn } = dom;
   if (!detectedVideosList) return;
 
@@ -126,8 +211,36 @@ export function renderDetectedVideos(): void {
 
   if (uniqueVideos.length === 0) {
     detectedVideosList.innerHTML = ``;
+    renderedVideoCards.clear();
+    lastVideoSnapshotJson = "";
     return;
   }
+
+  // Build structure snapshot to detect when full rebuild is needed
+  const structureSnapshot = uniqueVideos
+    .map((video) => videoStructureKey(video, getDownloadStateForVideo(video)))
+    .join("|");
+  const structureChanged = structureSnapshot !== lastVideoSnapshotJson;
+
+  // Incremental update: only patch progress elements in existing cards
+  if (!structureChanged && !forceFullRebuild) {
+    let needsRebuild = false;
+    for (const video of uniqueVideos) {
+      const normalizedUrl = normalizeUrl(video.url);
+      const card = renderedVideoCards.get(normalizedUrl);
+      if (card) {
+        if (!updateVideoCardProgress(card, video)) {
+          needsRebuild = true;
+          break;
+        }
+      }
+    }
+    if (!needsRebuild) return;
+  }
+
+  lastVideoSnapshotJson = structureSnapshot;
+
+  const scrollTop = detectedVideosList.scrollTop;
 
   detectedVideosList.innerHTML = uniqueVideos
     .map((video) => {
@@ -295,7 +408,7 @@ export function renderDetectedVideos(): void {
       }
 
       return `
-    <div class="video-item">
+    <div class="video-item" data-video-url="${escapeHtml(normalizedUrl)}">
       <div class="video-item-preview">
         ${
           video.thumbnail
@@ -385,6 +498,16 @@ export function renderDetectedVideos(): void {
   `;
     })
     .join("");
+
+  // Populate card tracking map
+  renderedVideoCards.clear();
+  detectedVideosList.querySelectorAll<HTMLElement>(".video-item[data-video-url]").forEach((card) => {
+    const url = card.dataset.videoUrl;
+    if (url) renderedVideoCards.set(url, card);
+  });
+
+  // Restore scroll position
+  detectedVideosList.scrollTop = scrollTop;
 
   // Handle thumbnail load errors
   detectedVideosList.querySelectorAll<HTMLImageElement>(".video-item-preview img").forEach((img) => {
