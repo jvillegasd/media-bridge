@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/jvillegasd/media-bridge/compare/v1.6.0...v1.7.0) (2026-02-24)
+
+
+### 🎉 New Features
+
+* iframe-and-UI: iframe detection and UI/UX refactor ([#27](https://github.com/jvillegasd/media-bridge/issues/27)) ([9f429c8](https://github.com/jvillegasd/media-bridge/commit/9f429c8a0b6fae4988a8d1ec031cf18beefd6f9c))
+
 ## [1.6.0](https://github.com/jvillegasd/media-bridge/compare/v1.5.0...v1.6.0) (2026-02-22)
 
 
