@@ -25,7 +25,6 @@ import {
 import { switchTab } from "./tabs";
 
 const RENDER_DEBOUNCE_MS = 200;
-const CLEAR_FEEDBACK_RESET_MS = 1000;
 
 // ---- Debounce state ----
 let renderDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -53,41 +52,29 @@ function scheduleDebouncedRender(needsFullRender: boolean): void {
   }, RENDER_DEBOUNCE_MS);
 }
 
-// ---- Menu dropdowns ----
-
-function closeAllMenuDropdowns(): void {
-  document.querySelectorAll(".menu-dropdown-content").forEach((dropdown) => {
-    dropdown.classList.remove("show");
-  });
-}
-
 // ---- No-video notice ----
 
 function showNoVideoNotice(): void {
   if (!dom.noVideoNotice) return;
   dom.noVideoNotice.classList.add("show");
-  dom.noVideoNotice.classList.remove("visible");
   dom.noVideoNotice.style.display = "block";
 }
 
 function hideNoVideoNotice(): void {
   if (!dom.noVideoNotice) return;
   dom.noVideoNotice.classList.remove("show");
-  dom.noVideoNotice.classList.remove("visible");
   dom.noVideoNotice.style.display = "none";
-}
-
-function toggleNoVideoNotice(): void {
-  showNoVideoNotice();
 }
 
 // ---- Force detection ----
 
 async function handleForceDetection(): Promise<void> {
-  if (!dom.forceDetectionBtn) return;
-  const originalText = dom.forceDetectionBtn.textContent;
-  dom.forceDetectionBtn.disabled = true;
-  dom.forceDetectionBtn.textContent = "Refreshing...";
+  const btn = (document.getElementById("forceDetectionBtn") ||
+    document.querySelector(".empty-state-action")) as HTMLButtonElement | null;
+  if (!btn) return;
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Refreshing...";
 
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -114,43 +101,15 @@ async function handleForceDetection(): Promise<void> {
     console.error("Failed to refresh tab for force detection:", error);
     alert("Failed to refresh the page. Please try again.");
   } finally {
-    dom.forceDetectionBtn.disabled = false;
-    dom.forceDetectionBtn.textContent = originalText || "Force detection";
-  }
-}
-
-// ---- Downloads folder ----
-
-async function handleOpenDownloads(): Promise<void> {
-  try {
-    await chrome.downloads.showDefaultFolder();
-  } catch (error) {
-    console.error("Failed to open downloads folder:", error);
-    alert("Failed to open downloads folder. Please check your browser settings.");
+    btn.disabled = false;
+    btn.textContent = originalText || "Force detection";
   }
 }
 
 // ---- Clear completed ----
 
 async function handleClearCompleted(): Promise<void> {
-  const clearCompletedButtons = document.querySelectorAll("#clearCompletedBtn") as NodeListOf<HTMLButtonElement>;
-  if (clearCompletedButtons.length === 0) return;
-
-  const firstButton = clearCompletedButtons[0];
-  const originalText = firstButton.querySelector("span")?.textContent;
-
-  const updateAllButtons = (disabled: boolean, text?: string) => {
-    clearCompletedButtons.forEach((btn) => {
-      btn.disabled = disabled;
-      if (text !== undefined && btn.querySelector("span")) {
-        btn.querySelector("span")!.textContent = text;
-      }
-    });
-  };
-
   try {
-    updateAllButtons(true, "Clearing...");
-
     const allDownloads = await getAllDownloads();
 
     const downloadsToClear = allDownloads.filter(
@@ -160,13 +119,7 @@ async function handleClearCompleted(): Promise<void> {
         download.progress.stage === DownloadStage.CANCELLED,
     );
 
-    if (downloadsToClear.length === 0) {
-      updateAllButtons(false, "Nothing to clear");
-      setTimeout(() => {
-        updateAllButtons(false, originalText || "Clear");
-      }, CLEAR_FEEDBACK_RESET_MS);
-      return;
-    }
+    if (downloadsToClear.length === 0) return;
 
     for (const download of downloadsToClear) {
       await deleteDownload(download.id);
@@ -174,15 +127,9 @@ async function handleClearCompleted(): Promise<void> {
 
     await loadDownloadStates();
     renderDetectedVideos();
-
-    updateAllButtons(false, "Cleared!");
-    setTimeout(() => {
-      updateAllButtons(false, originalText || "Clear");
-    }, CLEAR_FEEDBACK_RESET_MS);
+    renderDownloads(true);
   } catch (error) {
     console.error("Failed to clear completed downloads:", error);
-    alert("Failed to clear completed downloads. Please try again.");
-    updateAllButtons(false, originalText || "Clear");
   }
 }
 
@@ -199,72 +146,75 @@ async function requestDetectedVideos(): Promise<void> {
       active: true,
       currentWindow: true,
     });
-    if (tab.id) {
-      let response;
-      try {
-        response = await new Promise<any>((resolve, reject) => {
-          chrome.tabs.sendMessage(
-            tab.id!,
-            { type: MessageType.GET_DETECTED_VIDEOS },
-            (response) => {
-              if (chrome.runtime.lastError) {
-                const errorMessage = chrome.runtime.lastError.message || "";
-                if (errorMessage.includes("Extension context invalidated")) {
-                  console.debug(
-                    "Extension context invalidated, cannot communicate with content script",
-                  );
-                  reject(new Error("Extension context invalidated"));
+    if (!tab?.id) return;
+
+    const tabId = tab.id;
+
+    // Get all frames in the tab (top frame + iframes)
+    // chrome.webNavigation may not be available in all contexts, fall back to top frame only
+    let frames: Array<{ frameId: number }>;
+    if (chrome.webNavigation?.getAllFrames) {
+      const allFrames = await chrome.webNavigation.getAllFrames({ tabId });
+      frames = allFrames && allFrames.length > 0 ? allFrames : [{ frameId: 0 }];
+    } else {
+      frames = [{ frameId: 0 }];
+    }
+
+    // Query each frame for detected videos
+    const frameResponses = await Promise.allSettled(
+      frames.map(
+        (frame) =>
+          new Promise<any>((resolve, reject) => {
+            chrome.tabs.sendMessage(
+              tabId,
+              { type: MessageType.GET_DETECTED_VIDEOS },
+              { frameId: frame.frameId },
+              (response) => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message || "Unknown error"));
                   return;
                 }
-                reject(
-                  new Error(chrome.runtime.lastError.message || "Unknown error"),
-                );
-                return;
-              }
-              resolve(response);
-            },
-          );
-        });
-      } catch (error: any) {
-        if (error?.message?.includes("Extension context invalidated")) {
-          console.debug(
-            "Extension context invalidated, cannot communicate with content script",
-          );
-          return;
-        }
-        console.debug("Could not send message to content script:", error);
-        return;
-      }
+                resolve(response);
+              },
+            );
+          }),
+      ),
+    );
 
-      if (response && response.videos && Array.isArray(response.videos)) {
-        const currentUrl = tab.url || "";
-        const filteredVideos: Record<string, VideoMetadata> = {};
-        for (const [url, video] of Object.entries(detectedVideos)) {
-          if (!(video as VideoMetadata).pageUrl.includes(currentUrl)) {
-            filteredVideos[url] = video as VideoMetadata;
-          }
-        }
-        setDetectedVideos(filteredVideos);
-
-        response.videos.forEach((video: VideoMetadata) => {
-          const normalizedVideoUrl = normalizeUrl(video.url);
-          const existing = detectedVideos[normalizedVideoUrl];
-
-          if (!existing) {
-            detectedVideos[normalizedVideoUrl] = video;
-          } else {
-            if (video.title && !existing.title) existing.title = video.title;
-            if (video.thumbnail && !existing.thumbnail) existing.thumbnail = video.thumbnail;
-            if (video.resolution && !existing.resolution) existing.resolution = video.resolution;
-            if (video.width && !existing.width) existing.width = video.width;
-            if (video.height && !existing.height) existing.height = video.height;
-            if (video.duration && !existing.duration) existing.duration = video.duration;
-          }
-        });
-
-        renderDetectedVideos();
+    // Filter to keep only videos from the current page
+    const currentUrl = tab.url || "";
+    const filteredVideos: Record<string, VideoMetadata> = {};
+    for (const [url, video] of Object.entries(detectedVideos)) {
+      if (!(video as VideoMetadata).pageUrl.includes(currentUrl)) {
+        filteredVideos[url] = video as VideoMetadata;
       }
     }
+    setDetectedVideos(filteredVideos);
+
+    // Merge videos from all frames, deduplicating by normalized URL
+    for (const result of frameResponses) {
+      if (result.status !== "fulfilled") continue;
+      const response = result.value;
+      if (!response?.videos || !Array.isArray(response.videos)) continue;
+
+      for (const video of response.videos as VideoMetadata[]) {
+        const normalizedVideoUrl = normalizeUrl(video.url);
+        const existing = detectedVideos[normalizedVideoUrl];
+
+        if (!existing) {
+          detectedVideos[normalizedVideoUrl] = video;
+        } else {
+          if (video.title && !existing.title) existing.title = video.title;
+          if (video.thumbnail && !existing.thumbnail) existing.thumbnail = video.thumbnail;
+          if (video.resolution && !existing.resolution) existing.resolution = video.resolution;
+          if (video.width && !existing.width) existing.width = video.width;
+          if (video.height && !existing.height) existing.height = video.height;
+          if (video.duration && !existing.duration) existing.duration = video.duration;
+        }
+      }
+    }
+
+    renderDetectedVideos();
   } catch (error) {
     console.debug("Could not get detected videos:", error);
   }
@@ -332,30 +282,24 @@ function applyTheme(isLightMode: boolean): void {
 }
 
 function updateThemeIcon(isLightMode: boolean): void {
-  const themeIcons = document.querySelectorAll("#themeIcon") as NodeListOf<SVGElement>;
+  const themeIcon = document.getElementById("themeIcon") as unknown as SVGElement | null;
+  if (!themeIcon) return;
 
-  const moonIcon = `
-    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-  `;
-  const sunIcon = `
-    <circle cx="12" cy="12" r="5"></circle>
-    <line x1="12" y1="1" x2="12" y2="3"></line>
-    <line x1="12" y1="21" x2="12" y2="23"></line>
-    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-    <line x1="1" y1="12" x2="3" y2="12"></line>
-    <line x1="21" y1="12" x2="23" y2="12"></line>
-    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-  `;
-
-  themeIcons.forEach((icon) => {
-    if (isLightMode) {
-      icon.innerHTML = moonIcon;
-    } else {
-      icon.innerHTML = sunIcon;
-    }
-  });
+  if (isLightMode) {
+    themeIcon.innerHTML = `<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>`;
+  } else {
+    themeIcon.innerHTML = `
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    `;
+  }
 }
 
 async function toggleTheme(): Promise<void> {
@@ -374,6 +318,14 @@ function setupDownloadsEventDelegation(): void {
 
   dom.downloadsList.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
+
+    // Clear all button in section headers
+    const clearBtn = target.closest<HTMLElement>(".section-clear-btn");
+    if (clearBtn) {
+      e.stopPropagation();
+      await handleClearCompleted();
+      return;
+    }
 
     const openBtn = target.closest<HTMLElement>(".download-open-btn");
     if (openBtn) {
@@ -428,13 +380,10 @@ function setupDownloadsEventDelegation(): void {
 
 async function init(): Promise<void> {
   // Initialize DOM elements
-  dom.noVideoBtn = document.getElementById("noVideoBtn") as HTMLButtonElement;
   dom.forceDetectionBtn = document.getElementById("forceDetectionBtn") as HTMLButtonElement;
   dom.closeNoVideoNoticeBtn = document.getElementById("closeNoVideoNotice") as HTMLButtonElement;
   dom.noVideoNotice = document.getElementById("noVideoNotice") as HTMLDivElement;
   dom.settingsBtn = document.getElementById("settingsBtn") as HTMLButtonElement;
-  dom.downloadsBtn = document.getElementById("downloadsBtn") as HTMLButtonElement;
-  dom.clearCompletedBtn = document.getElementById("clearCompletedBtn") as HTMLButtonElement;
   dom.autoDetectTab = document.getElementById("autoDetectTab") as HTMLButtonElement;
   dom.manifestTab = document.getElementById("manifestTab") as HTMLButtonElement;
   dom.downloadsTab = document.getElementById("downloadsTab") as HTMLButtonElement;
@@ -454,69 +403,38 @@ async function init(): Promise<void> {
   dom.manifestQualitySelection = document.getElementById("hlsQualitySelection") as HTMLDivElement;
   dom.manifestProgress = document.getElementById("manifestProgress") as HTMLDivElement;
   dom.detectedVideosList = document.getElementById("detectedVideosList") as HTMLDivElement;
-  dom.themeToggle = document.querySelector("#themeToggle") as HTMLButtonElement;
-  dom.themeIcon = document.querySelector("#themeIcon") as unknown as SVGElement;
+  dom.themeToggle = document.getElementById("themeToggle") as HTMLButtonElement;
+  dom.themeIcon = document.getElementById("themeIcon") as unknown as SVGElement;
 
   // Ensure notice is hidden initially
   if (dom.noVideoNotice) {
     dom.noVideoNotice.classList.remove("show");
-    dom.noVideoNotice.classList.remove("visible");
   }
 
   await loadTheme();
 
   // Theme toggle
   if (dom.themeToggle) {
-    dom.themeToggle.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleTheme();
-      closeAllMenuDropdowns();
+    dom.themeToggle.addEventListener("click", toggleTheme);
+  }
+
+  // Settings
+  if (dom.settingsBtn) {
+    dom.settingsBtn.addEventListener("click", () => {
+      chrome.runtime.openOptionsPage();
     });
   }
 
-  // Menu dropdowns
-  document.querySelectorAll(".menu-dropdown").forEach((dropdown) => {
-    const menuBtn = dropdown.querySelector(".bottom-bar-btn") as HTMLButtonElement;
-    const menuContent = dropdown.querySelector(".menu-dropdown-content") as HTMLDivElement;
-
-    if (menuBtn && menuContent) {
-      menuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const isOpen = menuContent.classList.contains("show");
-        closeAllMenuDropdowns();
-        if (!isOpen) {
-          menuContent.classList.add("show");
-        }
-      });
-    }
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest(".menu-dropdown")) {
-      closeAllMenuDropdowns();
-    }
-  });
-
-  // Event listeners
-  if (dom.noVideoBtn) dom.noVideoBtn.addEventListener("click", toggleNoVideoNotice);
+  // No-video notice
   if (dom.closeNoVideoNoticeBtn) dom.closeNoVideoNoticeBtn.addEventListener("click", hideNoVideoNotice);
   if (dom.forceDetectionBtn) dom.forceDetectionBtn.addEventListener("click", handleForceDetection);
-  document.querySelectorAll("#settingsBtn").forEach((btn) => {
-    btn.addEventListener("click", () => { chrome.runtime.openOptionsPage(); });
-  });
-  document.querySelectorAll("#downloadsBtn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      handleOpenDownloads();
-      closeAllMenuDropdowns();
-    });
-  });
-  document.querySelectorAll("#clearCompletedBtn").forEach((btn) => {
-    btn.addEventListener("click", handleClearCompleted);
-  });
+
+  // Tab switching
   if (dom.autoDetectTab) dom.autoDetectTab.addEventListener("click", async () => await switchTab("auto"));
   if (dom.manifestTab) dom.manifestTab.addEventListener("click", async () => await switchTab("manual"));
   if (dom.downloadsTab) dom.downloadsTab.addEventListener("click", async () => await switchTab("downloads"));
+
+  // Manifest tab
   if (dom.startManifestDownloadBtn) dom.startManifestDownloadBtn.addEventListener("click", handleStartManifestDownload);
   if (dom.loadManifestPlaylistBtn) dom.loadManifestPlaylistBtn.addEventListener("click", handleLoadManifestPlaylist);
   if (dom.manifestUrlInput) {
@@ -530,6 +448,17 @@ async function init(): Promise<void> {
   // Event delegation (once, not per render)
   setupDownloadsEventDelegation();
   setupDetectedVideosEventDelegation();
+
+  // Event delegation for force-detect in empty state
+  if (dom.detectedVideosList) {
+    dom.detectedVideosList.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const forceBtn = target.closest<HTMLElement>(".empty-state-action");
+      if (forceBtn) {
+        handleForceDetection();
+      }
+    });
+  }
 
   // Message listener
   chrome.runtime.onMessage.addListener(async (message) => {

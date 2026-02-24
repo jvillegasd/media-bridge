@@ -13,10 +13,7 @@ let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 let sentToPopup = new Set<string>();
 let lastUrl = location.href;
-
-function isInIframe(): boolean {
-  return window.location !== window.parent.location;
-}
+const inIframe = window.self !== window.top;
 
 /**
  * Send message to popup with error handling for extension context invalidation
@@ -162,10 +159,12 @@ function addDetectedVideo(video: VideoMetadata) {
  * Sets up detection manager, performs initial scan, and monitors DOM changes
  */
 function init() {
-  // Reset icon to gray on page load
-  safeSendMessage({
-    type: MessageType.SET_ICON_GRAY,
-  });
+  // Reset icon to gray on page load (only from top frame)
+  if (!inIframe) {
+    safeSendMessage({
+      type: MessageType.SET_ICON_GRAY,
+    });
+  }
 
   detectionManager = new DetectionManager({
     onVideoDetected: (video) => {
@@ -204,30 +203,27 @@ function handleNavigation(): void {
   init();
 }
 
-// Listen for SPA navigations (History API)
-window.addEventListener("popstate", handleNavigation);
+// Listen for SPA navigations (History API) — only in top frame
+if (!inIframe) {
+  window.addEventListener("popstate", handleNavigation);
 
-// Intercept pushState/replaceState since they don't fire popstate
-const origPushState = history.pushState.bind(history);
-const origReplaceState = history.replaceState.bind(history);
-history.pushState = function (...args) {
-  origPushState(...args);
-  handleNavigation();
-};
-history.replaceState = function (...args) {
-  origReplaceState(...args);
-  handleNavigation();
-};
+  // Intercept pushState/replaceState since they don't fire popstate
+  const origPushState = history.pushState.bind(history);
+  const origReplaceState = history.replaceState.bind(history);
+  history.pushState = function (...args) {
+    origPushState(...args);
+    handleNavigation();
+  };
+  history.replaceState = function (...args) {
+    origReplaceState(...args);
+    handleNavigation();
+  };
+}
 
 /**
  * Listen for messages from popup and service worker
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (isInIframe()) {
-    console.debug("In iframe context");
-    return true;
-  }
-
   // Check if extension context is still valid
   if (chrome.runtime.lastError) {
     const errorMessage = chrome.runtime.lastError.message || "";
@@ -263,10 +259,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-if (!isInIframe()) {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
 }

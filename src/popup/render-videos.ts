@@ -21,6 +21,9 @@ import {
 import { startDownload } from "./download-actions";
 import { handleSendToManifestTab } from "./render-manifest";
 
+// SVG play icon for no-thumbnail state
+const PLAY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+
 // Incremental rendering state
 const renderedVideoCards = new Map<string, HTMLElement>();
 let lastVideoSnapshotJson = "";
@@ -39,7 +42,7 @@ function videoStructureKey(video: VideoMetadata, downloadState?: DownloadState):
  */
 function updateVideoCardProgress(card: HTMLElement, video: VideoMetadata): boolean {
   const downloadState = getDownloadStateForVideo(video);
-  if (!downloadState) return true; // No download in progress, nothing to update
+  if (!downloadState) return true;
 
   const stage = downloadState.progress.stage;
   if (
@@ -47,7 +50,7 @@ function updateVideoCardProgress(card: HTMLElement, video: VideoMetadata): boole
     stage === DownloadStage.FAILED ||
     stage === DownloadStage.CANCELLED
   ) {
-    return true; // Terminal states don't need progress updates
+    return true;
   }
 
   if (stage === DownloadStage.RECORDING) {
@@ -97,10 +100,11 @@ function updateVideoCardProgress(card: HTMLElement, video: VideoMetadata): boole
     return true;
   }
 
-  // Direct/other downloading stages
   const fileSizeEl = card.querySelector(".file-size");
-  if (fileSizeEl && downloadState.progress.total) {
-    fileSizeEl.textContent = formatFileSize(downloadState.progress.total);
+  if (fileSizeEl) {
+    fileSizeEl.textContent = downloadState.progress.total
+      ? formatFileSize(downloadState.progress.total)
+      : getStatusText(downloadState.progress.stage);
   }
   return true;
 }
@@ -196,21 +200,23 @@ export function setupDetectedVideosEventDelegation(): void {
  * Uses incremental DOM updates when only progress has changed.
  */
 export function renderDetectedVideos(forceFullRebuild = false): void {
-  const { detectedVideosList, noVideoBtn } = dom;
+  const { detectedVideosList } = dom;
   if (!detectedVideosList) return;
 
   const uniqueVideos = Object.values(detectedVideos);
 
-  if (noVideoBtn) {
-    if (uniqueVideos.length === 0) {
-      noVideoBtn.classList.add("no-videos-detected");
-    } else {
-      noVideoBtn.classList.remove("no-videos-detected");
-    }
-  }
-
   if (uniqueVideos.length === 0) {
-    detectedVideosList.innerHTML = ``;
+    detectedVideosList.innerHTML = `
+      <div class="empty-state">
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polygon points="23 7 16 12 23 17 23 7"></polygon>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+        </svg>
+        <div class="empty-state-title">No videos detected</div>
+        <div class="empty-state-subtitle">Play a video on the page to detect it, or try force detection to refresh.</div>
+        <button class="primary-btn empty-state-action">Force Detection</button>
+      </div>
+    `;
     renderedVideoCards.clear();
     lastVideoSnapshotJson = "";
     return;
@@ -272,7 +278,7 @@ function createVideoCardElement(video: VideoMetadata): HTMLElement {
     img.addEventListener("error", () => {
       const v = Object.values(detectedVideos).find((d) => d.thumbnail === img.src);
       if (v) v.thumbnail = undefined;
-      img.parentElement!.innerHTML = '<div class="no-thumbnail"></div>';
+      img.parentElement!.innerHTML = `<div class="no-thumbnail">${PLAY_ICON_SVG}</div>`;
     });
   }
 
@@ -325,9 +331,7 @@ function renderVideoItem(video: VideoMetadata): string {
 
   if (isDownloading) {
     const stage = downloadState.progress.stage;
-    statusBadge = `<span class="video-status status-${stage}">${getStatusText(
-      stage,
-    )}</span>`;
+    statusBadge = `<span class="video-status status-${stage}">${getStatusText(stage)}</span>`;
 
     if (stage === DownloadStage.RECORDING) {
       const segmentsCollected = downloadState.progress.segmentsCollected || 0;
@@ -344,11 +348,8 @@ function renderVideoItem(video: VideoMetadata): string {
             <span class="rec-badge"><span class="rec-dot"></span>REC</span>
           </div>
         </div>
-        <div style="display: flex; gap: 6px; margin-top: 6px;">
-          <button class="btn-stop-rec"
-                  data-url="${escapeHtml(video.url)}">
-            Stop
-          </button>
+        <div class="card-actions">
+          <button class="btn-stop-rec" data-url="${escapeHtml(video.url)}">Stop</button>
         </div>
       `;
       buttonText = "";
@@ -369,36 +370,22 @@ function renderVideoItem(video: VideoMetadata): string {
         const total = downloadState.progress.total || 0;
         const speed = downloadState.progress.speed || 0;
 
-        const downloadedText = formatFileSize(downloaded);
-        const totalText = total > 0 ? formatFileSize(total) : "?";
-        const speedText = formatSpeed(speed);
-
         progressBar = `
         <div class="manifest-progress-container">
           <div class="manifest-progress-bar-wrapper">
-            <div class="manifest-progress-bar" style="width: ${Math.min(
-              percentage,
-              100,
-            )}%"></div>
+            <div class="manifest-progress-bar" style="width: ${Math.min(percentage, 100)}%"></div>
           </div>
           <div class="manifest-progress-info">
-            <span class="manifest-progress-size">${downloadedText} / ${totalText}</span>
-            ${
-              speed > 0
-                ? `<span class="manifest-progress-speed">${speedText}</span>`
-                : ""
-            }
+            <span class="manifest-progress-size">${formatFileSize(downloaded)} / ${total > 0 ? formatFileSize(total) : "?"}</span>
+            ${speed > 0 ? `<span class="manifest-progress-speed">${formatSpeed(speed)}</span>` : ""}
           </div>
         </div>
-        <div style="display: flex; gap: 6px; margin-top: 6px;">
-          <button class="btn-stop-save" data-url="${escapeHtml(video.url)}">
-            Stop &amp; Save
-          </button>
+        <div class="card-actions">
+          <button class="btn-stop-save" data-url="${escapeHtml(video.url)}">Stop &amp; Save</button>
         </div>
       `;
       } else if (stage === DownloadStage.MERGING) {
-        const message =
-          downloadState.progress.message || "Merging streams...";
+        const message = downloadState.progress.message || "Merging streams...";
         const mergingPercentage = Math.min(Math.max(percentage, 0), 100);
 
         progressBar = `
@@ -408,9 +395,7 @@ function renderVideoItem(video: VideoMetadata): string {
           </div>
           <div class="manifest-progress-info">
             <span class="manifest-progress-size">${message}</span>
-            <span class="manifest-progress-speed">${Math.round(
-              mergingPercentage,
-            )}%</span>
+            <span class="manifest-progress-speed">${Math.round(mergingPercentage)}%</span>
           </div>
         </div>
       `;
@@ -420,15 +405,14 @@ function renderVideoItem(video: VideoMetadata): string {
       const fileSizeText = fileSize ? formatFileSize(fileSize) : "";
 
       progressBar = `
-      <div class="downloading-label">
-        <span class="downloading-dots">
-          <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-        </span>
-        ${
-          fileSizeText
-            ? `<span class="file-size">${fileSizeText}</span>`
-            : ""
-        }
+      <div class="manifest-progress-container">
+        <div class="manifest-progress-bar-wrapper">
+          <div class="manifest-progress-bar indeterminate"></div>
+        </div>
+        <div class="manifest-progress-info">
+          <span class="file-size">${fileSizeText || getStatusText(stage)}</span>
+          <span class="dl-badge"><span class="dl-dot"></span>DL</span>
+        </div>
       </div>
     `;
     }
@@ -447,16 +431,9 @@ function renderVideoItem(video: VideoMetadata): string {
   return `
     <div class="video-item">
       <div class="video-item-preview">
-        ${
-          video.thumbnail
-            ? `
-          <img src="${escapeHtml(video.thumbnail)}"
-               alt="Video preview"
-               loading="lazy">
-        `
-            : `
-          <div class="no-thumbnail">\uD83C\uDFAC</div>
-        `
+        ${video.thumbnail
+          ? `<img src="${escapeHtml(video.thumbnail)}" alt="Video preview" loading="lazy">`
+          : `<div class="no-thumbnail">${PLAY_ICON_SVG}</div>`
         }
       </div>
       <div class="video-item-content">
@@ -467,40 +444,15 @@ function renderVideoItem(video: VideoMetadata): string {
           ${statusBadge}
         </div>
         <div class="video-meta">
-          ${
-            displayResolution
-              ? `<span class="video-resolution">${escapeHtml(
-                  displayResolution,
-                )}</span>`
-              : ""
-          }
-          ${
-            displayDimensions
-              ? `<span class="video-resolution">${displayDimensions}</span>`
-              : ""
-          }
-          <span class="video-link-type">${escapeHtml(
-            getLinkTypeDisplayName(video.format),
-          )}</span>
-          <span class="video-format">${escapeHtml(
-            getFormatDisplayName(video.format, actualFormat),
-          )}</span>
-          ${
-            video.duration
-              ? `<span style="color: #999; margin-left: 4px;">\u23F1 ${formatDuration(
-                  video.duration,
-                )}</span>`
-              : ""
-          }
-        </div>
-        <div style="font-size: 11px; color: #b0b0b0; margin-top: 4px;">
-          From: ${escapeHtml(new URL(video.pageUrl).hostname)}
+          ${displayResolution ? `<span class="badge badge-resolution">${escapeHtml(displayResolution)}</span>` : ""}
+          ${displayDimensions ? `<span class="badge badge-resolution">${displayDimensions}</span>` : ""}
+          <span class="badge badge-link-type">${escapeHtml(getLinkTypeDisplayName(video.format))}</span>
+          <span class="badge badge-format">${escapeHtml(getFormatDisplayName(video.format, actualFormat))}</span>
+          ${video.duration ? `<span class="badge-duration">${formatDuration(video.duration)}</span>` : ""}
         </div>
         ${progressBar}
-        ${
-          !isDownloading && !hasDrm && !unsupported
-            ? `
-          <div style="display: flex; gap: 6px; margin-top: 6px;">
+        ${!isDownloading && !hasDrm && !unsupported ? `
+          <div class="card-actions">
             ${!video.isLive ? `
               <button class="video-btn ${buttonDisabled ? "disabled" : ""}"
                       data-url="${escapeHtml(video.url)}"
@@ -508,17 +460,13 @@ function renderVideoItem(video: VideoMetadata): string {
                 ${buttonText}
               </button>
             ` : ""}
-            ${
-              (video.format === "hls" || video.format === "m3u8") && !hasDrm && !unsupported
-                ? `
+            ${(video.format === "hls" || video.format === "m3u8") && !hasDrm && !unsupported ? `
               <button class="video-btn-manifest"
                       data-url="${escapeHtml(video.url)}"
                       title="Select quality">
                 Select Quality
               </button>
-            `
-                : ""
-            }
+            ` : ""}
             ${video.isLive ? `
               <button class="btn-rec"
                       data-url="${escapeHtml(video.url)}"
@@ -527,9 +475,7 @@ function renderVideoItem(video: VideoMetadata): string {
               </button>
             ` : ""}
           </div>
-        `
-            : ""
-        }
+        ` : ""}
       </div>
     </div>
   `;

@@ -27,13 +27,10 @@ export async function loadDownloadStates(): Promise<void> {
 
 // ---- DOM element references (populated by init) ----
 export const dom = {
-  noVideoBtn: null as HTMLButtonElement | null,
   forceDetectionBtn: null as HTMLButtonElement | null,
   closeNoVideoNoticeBtn: null as HTMLButtonElement | null,
   noVideoNotice: null as HTMLDivElement | null,
   settingsBtn: null as HTMLButtonElement | null,
-  downloadsBtn: null as HTMLButtonElement | null,
-  clearCompletedBtn: null as HTMLButtonElement | null,
   autoDetectTab: null as HTMLButtonElement | null,
   manifestTab: null as HTMLButtonElement | null,
   downloadsTab: null as HTMLButtonElement | null,
