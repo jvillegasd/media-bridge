@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0](https://github.com/jvillegasd/media-bridge/compare/v1.7.0...v1.8.0) (2026-02-24)
+
+
+### 🎉 New Features
+
+* bumping up license ([c9cbd2a](https://github.com/jvillegasd/media-bridge/commit/c9cbd2a62fc2c1e63376ac1569aad5c43955a74f))
+* change accent color from green to blue to match extension icon ([db62dee](https://github.com/jvillegasd/media-bridge/commit/db62deea66028203a76a881b1be7a8d411f18bc8))
+
 ## [1.7.0](https://github.com/jvillegasd/media-bridge/compare/v1.6.0...v1.7.0) (2026-02-24)
 
 
