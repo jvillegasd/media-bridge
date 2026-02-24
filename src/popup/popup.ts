@@ -146,72 +146,75 @@ async function requestDetectedVideos(): Promise<void> {
       active: true,
       currentWindow: true,
     });
-    if (tab.id) {
-      let response;
-      try {
-        response = await new Promise<any>((resolve, reject) => {
-          chrome.tabs.sendMessage(
-            tab.id!,
-            { type: MessageType.GET_DETECTED_VIDEOS },
-            (response) => {
-              if (chrome.runtime.lastError) {
-                const errorMessage = chrome.runtime.lastError.message || "";
-                if (errorMessage.includes("Extension context invalidated")) {
-                  console.debug(
-                    "Extension context invalidated, cannot communicate with content script",
-                  );
-                  reject(new Error("Extension context invalidated"));
+    if (!tab?.id) return;
+
+    const tabId = tab.id;
+
+    // Get all frames in the tab (top frame + iframes)
+    // chrome.webNavigation may not be available in all contexts, fall back to top frame only
+    let frames: Array<{ frameId: number }>;
+    if (chrome.webNavigation?.getAllFrames) {
+      const allFrames = await chrome.webNavigation.getAllFrames({ tabId });
+      frames = allFrames && allFrames.length > 0 ? allFrames : [{ frameId: 0 }];
+    } else {
+      frames = [{ frameId: 0 }];
+    }
+
+    // Query each frame for detected videos
+    const frameResponses = await Promise.allSettled(
+      frames.map(
+        (frame) =>
+          new Promise<any>((resolve, reject) => {
+            chrome.tabs.sendMessage(
+              tabId,
+              { type: MessageType.GET_DETECTED_VIDEOS },
+              { frameId: frame.frameId },
+              (response) => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message || "Unknown error"));
                   return;
                 }
-                reject(
-                  new Error(chrome.runtime.lastError.message || "Unknown error"),
-                );
-                return;
-              }
-              resolve(response);
-            },
-          );
-        });
-      } catch (error: any) {
-        if (error?.message?.includes("Extension context invalidated")) {
-          console.debug(
-            "Extension context invalidated, cannot communicate with content script",
-          );
-          return;
-        }
-        console.debug("Could not send message to content script:", error);
-        return;
-      }
+                resolve(response);
+              },
+            );
+          }),
+      ),
+    );
 
-      if (response && response.videos && Array.isArray(response.videos)) {
-        const currentUrl = tab.url || "";
-        const filteredVideos: Record<string, VideoMetadata> = {};
-        for (const [url, video] of Object.entries(detectedVideos)) {
-          if (!(video as VideoMetadata).pageUrl.includes(currentUrl)) {
-            filteredVideos[url] = video as VideoMetadata;
-          }
-        }
-        setDetectedVideos(filteredVideos);
-
-        response.videos.forEach((video: VideoMetadata) => {
-          const normalizedVideoUrl = normalizeUrl(video.url);
-          const existing = detectedVideos[normalizedVideoUrl];
-
-          if (!existing) {
-            detectedVideos[normalizedVideoUrl] = video;
-          } else {
-            if (video.title && !existing.title) existing.title = video.title;
-            if (video.thumbnail && !existing.thumbnail) existing.thumbnail = video.thumbnail;
-            if (video.resolution && !existing.resolution) existing.resolution = video.resolution;
-            if (video.width && !existing.width) existing.width = video.width;
-            if (video.height && !existing.height) existing.height = video.height;
-            if (video.duration && !existing.duration) existing.duration = video.duration;
-          }
-        });
-
-        renderDetectedVideos();
+    // Filter to keep only videos from the current page
+    const currentUrl = tab.url || "";
+    const filteredVideos: Record<string, VideoMetadata> = {};
+    for (const [url, video] of Object.entries(detectedVideos)) {
+      if (!(video as VideoMetadata).pageUrl.includes(currentUrl)) {
+        filteredVideos[url] = video as VideoMetadata;
       }
     }
+    setDetectedVideos(filteredVideos);
+
+    // Merge videos from all frames, deduplicating by normalized URL
+    for (const result of frameResponses) {
+      if (result.status !== "fulfilled") continue;
+      const response = result.value;
+      if (!response?.videos || !Array.isArray(response.videos)) continue;
+
+      for (const video of response.videos as VideoMetadata[]) {
+        const normalizedVideoUrl = normalizeUrl(video.url);
+        const existing = detectedVideos[normalizedVideoUrl];
+
+        if (!existing) {
+          detectedVideos[normalizedVideoUrl] = video;
+        } else {
+          if (video.title && !existing.title) existing.title = video.title;
+          if (video.thumbnail && !existing.thumbnail) existing.thumbnail = video.thumbnail;
+          if (video.resolution && !existing.resolution) existing.resolution = video.resolution;
+          if (video.width && !existing.width) existing.width = video.width;
+          if (video.height && !existing.height) existing.height = video.height;
+          if (video.duration && !existing.duration) existing.duration = video.duration;
+        }
+      }
+    }
+
+    renderDetectedVideos();
   } catch (error) {
     console.debug("Could not get detected videos:", error);
   }

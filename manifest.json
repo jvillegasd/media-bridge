@@ -12,7 +12,8 @@
     "downloads",
     "tabs",
     "activeTab",
-    "offscreen"
+    "offscreen",
+    "webNavigation"
   ],
   "host_permissions": [
     "http://*/*",
@@ -40,7 +41,7 @@
         "content.js"
       ],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "options_page": "options/options.html",
