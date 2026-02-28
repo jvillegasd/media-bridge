@@ -60,12 +60,12 @@ let processingQueue: Promise<void> = Promise.resolve();
 function enqueue<T>(job: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     processingQueue = processingQueue.then(async () => {
-        try {
-          resolve(await job());
-        } catch (error) {
-          reject(error);
-        }
-      });
+      try {
+        resolve(await job());
+      } catch (error) {
+        reject(error);
+      }
+    });
   });
 }
 
@@ -108,7 +108,9 @@ async function concatenateChunks(
     }
   }
 
-  logger.info(`Concatenated ${chunks.length}/${length} chunks (${totalBytes} bytes, ${missingCount} missing) for ${downloadId}`);
+  logger.info(
+    `Concatenated ${chunks.length}/${length} chunks (${totalBytes} bytes, ${missingCount} missing) for ${downloadId}`,
+  );
 
   return {
     blob: new Blob(chunks, { type: "video/mp2t" }),
@@ -123,12 +125,17 @@ async function concatenateChunks(
 /**
  * Safely clean up intermediate files from FFmpeg's virtual filesystem
  */
-async function cleanupFiles(ffmpeg: FFmpeg, filenames: string[]): Promise<void> {
+async function cleanupFiles(
+  ffmpeg: FFmpeg,
+  filenames: string[],
+): Promise<void> {
   for (const name of filenames) {
     try {
       await ffmpeg.deleteFile(name);
     } catch {
-      logger.debug(`Could not delete intermediate file ${name} (may not exist)`);
+      logger.debug(
+        `Could not delete intermediate file ${name} (may not exist)`,
+      );
     }
   }
 }
@@ -137,7 +144,10 @@ async function cleanupFiles(ffmpeg: FFmpeg, filenames: string[]): Promise<void> 
  * Build a user-facing warning string from missing chunk counts.
  * Returns undefined if no chunks are missing.
  */
-function buildMissingChunksWarning(missingCount: number, totalCount: number): string | undefined {
+function buildMissingChunksWarning(
+  missingCount: number,
+  totalCount: number,
+): string | undefined {
   if (missingCount === 0 || totalCount === 0) return undefined;
   const pct = ((missingCount / totalCount) * 100).toFixed(1);
   return `${missingCount} of ${totalCount} chunks were missing (${pct}%) — video may have gaps`;
@@ -242,7 +252,12 @@ async function processAudioOnly(
   onProgress?: (progress: number, message: string) => void,
 ): Promise<string | undefined> {
   return processSingleStream(
-    ffmpeg, downloadId, audioLength, 0, "audio", outputFileName,
+    ffmpeg,
+    downloadId,
+    audioLength,
+    0,
+    "audio",
+    outputFileName,
     ["-c:a", "copy", "-movflags", "+faststart"],
     onProgress,
   );
@@ -282,7 +297,12 @@ async function processHLSChunks(
       );
     } else if (videoLength > 0) {
       warning = await processSingleStream(
-        ffmpeg, downloadId, videoLength, 0, "video", outputFileName,
+        ffmpeg,
+        downloadId,
+        videoLength,
+        0,
+        "video",
+        outputFileName,
         ["-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"],
         onProgress,
       );
@@ -341,7 +361,12 @@ async function processM3u8Chunks(
   try {
     // Process M3U8 media playlist
     const warning = await processSingleStream(
-      ffmpeg, downloadId, fragmentCount, 0, "media", outputFileName,
+      ffmpeg,
+      downloadId,
+      fragmentCount,
+      0,
+      "media",
+      outputFileName,
       ["-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"],
       onProgress,
     );
@@ -375,7 +400,9 @@ async function processM3u8Chunks(
  */
 function sendToServiceWorker(msg: object): void {
   chrome.runtime.sendMessage(msg, () => {
-    if (chrome.runtime.lastError) { /* intentionally swallowed */ }
+    if (chrome.runtime.lastError) {
+      /* intentionally swallowed */
+    }
   });
 }
 
@@ -398,15 +425,14 @@ function handleProcessingMessage(
   const { downloadId } = message.payload;
   sendResponse({ acknowledged: true });
 
-  enqueue(() => processFn(
-    message.payload,
-    (progress, msg) => {
+  enqueue(() =>
+    processFn(message.payload, (progress, msg) => {
       sendToServiceWorker({
         type: responseType,
         payload: { downloadId, type: "progress", progress, message: msg },
       });
-    },
-  ))
+    }),
+  )
     .then(({ blobUrl, warning }) => {
       sendToServiceWorker({
         type: responseType,
@@ -431,28 +457,45 @@ function handleProcessingMessage(
  * Handle messages from service worker
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (handleProcessingMessage(
-    message, sendResponse,
-    MessageType.OFFSCREEN_PROCESS_HLS,
-    MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-    (payload, onProgress) => processHLSChunks(
-      payload.downloadId as string,
-      payload.videoLength as number,
-      payload.audioLength as number,
-      onProgress,
-    ),
-  )) return true;
+  if (
+    handleProcessingMessage(
+      message,
+      sendResponse,
+      MessageType.OFFSCREEN_PROCESS_HLS,
+      MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
+      (payload, onProgress) =>
+        processHLSChunks(
+          payload.downloadId as string,
+          payload.videoLength as number,
+          payload.audioLength as number,
+          onProgress,
+        ),
+    )
+  )
+    return true;
 
-  if (handleProcessingMessage(
-    message, sendResponse,
-    MessageType.OFFSCREEN_PROCESS_M3U8,
-    MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-    (payload, onProgress) => processM3u8Chunks(
-      payload.downloadId as string,
-      payload.fragmentCount as number,
-      onProgress,
-    ),
-  )) return true;
+  if (
+    handleProcessingMessage(
+      message,
+      sendResponse,
+      MessageType.OFFSCREEN_PROCESS_M3U8,
+      MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
+      (payload, onProgress) =>
+        processM3u8Chunks(
+          payload.downloadId as string,
+          payload.fragmentCount as number,
+          onProgress,
+        ),
+    )
+  )
+    return true;
+
+  // Pre-warm FFmpeg while segments are downloading
+  if (message.type === MessageType.WARMUP_FFMPEG) {
+    sendResponse({ acknowledged: true });
+    getFFmpeg().catch((err) => logger.error("FFmpeg warmup failed:", err));
+    return false;
+  }
 
   // Revoke a blob URL that was created in this offscreen document context
   if (message.type === MessageType.REVOKE_BLOB_URL) {

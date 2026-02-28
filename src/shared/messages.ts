@@ -61,6 +61,9 @@ export enum MessageType {
 
   // Blob URL revocation (must be sent to offscreen document — not service worker)
   REVOKE_BLOB_URL = "REVOKE_BLOB_URL",
+
+  // FFmpeg pre-warm
+  WARMUP_FFMPEG = "WARMUP_FFMPEG",
 }
 
 export interface BaseMessage {

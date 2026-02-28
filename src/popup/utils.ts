@@ -77,17 +77,17 @@ export function getFormatDisplayName(
   actualFormat?: string | null,
 ): string {
   if (actualFormat) return actualFormat;
-  if (format === "direct") return "MP4";
+  if (format === VideoFormat.DIRECT) return "MP4";
   return format.toUpperCase();
 }
 
 export function getLinkTypeDisplayName(format: VideoFormat): string {
   switch (format) {
-    case "direct":
+    case VideoFormat.DIRECT:
       return "Direct";
-    case "hls":
+    case VideoFormat.HLS:
       return "HLS";
-    case "m3u8":
+    case VideoFormat.M3U8:
       return "M3U8";
     default:
       return format.toUpperCase();

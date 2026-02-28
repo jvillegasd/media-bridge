@@ -27,26 +27,26 @@ export function normalizeUrl(url: string): string {
 export function detectFormatFromUrl(url: string): VideoFormat {
   // Handle blob URLs - these are already video blobs, treat as direct
   if (url.startsWith("blob:")) {
-    return "direct";
+    return VideoFormat.DIRECT;
   }
 
   // Handle data URLs - treat as direct
   if (url.startsWith("data:")) {
-    return "direct";
+    return VideoFormat.DIRECT;
   }
 
   let urlObj: URL;
   try {
     urlObj = new URL(url);
   } catch (error) {
-    return "unknown";
+    return VideoFormat.UNKNOWN;
   }
 
   const pathnameLower = urlObj.pathname.toLowerCase();
 
   // Check for HLS playlist files (.m3u8) on pathname only
   if (pathnameLower.endsWith(".m3u8")) {
-    return "hls";
+    return VideoFormat.HLS;
   }
 
   // Check for common video extensions on pathname only
@@ -61,14 +61,14 @@ export function detectFormatFromUrl(url: string): VideoFormat {
     ".wmv",
   ];
   if (videoExtensions.some((ext) => pathnameLower.endsWith(ext))) {
-    return "direct";
+    return VideoFormat.DIRECT;
   }
 
   // If no clear format detected but it looks like a video URL, assume direct
   // Many video CDNs don't include file extensions
   if (urlObj.pathname.match(/\/(video|stream|media|v|embed)\//i)) {
-    return "direct";
+    return VideoFormat.DIRECT;
   }
 
-  return "unknown";
+  return VideoFormat.UNKNOWN;
 }

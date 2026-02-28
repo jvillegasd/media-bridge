@@ -20,7 +20,7 @@
  * @module DetectionManager
  */
 
-import { VideoMetadata } from "../types";
+import { VideoMetadata, VideoFormat } from "../types";
 import { logger } from "../utils/logger";
 import { detectFormatFromUrl } from "../utils/url-utils";
 import { DirectDetectionHandler } from "./direct/direct-detection-handler";
@@ -68,12 +68,12 @@ export class DetectionManager {
     const format = detectFormatFromUrl(url);
 
     switch (format) {
-      case "direct":
+      case VideoFormat.DIRECT:
         logger.debug("[Media Bridge] Direct video detected", { url });
         this.directHandler.handleNetworkRequest(url);
         break;
 
-      case "hls":
+      case VideoFormat.HLS:
         logger.debug("[Media Bridge] HLS video detected", { url });
         this.hlsHandler.handleNetworkRequest(url);
         break;

@@ -2,7 +2,7 @@
  * Manual manifest tab: load playlist, quality selection, start download.
  */
 
-import { VideoMetadata, DownloadStage } from "../core/types";
+import { VideoMetadata, DownloadStage, VideoFormat } from "../core/types";
 import { normalizeUrl, detectFormatFromUrl } from "../core/utils/url-utils";
 import { parseMasterPlaylist, isMasterPlaylist, isMediaPlaylist } from "../core/utils/m3u8-parser";
 import { hasDrm, canDecrypt } from "../core/utils/drm-utils";
@@ -130,7 +130,7 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
   const normalizedUrl = normalizeUrl(rawUrl);
 
   const format = detectFormatFromUrl(normalizedUrl);
-  if (format !== "hls") {
+  if (format !== VideoFormat.HLS) {
     alert("Please enter a valid manifest URL (.m3u8 or .mpd)");
     return;
   }
@@ -339,7 +339,7 @@ export async function handleStartManifestDownload(): Promise<void> {
 
     const metadata: VideoMetadata = {
       url: playlistUrl,
-      format: isMediaPlaylistMode ? "m3u8" : "hls",
+      format: isMediaPlaylistMode ? VideoFormat.M3U8 : VideoFormat.HLS,
       title: tabTitle || "Manifest Video",
       pageUrl: pageUrl || window.location.href,
       isLive: isLiveManifest,

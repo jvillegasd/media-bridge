@@ -23,7 +23,7 @@
  * @module DirectDetectionHandler
  */
 
-import { VideoMetadata } from "../../types";
+import { VideoMetadata, VideoFormat } from "../../types";
 import { detectFormatFromUrl } from "../../utils/url-utils";
 import { extractThumbnail } from "../../utils/thumbnail-utils";
 
@@ -339,7 +339,7 @@ export class DirectDetectionHandler {
     const format = detectFormatFromUrl(url);
 
     // Reject unknown formats
-    if (format === "unknown") {
+    if (format === VideoFormat.UNKNOWN) {
       return null;
     }
 

@@ -115,7 +115,7 @@ export class DownloadManager {
       );
 
       // Validate format from metadata (should already be set by detection)
-      if (metadata.format === "unknown") {
+      if (metadata.format === VideoFormat.UNKNOWN) {
         const error = new Error(`Video format is unknown for URL: ${url}`);
         return await this.createFailedState(
           state.id,
@@ -136,7 +136,7 @@ export class DownloadManager {
       const actualVideoUrl = metadata.url;
 
       // Route to appropriate download handler based on format
-      if (format === "direct") {
+      if (format === VideoFormat.DIRECT) {
         // Use direct download handler with Chrome downloads API
         // AbortSignal is used to cancel the HEAD request for extension detection
         // The actual Chrome download is cancelled via chrome.downloads.cancel
@@ -146,7 +146,7 @@ export class DownloadManager {
           state.id,
           abortSignal,
         );
-      } else if (format === "hls") {
+      } else if (format === VideoFormat.HLS) {
         // Use HLS download handler
         await this.hlsDownloadHandler.download(
           actualVideoUrl,
@@ -156,7 +156,7 @@ export class DownloadManager {
           abortSignal,
           metadata.pageUrl,
         );
-      } else if (format === "m3u8") {
+      } else if (format === VideoFormat.M3U8) {
         // Use M3U8 download handler
         await this.m3u8DownloadHandler.download(
           actualVideoUrl,

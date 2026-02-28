@@ -2,7 +2,7 @@
  * Downloads tab rendering with incremental DOM updates.
  */
 
-import { DownloadState, DownloadStage } from "../core/types";
+import { DownloadState, DownloadStage, VideoFormat } from "../core/types";
 import { storeDownload } from "../core/database/downloads";
 import { dom, downloadStates } from "./state";
 import {
@@ -47,7 +47,7 @@ function updateDownloadCardProgress(card: HTMLElement, download: DownloadState):
 
   const isRecording = stage === DownloadStage.RECORDING;
   const isManifestDownload =
-    (download.metadata.format === "hls" || download.metadata.format === "m3u8") &&
+    (download.metadata.format === VideoFormat.HLS || download.metadata.format === VideoFormat.M3U8) &&
     (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
   if (isRecording) {
@@ -173,8 +173,8 @@ function renderDownloadItem(download: DownloadState): string {
   let progressBar = "";
   const isRecording = stage === DownloadStage.RECORDING;
   const isManifestDownload =
-    (download.metadata.format === "hls" ||
-      download.metadata.format === "m3u8") &&
+    (download.metadata.format === VideoFormat.HLS ||
+      download.metadata.format === VideoFormat.M3U8) &&
     (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
   if (isRecording) {
@@ -287,7 +287,7 @@ function renderDownloadItem(download: DownloadState): string {
       `;
     } else {
       const isDownloading = download.progress.stage === DownloadStage.DOWNLOADING;
-      const isManifestType = download.metadata.format === "hls" || download.metadata.format === "m3u8";
+      const isManifestType = download.metadata.format === VideoFormat.HLS || download.metadata.format === VideoFormat.M3U8;
       actionButtons = `
         <div class="card-actions">
           ${isDownloading && isManifestType ? `<button class="btn-stop-save" data-action="stop-save" data-url="${escapeHtml(download.metadata.url)}" title="Stop & Save">Stop &amp; Save</button>` : `<button class="video-btn-manifest download-remove-btn" data-download-id="${escapeHtml(download.id)}">Cancel</button>`}

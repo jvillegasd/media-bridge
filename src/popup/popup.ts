@@ -2,7 +2,7 @@
  * Popup entry point: initialization, tab switching, theme, and message routing.
  */
 
-import { VideoMetadata, DownloadStage } from "../core/types";
+import { VideoMetadata, DownloadStage, VideoFormat } from "../core/types";
 import { getAllDownloads, deleteDownload } from "../core/database/downloads";
 import { MessageType } from "../shared/messages";
 import { normalizeUrl } from "../core/utils/url-utils";
@@ -232,7 +232,7 @@ function removeDetectedVideo(url: string | undefined): void {
 }
 
 function addDetectedVideo(video: VideoMetadata): void {
-  if (video.format === "unknown") {
+  if (video.format === VideoFormat.UNKNOWN) {
     const normalizedUrl = normalizeUrl(video.url);
     if (detectedVideos[normalizedUrl]) {
       delete detectedVideos[normalizedUrl];
