@@ -4,7 +4,7 @@
  */
 
 import { MessageType } from "./shared/messages";
-import { VideoMetadata } from "./core/types";
+import { VideoMetadata, VideoFormat } from "./core/types";
 import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
 import { logger } from "./core/utils/logger";
@@ -68,7 +68,7 @@ function removeDetectedVideo(url: string): void {
  */
 function addDetectedVideo(video: VideoMetadata) {
   // Reject unknown formats - don't show them in UI
-  if (video.format === "unknown") {
+  if (video.format === VideoFormat.UNKNOWN) {
     return;
   }
 

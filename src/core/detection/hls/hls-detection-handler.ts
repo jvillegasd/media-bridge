@@ -25,7 +25,7 @@
  * @module HlsDetectionHandler
  */
 
-import { VideoMetadata } from "../../types";
+import { VideoMetadata, VideoFormat } from "../../types";
 import {
   isMasterPlaylist,
   isMediaPlaylist,
@@ -168,7 +168,7 @@ export class HlsDetectionHandler {
     // A media playlist without #EXT-X-ENDLIST is a live stream
     const isLive = !playlistText.includes("#EXT-X-ENDLIST");
     logger.info("[Media Bridge] Detected standalone M3U8 media playlist", url);
-    return await this.addDetectedVideo(url, "m3u8", playlistText, isLive);
+    return await this.addDetectedVideo(url, VideoFormat.M3U8, playlistText, isLive);
   }
 
   /**
@@ -197,7 +197,7 @@ export class HlsDetectionHandler {
     // Determine liveness by fetching the first variant playlist and checking for #EXT-X-ENDLIST
     const isLive = await this.checkMasterIsLive(levels);
 
-    return await this.addDetectedVideo(url, "hls", playlistText, isLive);
+    return await this.addDetectedVideo(url, VideoFormat.HLS, playlistText, isLive);
   }
 
   /**
@@ -268,7 +268,7 @@ export class HlsDetectionHandler {
    */
   private async addDetectedVideo(
     url: string,
-    format: "hls" | "m3u8",
+    format: VideoFormat.HLS | VideoFormat.M3U8,
     playlistText: string,
     isLive: boolean = false,
   ): Promise<VideoMetadata | null> {
@@ -372,7 +372,7 @@ export class HlsDetectionHandler {
    */
   private async extractMetadata(
     url: string,
-    format: "hls" | "m3u8" = "hls",
+    format: VideoFormat.HLS | VideoFormat.M3U8 = VideoFormat.HLS,
     playlistText: string,
     isLive: boolean = false,
   ): Promise<VideoMetadata | null> {

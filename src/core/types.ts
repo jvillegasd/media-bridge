@@ -2,7 +2,12 @@
  * Type definitions for Media Bridge Extension
  */
 
-export type VideoFormat = "direct" | "hls" | "m3u8" | "unknown";
+export enum VideoFormat {
+  DIRECT  = "direct",
+  HLS     = "hls",
+  M3U8    = "m3u8",
+  UNKNOWN = "unknown",
+}
 
 export interface VideoMetadata {
   url: string;

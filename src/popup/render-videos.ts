@@ -2,7 +2,7 @@
  * Detected videos tab rendering.
  */
 
-import { DownloadState, DownloadStage, VideoMetadata } from "../core/types";
+import { DownloadState, DownloadStage, VideoMetadata, VideoFormat } from "../core/types";
 import { normalizeUrl } from "../core/utils/url-utils";
 import { MessageType } from "../shared/messages";
 import { dom, detectedVideos, downloadStates } from "./state";
@@ -63,7 +63,7 @@ function updateVideoCardProgress(card: HTMLElement, video: VideoMetadata): boole
   }
 
   const isManifestDownload =
-    (video.format === "hls" || video.format === "m3u8") &&
+    (video.format === VideoFormat.HLS || video.format === VideoFormat.M3U8) &&
     (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
   if (isManifestDownload && stage === DownloadStage.DOWNLOADING) {
@@ -357,7 +357,7 @@ function renderVideoItem(video: VideoMetadata): string {
     }
 
     const isManifestDownload =
-      (video.format === "hls" || video.format === "m3u8") &&
+      (video.format === VideoFormat.HLS || video.format === VideoFormat.M3U8) &&
       (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
     if (stage === DownloadStage.RECORDING) {
@@ -460,7 +460,7 @@ function renderVideoItem(video: VideoMetadata): string {
                 ${buttonText}
               </button>
             ` : ""}
-            ${(video.format === "hls" || video.format === "m3u8") && !hasDrm && !unsupported ? `
+            ${(video.format === VideoFormat.HLS || video.format === VideoFormat.M3U8) && !hasDrm && !unsupported ? `
               <button class="video-btn-manifest"
                       data-url="${escapeHtml(video.url)}"
                       title="Select quality">

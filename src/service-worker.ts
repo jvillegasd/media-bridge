@@ -19,6 +19,7 @@ import {
   StorageConfig,
   VideoMetadata,
   DownloadStage,
+  VideoFormat,
 } from "./core/types";
 import { CancellationError } from "./core/utils/errors";
 import { generateDownloadId } from "./core/utils/id-utils";
@@ -33,6 +34,7 @@ import {
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
 import { deleteChunks, getChunkCount, getAllChunkDownloadIds } from "./core/database/chunks";
+import { createOffscreenDocument, closeOffscreenDocument } from "./core/utils/offscreen-manager";
 import {
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_FFMPEG_TIMEOUT_MS,
@@ -292,7 +294,7 @@ chrome.webRequest.onCompleted.addListener(
     logger.info(`Network request completed: ${url}`);
     // Detect if this is a video URL
     const format = detectFormatFromUrl(url);
-    if (format === "unknown") {
+    if (format === VideoFormat.UNKNOWN) {
       return;
     }
 
@@ -405,8 +407,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function cleanupOrphanedChunks(existing: DownloadState) {
   if (
-    existing.metadata.format !== "hls" &&
-    existing.metadata.format !== "m3u8"
+    existing.metadata.format !== VideoFormat.HLS &&
+    existing.metadata.format !== VideoFormat.M3U8
   ) {
     return;
   }
@@ -593,6 +595,12 @@ async function handleDownloadRequest(payload: {
   // Start keep-alive if this is the first active download
   if (activeDownloads.size === 1) {
     keepAlive(true);
+    // Pre-warm FFmpeg for HLS/M3U8 downloads while segments download
+    if (metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8) {
+      createOffscreenDocument()
+        .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
+        .catch((err) => logger.error("FFmpeg pre-warm failed:", err));
+    }
   }
 
   downloadPromise
@@ -620,6 +628,9 @@ async function handleDownloadRequest(payload: {
       // Stop keep-alive if no more active downloads
       if (activeDownloads.size === 0) {
         keepAlive(false);
+        closeOffscreenDocument().catch((err) =>
+          logger.error("Failed to close offscreen document:", err),
+        );
       }
     });
 }
@@ -740,7 +751,7 @@ async function startDownload(
     let finalFilename = filename;
     if (!finalFilename) {
       // HLS/M3U8 formats always produce MP4 after FFmpeg processing
-      const extension = metadata.format === "hls" || metadata.format === "m3u8"
+      const extension = metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8
         ? "mp4"
         : metadata.fileExtension || "mp4";
       // Use tab info if available, otherwise fall back to URL-based generation
@@ -844,8 +855,8 @@ async function handleCancelDownload(id: string): Promise<void> {
   // 3. Clean up chunks for HLS/M3U8 downloads
   // Only cleanup if format is HLS or M3U8 (these use IndexedDB chunks)
   if (
-    download.metadata.format === "hls" ||
-    download.metadata.format === "m3u8"
+    download.metadata.format === VideoFormat.HLS ||
+    download.metadata.format === VideoFormat.M3U8
   ) {
     try {
       await deleteChunks(download.id);
@@ -945,7 +956,7 @@ async function handleStartRecordingMessage(payload: {
     let finalFilename = filename;
     if (!finalFilename) {
       // HLS/M3U8 formats always produce MP4 after FFmpeg processing
-      const extension = metadata.format === "hls" || metadata.format === "m3u8"
+      const extension = metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8
         ? "mp4"
         : metadata.fileExtension || "mp4";
       if (tabTitle || website) {
