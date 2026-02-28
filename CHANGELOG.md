@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/jvillegasd/media-bridge/compare/v1.8.0...v1.9.0) (2026-02-28)
+
+
+### 🎉 New Features
+
+* enhance-ffmpeg: Improve UI response and updates when extension downloads multiple files, open / close ffmpeg isntance on demand ([#30](https://github.com/jvillegasd/media-bridge/issues/30)) ([9f2a21e](https://github.com/jvillegasd/media-bridge/commit/9f2a21e9d6a11bac03a3766d90025a1c65220a46))
+
 ## [1.8.0](https://github.com/jvillegasd/media-bridge/compare/v1.7.0...v1.8.0) (2026-02-24)
 
 
