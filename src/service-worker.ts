@@ -88,21 +88,23 @@ async function cleanupStaleChunks(): Promise<void> {
   const chunkDownloadIds = await getAllChunkDownloadIds();
   if (chunkDownloadIds.length === 0) return;
 
-  let cleaned = 0;
-  for (const downloadId of chunkDownloadIds) {
-    const download = await getDownload(downloadId);
-    const isOrphaned =
-      !download ||
-      download.progress.stage === DownloadStage.COMPLETED ||
-      download.progress.stage === DownloadStage.FAILED ||
-      download.progress.stage === DownloadStage.CANCELLED;
+  const results = await Promise.all(
+    chunkDownloadIds.map(async (downloadId) => {
+      const download = await getDownload(downloadId);
+      const isOrphaned =
+        !download ||
+        download.progress.stage === DownloadStage.COMPLETED ||
+        download.progress.stage === DownloadStage.FAILED ||
+        download.progress.stage === DownloadStage.CANCELLED;
+      if (isOrphaned) {
+        await deleteChunks(downloadId);
+        return true;
+      }
+      return false;
+    }),
+  );
 
-    if (isOrphaned) {
-      await deleteChunks(downloadId);
-      cleaned++;
-    }
-  }
-
+  const cleaned = results.filter(Boolean).length;
   if (cleaned > 0) {
     logger.info(`Cleaned up orphaned chunks for ${cleaned} download(s)`);
   }
@@ -521,29 +523,8 @@ async function handleDownloadRequest(payload: {
         return;
       }
 
-      // Store signal reference for consistent checks throughout this function
-      const signal = controller?.signal;
-
-      // Double-check cancellation state in database (defensive check)
-      const currentState = await getDownload(state.id);
-      // If download was deleted (cancelled) or has CANCELLED stage, don't update
-      if (!currentState) {
-        logger.info(
-          `Download ${state.id} was deleted (cancelled), ignoring progress update`,
-        );
-        return;
-      }
-      if (currentState.progress.stage === DownloadStage.CANCELLED) {
-        logger.info(
-          `Download ${state.id} was cancelled, ignoring progress update`,
-        );
-        return;
-      }
-
       // Final abort check immediately before storing to minimize race window
-      // Re-check abort signal after async database operation using stored reference
-      // Skip this check if we're saving a partial download
-      if (!isSavingPartial && signal?.aborted) {
+      if (!isSavingPartial && controller?.signal.aborted) {
         logger.info(
           `Download ${state.id} was aborted, ignoring progress update`,
         );
