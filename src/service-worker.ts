@@ -975,7 +975,13 @@ async function handleStartRecordingMessage(payload: {
       });
 
     activeDownloads.set(normalizedUrl, recordingPromise);
-    if (activeDownloads.size === 1) keepAlive(true);
+    if (activeDownloads.size === 1) {
+      keepAlive(true);
+      // Pre-warm FFmpeg — recordings always need FFmpeg for the merge phase
+      createOffscreenDocument()
+        .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
+        .catch((err) => logger.error("FFmpeg pre-warm failed for recording:", err));
+    }
 
     return { success: true };
   } catch (error) {
