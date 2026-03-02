@@ -63,7 +63,9 @@ function updateVideoCardProgress(card: HTMLElement, video: VideoMetadata): boole
   }
 
   const isManifestDownload =
-    (video.format === VideoFormat.HLS || video.format === VideoFormat.M3U8) &&
+    (video.format === VideoFormat.HLS ||
+      video.format === VideoFormat.M3U8 ||
+      video.format === VideoFormat.DASH) &&
     (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
   if (isManifestDownload && stage === DownloadStage.DOWNLOADING) {
@@ -357,7 +359,9 @@ function renderVideoItem(video: VideoMetadata): string {
     }
 
     const isManifestDownload =
-      (video.format === VideoFormat.HLS || video.format === VideoFormat.M3U8) &&
+      (video.format === VideoFormat.HLS ||
+        video.format === VideoFormat.M3U8 ||
+        video.format === VideoFormat.DASH) &&
       (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
     if (stage === DownloadStage.RECORDING) {

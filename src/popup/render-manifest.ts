@@ -6,6 +6,7 @@ import { VideoMetadata, DownloadStage, VideoFormat } from "../core/types";
 import { normalizeUrl, detectFormatFromUrl } from "../core/utils/url-utils";
 import { parseMasterPlaylist, isMasterPlaylist, isMediaPlaylist } from "../core/parsers/m3u8-parser";
 import { hasDrm, canDecrypt } from "../core/utils/drm-utils";
+import { MpdParser } from "../core/parsers/mpd-parser";
 import { MessageType } from "../shared/messages";
 import {
   dom,
@@ -21,6 +22,8 @@ import {
   setCurrentManualManifestUrl,
   setHasDrmInManifest,
   setUnsupportedManifest,
+  currentManifestFormat,
+  setCurrentManifestFormat,
 } from "./state";
 import { fetchTextViaBackground, formatQualityLabel } from "./utils";
 import { renderDownloads } from "./render-downloads";
@@ -130,7 +133,7 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
   const normalizedUrl = normalizeUrl(rawUrl);
 
   const format = detectFormatFromUrl(normalizedUrl);
-  if (format !== VideoFormat.HLS) {
+  if (format !== VideoFormat.HLS && format !== VideoFormat.DASH) {
     alert("Please enter a valid manifest URL (.m3u8 or .mpd)");
     return;
   }
@@ -152,106 +155,139 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
 
   try {
     const playlistText = await fetchTextViaBackground(normalizedUrl);
+    setCurrentManifestFormat(format);
 
-    setHasDrmInManifest(hasDrm(playlistText));
-    setUnsupportedManifest(!canDecrypt(playlistText));
+    if (format === VideoFormat.DASH) {
+      setHasDrmInManifest(MpdParser.hasDrm(playlistText));
+      setUnsupportedManifest(false);
 
-    if (hasDrmInManifest) {
-      if (dom.manifestDrmWarning) dom.manifestDrmWarning.style.display = "block";
-      if (dom.manifestUnsupportedWarning) dom.manifestUnsupportedWarning.style.display = "none";
-      if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
-      if (dom.manifestLiveStreamInfo) dom.manifestLiveStreamInfo.style.display = "none";
-      if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
-      if (dom.startManifestDownloadBtn) dom.startManifestDownloadBtn.disabled = true;
-      updateManualManifestFormState();
-      return;
-    }
-
-    if (unsupportedManifest) {
-      if (dom.manifestUnsupportedWarning) dom.manifestUnsupportedWarning.style.display = "block";
-      if (dom.manifestDrmWarning) dom.manifestDrmWarning.style.display = "none";
-      if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
-      if (dom.manifestLiveStreamInfo) dom.manifestLiveStreamInfo.style.display = "none";
-      if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
-      if (dom.startManifestDownloadBtn) dom.startManifestDownloadBtn.disabled = true;
-      updateManualManifestFormState();
-      return;
-    }
-
-    if (isMediaPlaylist(playlistText)) {
-      setIsMediaPlaylistMode(true);
-      setIsLiveManifest(!playlistText.includes("#EXT-X-ENDLIST"));
-      if (dom.manifestMediaPlaylistWarning) {
-        dom.manifestMediaPlaylistWarning.style.display = isLiveManifest ? "none" : "block";
+      if (hasDrmInManifest) {
+        if (dom.manifestDrmWarning) dom.manifestDrmWarning.style.display = "block";
+        if (dom.manifestUnsupportedWarning) dom.manifestUnsupportedWarning.style.display = "none";
+        if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
+        if (dom.manifestLiveStreamInfo) dom.manifestLiveStreamInfo.style.display = "none";
+        if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
+        if (dom.startManifestDownloadBtn) dom.startManifestDownloadBtn.disabled = true;
+        updateManualManifestFormState();
+        return;
       }
+
+      const live = MpdParser.isLive(playlistText);
+      setIsLiveManifest(live);
+      setIsMediaPlaylistMode(true); // DASH auto-selects quality — no quality picker needed
+
+      if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
+      if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
       if (dom.manifestLiveStreamInfo) {
-        dom.manifestLiveStreamInfo.style.display = isLiveManifest ? "block" : "none";
-        const infoText = document.getElementById("hlsLiveStreamInfoText");
-        if (infoText) {
-          infoText.textContent = "This is a live stream. Click Record to start capturing the stream.";
+        dom.manifestLiveStreamInfo.style.display = live ? "block" : "none";
+        if (live) {
+          const infoText = document.getElementById("hlsLiveStreamInfoText");
+          if (infoText) {
+            infoText.textContent = "This is a live DASH stream. Click Record to start capturing.";
+          }
         }
       }
-      if (dom.manifestQualitySelection) {
-        dom.manifestQualitySelection.style.display = "none";
+    } else {
+      setHasDrmInManifest(hasDrm(playlistText));
+      setUnsupportedManifest(!canDecrypt(playlistText));
+
+      if (hasDrmInManifest) {
+        if (dom.manifestDrmWarning) dom.manifestDrmWarning.style.display = "block";
+        if (dom.manifestUnsupportedWarning) dom.manifestUnsupportedWarning.style.display = "none";
+        if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
+        if (dom.manifestLiveStreamInfo) dom.manifestLiveStreamInfo.style.display = "none";
+        if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
+        if (dom.startManifestDownloadBtn) dom.startManifestDownloadBtn.disabled = true;
+        updateManualManifestFormState();
+        return;
       }
-    } else if (isMasterPlaylist(playlistText)) {
-      setIsMediaPlaylistMode(false);
-      if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
-      const { videoQualitySelect, audioQualitySelect, manifestQualitySelection } = dom;
-      if (manifestQualitySelection && videoQualitySelect && audioQualitySelect) {
-        manifestQualitySelection.style.display = "block";
 
-        const levels = parseMasterPlaylist(playlistText, normalizedUrl);
-        const videoLevels = levels.filter((level) => level.type === "stream");
-        const audioLevels = levels.filter((level) => level.type === "audio");
+      if (unsupportedManifest) {
+        if (dom.manifestUnsupportedWarning) dom.manifestUnsupportedWarning.style.display = "block";
+        if (dom.manifestDrmWarning) dom.manifestDrmWarning.style.display = "none";
+        if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
+        if (dom.manifestLiveStreamInfo) dom.manifestLiveStreamInfo.style.display = "none";
+        if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
+        if (dom.startManifestDownloadBtn) dom.startManifestDownloadBtn.disabled = true;
+        updateManualManifestFormState();
+        return;
+      }
 
-        setIsLiveManifest(false);
-        if (videoLevels.length > 0) {
-          try {
-            const variantText = await fetchTextViaBackground(videoLevels[0]!.uri);
-            setIsLiveManifest(!variantText.includes("#EXT-X-ENDLIST"));
-          } catch {}
+      if (isMediaPlaylist(playlistText)) {
+        setIsMediaPlaylistMode(true);
+        setIsLiveManifest(!playlistText.includes("#EXT-X-ENDLIST"));
+        if (dom.manifestMediaPlaylistWarning) {
+          dom.manifestMediaPlaylistWarning.style.display = isLiveManifest ? "none" : "block";
         }
-
         if (dom.manifestLiveStreamInfo) {
           dom.manifestLiveStreamInfo.style.display = isLiveManifest ? "block" : "none";
           const infoText = document.getElementById("hlsLiveStreamInfoText");
           if (infoText) {
-            infoText.textContent = "This is a live stream. Select a quality and click Record to start capturing the stream.";
+            infoText.textContent = "This is a live stream. Click Record to start capturing the stream.";
           }
         }
-
-        videoQualitySelect.innerHTML = '<option value="">None (audio only)</option>';
-        videoLevels.forEach((level, index) => {
-          const option = document.createElement("option");
-          option.value = level.uri;
-          option.textContent = formatQualityLabel(level);
-          option.setAttribute("data-level-index", index.toString());
-          videoQualitySelect!.appendChild(option);
-        });
-        videoQualitySelect.disabled = false;
-
-        audioQualitySelect.innerHTML = '<option value="">None (video only)</option>';
-        audioLevels.forEach((level, index) => {
-          const option = document.createElement("option");
-          option.value = level.uri;
-          option.textContent = level.id;
-          option.setAttribute("data-level-index", index.toString());
-          audioQualitySelect!.appendChild(option);
-        });
-        audioQualitySelect.disabled = false;
-
-        if (videoLevels.length > 0 && videoQualitySelect.options.length > 1) {
-          videoQualitySelect.selectedIndex = 1;
+        if (dom.manifestQualitySelection) {
+          dom.manifestQualitySelection.style.display = "none";
         }
-        if (audioLevels.length > 0 && audioQualitySelect.options.length > 1) {
-          audioQualitySelect.selectedIndex = 1;
-        }
+      } else if (isMasterPlaylist(playlistText)) {
+        setIsMediaPlaylistMode(false);
+        if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
+        const { videoQualitySelect, audioQualitySelect, manifestQualitySelection } = dom;
+        if (manifestQualitySelection && videoQualitySelect && audioQualitySelect) {
+          manifestQualitySelection.style.display = "block";
 
-        updateDownloadButtonState();
+          const levels = parseMasterPlaylist(playlistText, normalizedUrl);
+          const videoLevels = levels.filter((level) => level.type === "stream");
+          const audioLevels = levels.filter((level) => level.type === "audio");
+
+          setIsLiveManifest(false);
+          if (videoLevels.length > 0) {
+            try {
+              const variantText = await fetchTextViaBackground(videoLevels[0]!.uri);
+              setIsLiveManifest(!variantText.includes("#EXT-X-ENDLIST"));
+            } catch {}
+          }
+
+          if (dom.manifestLiveStreamInfo) {
+            dom.manifestLiveStreamInfo.style.display = isLiveManifest ? "block" : "none";
+            const infoText = document.getElementById("hlsLiveStreamInfoText");
+            if (infoText) {
+              infoText.textContent = "This is a live stream. Select a quality and click Record to start capturing the stream.";
+            }
+          }
+
+          videoQualitySelect.innerHTML = '<option value="">None (audio only)</option>';
+          videoLevels.forEach((level, index) => {
+            const option = document.createElement("option");
+            option.value = level.uri;
+            option.textContent = formatQualityLabel(level);
+            option.setAttribute("data-level-index", index.toString());
+            videoQualitySelect!.appendChild(option);
+          });
+          videoQualitySelect.disabled = false;
+
+          audioQualitySelect.innerHTML = '<option value="">None (video only)</option>';
+          audioLevels.forEach((level, index) => {
+            const option = document.createElement("option");
+            option.value = level.uri;
+            option.textContent = level.id;
+            option.setAttribute("data-level-index", index.toString());
+            audioQualitySelect!.appendChild(option);
+          });
+          audioQualitySelect.disabled = false;
+
+          if (videoLevels.length > 0 && videoQualitySelect.options.length > 1) {
+            videoQualitySelect.selectedIndex = 1;
+          }
+          if (audioLevels.length > 0 && audioQualitySelect.options.length > 1) {
+            audioQualitySelect.selectedIndex = 1;
+          }
+
+          updateDownloadButtonState();
+        }
+      } else {
+        throw new Error("Invalid playlist format");
       }
-    } else {
-      throw new Error("Invalid playlist format");
     }
 
     updateManualManifestFormState();
@@ -339,7 +375,9 @@ export async function handleStartManifestDownload(): Promise<void> {
 
     const metadata: VideoMetadata = {
       url: playlistUrl,
-      format: isMediaPlaylistMode ? VideoFormat.M3U8 : VideoFormat.HLS,
+      format: currentManifestFormat === VideoFormat.DASH
+        ? VideoFormat.DASH
+        : (isMediaPlaylistMode ? VideoFormat.M3U8 : VideoFormat.HLS),
       title: tabTitle || "Manifest Video",
       pageUrl: pageUrl || window.location.href,
       isLive: isLiveManifest,
