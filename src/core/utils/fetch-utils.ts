@@ -2,9 +2,10 @@
  * Fetch utility functions with retry logic
  */
 
-import { FetchFn } from "../types";
 import { MessageType } from "../../shared/messages";
 import { INITIAL_RETRY_DELAY_MS, RETRY_BACKOFF_FACTOR } from "../../shared/constants";
+
+type FetchFn<Data> = () => Promise<Data>;
 
 /**
  * Check if we're running in a service worker/background context

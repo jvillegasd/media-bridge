@@ -8,7 +8,7 @@
 import { parse, MpdManifest, MpdPlaylist } from "mpd-parser";
 import { v4 as uuidv4 } from "uuid";
 import { Level, LevelType } from "../types";
-import type { ParsedPlaylist, ParsedSegment } from "../types";
+import type { ParsedPlaylist, ParsedSegment } from "./playlist-utils";
 import { parseLevelsPlaylist } from "./playlist-utils";
 
 // Re-export for callers that want the unified Fragment conversion.

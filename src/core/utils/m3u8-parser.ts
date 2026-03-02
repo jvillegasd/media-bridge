@@ -6,7 +6,7 @@ import { Parser } from "m3u8-parser";
 import { buildAbsoluteURL } from "url-toolkit";
 import { v4 as uuidv4 } from "uuid";
 import { Level, LevelType } from "../types";
-import type { ParsedPlaylist, ParsedSegment } from "../types";
+import type { ParsedPlaylist, ParsedSegment } from "./playlist-utils";
 import { normalizeUrl } from "./url-utils";
 import { logger } from "./logger";
 

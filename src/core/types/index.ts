@@ -101,8 +101,6 @@ export interface MessageResponse {
   error?: string;
 }
 
-export type FetchFn<Data> = () => Promise<Data>;
-
 // HLS Playlist Types
 export type LevelType = "stream" | "audio";
 
@@ -126,16 +124,3 @@ export interface Level {
   width?: number;
 }
 
-// Protocol-agnostic intermediate segment produced by parseMediaPlaylist (HLS)
-// or getVideoPlaylist/getAudioPlaylist (DASH) before Fragment[] conversion.
-export interface ParsedSegment {
-  uri: string;
-  initUri?: string; // EXT-X-MAP (HLS) or segment.map.resolvedUri (DASH)
-  initByteRange?: string; // "offset:length" — HLS only
-  key?: { iv: string | null; uri: string | null }; // HLS only
-}
-
-// Protocol-agnostic playlist ready for Fragment[] conversion via parseLevelsPlaylist.
-export interface ParsedPlaylist {
-  segments: ParsedSegment[];
-}

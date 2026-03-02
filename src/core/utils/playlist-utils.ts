@@ -1,5 +1,15 @@
 import { Fragment } from "../types";
-import type { ParsedPlaylist } from "../types";
+
+export interface ParsedSegment {
+  uri: string;
+  initUri?: string; // EXT-X-MAP (HLS) or segment.map.resolvedUri (DASH)
+  initByteRange?: string; // "offset:length" — HLS only
+  key?: { iv: string | null; uri: string | null }; // HLS only
+}
+
+export interface ParsedPlaylist {
+  segments: ParsedSegment[];
+}
 
 /**
  * Convert a ParsedPlaylist into a Fragment[] with sequential indices.
