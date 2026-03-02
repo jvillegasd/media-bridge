@@ -6,6 +6,7 @@ export enum VideoFormat {
   DIRECT  = "direct",
   HLS     = "hls",
   M3U8    = "m3u8",
+  DASH    = "dash",
   UNKNOWN = "unknown",
 }
 

@@ -25,6 +25,7 @@ import { logger } from "../utils/logger";
 import { detectFormatFromUrl } from "../utils/url-utils";
 import { DirectDetectionHandler } from "./direct/direct-detection-handler";
 import { HlsDetectionHandler } from "./hls/hls-detection-handler";
+import { DashDetectionHandler } from "./dash/dash-detection-handler";
 
 /** Configuration options for DetectionManager */
 export interface DetectionManagerOptions {
@@ -43,6 +44,7 @@ export class DetectionManager {
   private onVideoRemoved?: (url: string) => void;
   public readonly directHandler: DirectDetectionHandler;
   private hlsHandler: HlsDetectionHandler;
+  private dashHandler: DashDetectionHandler;
 
   /**
    * Create a new DetectionManager instance
@@ -57,6 +59,9 @@ export class DetectionManager {
     this.hlsHandler = new HlsDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
       onVideoRemoved: (url) => this.handleVideoRemoved(url),
+    });
+    this.dashHandler = new DashDetectionHandler({
+      onVideoDetected: (video) => this.handleVideoDetected(video),
     });
   }
 
@@ -76,6 +81,11 @@ export class DetectionManager {
       case VideoFormat.HLS:
         logger.debug("[Media Bridge] HLS video detected", { url });
         this.hlsHandler.handleNetworkRequest(url);
+        break;
+
+      case VideoFormat.DASH:
+        logger.debug("[Media Bridge] DASH video detected", { url });
+        this.dashHandler.handleNetworkRequest(url);
         break;
 
       default:
@@ -103,6 +113,7 @@ export class DetectionManager {
   destroy(): void {
     this.directHandler.destroy();
     this.hlsHandler.destroy();
+    this.dashHandler.destroy();
   }
 
   /**

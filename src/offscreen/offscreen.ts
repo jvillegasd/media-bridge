@@ -342,6 +342,144 @@ async function processHLSChunks(
 }
 
 /**
+ * Process DASH chunks (ISOBMF/.m4s segments) and convert to MP4.
+ *
+ * Nearly identical to processHLSChunks() but:
+ *   - Intermediate files use .mp4 extension (ISOBMF demuxer, not MPEG-TS)
+ *   - No -bsf:a aac_adtstoasc bitstream filter (not needed for MP4 container)
+ *   - Handles both dual-stream VOD (video+audio) and single-stream recording
+ */
+
+async function processDashVideoAndAudio(
+  ffmpeg: FFmpeg,
+  downloadId: string,
+  videoLength: number,
+  audioLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string | undefined> {
+  const videoFile = `${downloadId}_video.mp4`;
+  const audioFile = `${downloadId}_audio.mp4`;
+
+  try {
+    onProgress?.(0.1, "Concatenating chunks");
+    const [videoResult, audioResult] = await Promise.all([
+      concatenateChunks(downloadId, 0, videoLength),
+      concatenateChunks(downloadId, videoLength, audioLength),
+    ]);
+
+    onProgress?.(0.5, "Writing video stream");
+    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
+
+    onProgress?.(0.6, "Writing audio stream");
+    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
+
+    onProgress?.(0.7, "Merging video and audio");
+    await ffmpeg.exec([
+      "-y",
+      "-i", videoFile,
+      "-i", audioFile,
+      "-c:v", "copy",
+      "-c:a", "copy",
+      "-movflags", "+faststart",
+      outputFileName,
+    ]);
+
+    const totalMissing = videoResult.missingCount + audioResult.missingCount;
+    const totalChunks = videoResult.totalCount + audioResult.totalCount;
+    return buildMissingChunksWarning(totalMissing, totalChunks);
+  } finally {
+    await cleanupFiles(ffmpeg, [videoFile, audioFile]);
+  }
+}
+
+async function processDashSingleStream(
+  ffmpeg: FFmpeg,
+  downloadId: string,
+  fragmentCount: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string | undefined> {
+  const inputFile = `${downloadId}_media.mp4`;
+
+  try {
+    onProgress?.(0.2, "Concatenating segments");
+    const result = await concatenateChunks(downloadId, 0, fragmentCount);
+
+    onProgress?.(0.5, "Writing media stream");
+    await ffmpeg.writeFile(inputFile, await fetchFile(result.blob));
+
+    onProgress?.(0.7, "Converting to MP4");
+    await ffmpeg.exec([
+      "-y",
+      "-i", inputFile,
+      "-c", "copy",
+      "-movflags", "+faststart",
+      outputFileName,
+    ]);
+
+    return buildMissingChunksWarning(result.missingCount, result.totalCount);
+  } finally {
+    await cleanupFiles(ffmpeg, [inputFile]);
+  }
+}
+
+async function processDashChunks(
+  downloadId: string,
+  videoLength: number,
+  audioLength: number,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<ProcessResult> {
+  validateDownloadId(downloadId);
+  const ffmpeg = await getFFmpeg();
+
+  const outputFileName = `/tmp/${downloadId}.mp4`;
+
+  try {
+    let warning: string | undefined;
+
+    if (videoLength > 0 && audioLength > 0) {
+      warning = await processDashVideoAndAudio(
+        ffmpeg,
+        downloadId,
+        videoLength,
+        audioLength,
+        outputFileName,
+        onProgress,
+      );
+    } else if (videoLength > 0) {
+      warning = await processDashSingleStream(
+        ffmpeg,
+        downloadId,
+        videoLength,
+        outputFileName,
+        onProgress,
+      );
+    } else {
+      throw new Error("No DASH chunks to process");
+    }
+
+    const data = await ffmpeg.readFile(outputFileName);
+    onProgress?.(1, "Done");
+
+    const blob = new Blob([data as BlobPart], { type: "video/mp4" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    try {
+      await ffmpeg.deleteFile(outputFileName);
+    } catch {
+      // File may not exist, ignore error
+    }
+
+    return { blobUrl, warning };
+  } catch (error) {
+    resetFFmpeg();
+    logger.error(`FFmpeg DASH processing failed for ${downloadId}:`, error);
+    throw error;
+  }
+}
+
+/**
  * Process M3U8 media playlist chunks and convert to MP4
  */
 async function processM3u8Chunks(
@@ -484,6 +622,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         processM3u8Chunks(
           payload.downloadId as string,
           payload.fragmentCount as number,
+          onProgress,
+        ),
+    )
+  )
+    return true;
+
+  if (
+    handleProcessingMessage(
+      message,
+      sendResponse,
+      MessageType.OFFSCREEN_PROCESS_DASH,
+      MessageType.OFFSCREEN_PROCESS_DASH_RESPONSE,
+      (payload, onProgress) =>
+        processDashChunks(
+          payload.downloadId as string,
+          payload.videoLength as number,
+          payload.audioLength as number,
           onProgress,
         ),
     )
