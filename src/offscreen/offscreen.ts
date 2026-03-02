@@ -413,6 +413,7 @@ async function processDashVideoAndAudioSeparate(
       "-i", audioFile,
       "-c:v", "copy",
       "-c:a", "copy",
+      "-shortest",
       "-movflags", "+faststart",
       outputFileName,
     ]);
