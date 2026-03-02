@@ -15,6 +15,7 @@ import { Fragment } from "../../types";
 import { fetchText } from "../../utils/fetch-utils";
 import {
   parseMasterPlaylist,
+  parseMediaPlaylist,
   parseLevelsPlaylist,
 } from "../../utils/m3u8-parser";
 import { logger } from "../../utils/logger";
@@ -83,7 +84,7 @@ export class HlsRecordingHandler extends BaseRecordingHandler {
   ): Promise<{ fragments: Fragment[]; pollIntervalMs: number; ended: boolean }> {
     const playlistText = await fetchText(url, 3, abortSignal, true);
 
-    const allFragments = parseLevelsPlaylist(playlistText, url);
+    const allFragments = parseLevelsPlaylist(parseMediaPlaylist(playlistText, url));
     const newFragments = allFragments.filter((f) => !seenUris.has(f.uri));
 
     const ended = playlistText.includes("#EXT-X-ENDLIST");

@@ -19,7 +19,7 @@ import {
   parseLevelsPlaylist,
   isLive,
   getPollIntervalMs,
-  MpdPlaylist,
+  getVideoPlaylist,
 } from "../../utils/mpd-parser";
 
 export class DashRecordingHandler extends BaseRecordingHandler {
@@ -43,14 +43,10 @@ export class DashRecordingHandler extends BaseRecordingHandler {
     const manifest = parseManifest(mpdText, mpdUrl);
 
     // Select highest bandwidth video playlist (single stream — audio typically muxed)
-    const playlists: MpdPlaylist[] = [...(manifest.playlists || [])];
-    if (playlists.length === 0) {
+    const playlist = getVideoPlaylist(manifest);
+    if (!playlist) {
       return { fragments: [], pollIntervalMs: getPollIntervalMs(mpdText), ended: false };
     }
-    playlists.sort(
-      (a, b) => (b.attributes?.BANDWIDTH || 0) - (a.attributes?.BANDWIDTH || 0),
-    );
-    const playlist = playlists[0]!;
 
     // Parse all segments for this playlist and filter to only new ones
     const allFragments = parseLevelsPlaylist(playlist, 0);

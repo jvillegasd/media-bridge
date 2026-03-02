@@ -27,8 +27,8 @@ import {
   parseManifest,
   parseLevelsPlaylist,
   hasDrm,
+  getVideoPlaylist,
   getAudioPlaylist,
-  MpdPlaylist,
 } from "../../utils/mpd-parser";
 
 export class DashDownloadHandler extends BasePlaylistHandler {
@@ -71,17 +71,12 @@ export class DashDownloadHandler extends BasePlaylistHandler {
 
       const manifest = parseManifest(mpdText, mpdUrl);
 
-      // Select highest bandwidth video playlist
-      const videoPlaylists = [...(manifest.playlists || [])];
-      if (videoPlaylists.length === 0) {
+      const videoPlaylist = getVideoPlaylist(manifest);
+      if (!videoPlaylist) {
         throw new Error("No video streams found in MPD manifest");
       }
-      videoPlaylists.sort(
-        (a, b) => (b.attributes?.BANDWIDTH || 0) - (a.attributes?.BANDWIDTH || 0),
-      );
-      const videoPlaylist = videoPlaylists[0]!;
 
-      const audioPlaylist: MpdPlaylist | null = getAudioPlaylist(manifest);
+      const audioPlaylist = getAudioPlaylist(manifest);
 
       throwIfAborted(this.abortSignal);
 

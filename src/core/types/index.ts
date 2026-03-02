@@ -3,10 +3,10 @@
  */
 
 export enum VideoFormat {
-  DIRECT  = "direct",
-  HLS     = "hls",
-  M3U8    = "m3u8",
-  DASH    = "dash",
+  DIRECT = "direct",
+  HLS = "hls",
+  M3U8 = "m3u8",
+  DASH = "dash",
   UNKNOWN = "unknown",
 }
 
@@ -124,4 +124,18 @@ export interface Level {
   fps?: number;
   height?: number;
   width?: number;
+}
+
+// Protocol-agnostic intermediate segment produced by parseMediaPlaylist (HLS)
+// or getVideoPlaylist/getAudioPlaylist (DASH) before Fragment[] conversion.
+export interface ParsedSegment {
+  uri: string;
+  initUri?: string; // EXT-X-MAP (HLS) or segment.map.resolvedUri (DASH)
+  initByteRange?: string; // "offset:length" — HLS only
+  key?: { iv: string | null; uri: string | null }; // HLS only
+}
+
+// Protocol-agnostic playlist ready for Fragment[] conversion via parseLevelsPlaylist.
+export interface ParsedPlaylist {
+  segments: ParsedSegment[];
 }

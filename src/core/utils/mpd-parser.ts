@@ -5,43 +5,26 @@
  * project's Fragment[] and Level[] types. Mirrors the structure of m3u8-parser.ts.
  */
 
-import { parse } from "mpd-parser";
+import { parse, MpdManifest, MpdPlaylist } from "mpd-parser";
 import { v4 as uuidv4 } from "uuid";
-import { Fragment, Level, LevelType } from "../types";
+import { Level, LevelType } from "../types";
+import type { ParsedPlaylist, ParsedSegment } from "../types";
+import { parseLevelsPlaylist } from "./playlist-utils";
 
-// Typed shapes for mpd-parser output (no bundled @types, so we define what we need)
-export interface MpdSegment {
-  uri: string;
-  resolvedUri: string;
-  duration: number;
-  map?: {
-    uri: string;
-    resolvedUri: string;
-    byterange?: { offset: number | bigint; length: number | bigint };
-  };
-}
+// Re-export for callers that want the unified Fragment conversion.
+export { parseLevelsPlaylist } from "./playlist-utils";
 
-export interface MpdPlaylist {
-  uri: string;
-  attributes: {
-    BANDWIDTH?: number;
-    RESOLUTION?: { width: number; height: number };
-    CODECS?: string;
-    [key: string]: unknown;
-  };
-  segments: MpdSegment[];
-  contentProtection?: Record<string, unknown>;
-}
+export type { MpdManifest } from "mpd-parser";
 
-export interface MpdManifest {
-  playlists: MpdPlaylist[];
-  mediaGroups: {
-    AUDIO?: {
-      audio?: Record<string, { playlists?: MpdPlaylist[] }>;
-    };
-  };
-  minimumUpdatePeriod?: number; // in ms; always present in mpd-parser output
-  [key: string]: unknown;
+/**
+ * Convert an mpd-parser MpdPlaylist into a ParsedPlaylist.
+ */
+function mpdPlaylistToParsedPlaylist(playlist: MpdPlaylist): ParsedPlaylist {
+  const segments: ParsedSegment[] = (playlist.segments || []).map((segment) => ({
+    uri: segment.resolvedUri || segment.uri,
+    ...(segment.map ? { initUri: segment.map.resolvedUri || segment.map.uri } : {}),
+  }));
+  return { segments };
 }
 
 /**
@@ -69,47 +52,31 @@ export function parseMasterPlaylist(mpdText: string, mpdUrl: string): Level[] {
 }
 
 /**
- * Parse a single representation's segments into Fragment[].
- *
- * Handles the init segment (segment.map) the same way m3u8-parser handles
- * EXT-X-MAP: inserts it as a Fragment at the current index, deduplicated by URI.
- * Indices are assigned sequentially from `startIndex`.
- * Mirrors parseLevelsPlaylist() from m3u8-parser.ts.
+ * Select the highest-bandwidth video playlist from a parsed MPD manifest
+ * and return it as a ParsedPlaylist, ready for parseLevelsPlaylist().
+ * Returns null if no video playlists are present.
  */
-export function parseLevelsPlaylist(
-  playlist: MpdPlaylist,
-  startIndex: number = 0,
-): Fragment[] {
-  const fragments: Fragment[] = [];
-  const segments = playlist.segments || [];
-  let index = startIndex;
-  let currentMapUri: string | null = null;
+export function getVideoPlaylist(manifest: MpdManifest): ParsedPlaylist | null {
+  const playlists = [...(manifest.playlists || [])];
+  if (!playlists.length) return null;
+  playlists.sort((a, b) => (b.attributes?.BANDWIDTH || 0) - (a.attributes?.BANDWIDTH || 0));
+  return mpdPlaylistToParsedPlaylist(playlists[0]!);
+}
 
-  for (const segment of segments) {
-    // Handle init segment (like EXT-X-MAP) — deduplicate by URI
-    if (segment.map) {
-      const mapUri = segment.map.resolvedUri || segment.map.uri;
-      if (mapUri && mapUri !== currentMapUri) {
-        fragments.push({
-          index,
-          key: { iv: null, uri: null },
-          uri: mapUri,
-        });
-        index++;
-        currentMapUri = mapUri;
-      }
+/**
+ * Extract the first audio playlist from the parsed manifest's mediaGroups
+ * and return it as a ParsedPlaylist, ready for parseLevelsPlaylist().
+ * Returns null if no audio adaptation set is present.
+ */
+export function getAudioPlaylist(manifest: MpdManifest): ParsedPlaylist | null {
+  const audioGroup = manifest.mediaGroups?.AUDIO?.audio;
+  if (!audioGroup) return null;
+  for (const group of Object.values(audioGroup)) {
+    if (group.playlists?.length) {
+      return mpdPlaylistToParsedPlaylist(group.playlists[0]!);
     }
-
-    const segUri = segment.resolvedUri || segment.uri;
-    fragments.push({
-      index,
-      key: { iv: null, uri: null },
-      uri: segUri,
-    });
-    index++;
   }
-
-  return fragments;
+  return null;
 }
 
 /**
@@ -140,27 +107,13 @@ export function getPollIntervalMs(mpdText: string): number {
   return Math.max(1000, Math.min(ms, 10000));
 }
 
-/**
- * Extract the first audio playlist from the parsed manifest's mediaGroups.
- * Returns null if no audio adaptation set is present.
- */
-export function getAudioPlaylist(manifest: MpdManifest): MpdPlaylist | null {
-  const audioGroup = manifest.mediaGroups?.AUDIO?.audio;
-  if (!audioGroup) return null;
-  for (const group of Object.values(audioGroup)) {
-    if (group.playlists?.length) {
-      return group.playlists[0]!;
-    }
-  }
-  return null;
-}
-
 export const MpdParser = {
   parseManifest,
   parseMasterPlaylist,
   parseLevelsPlaylist,
+  getVideoPlaylist,
+  getAudioPlaylist,
   isLive,
   hasDrm,
   getPollIntervalMs,
-  getAudioPlaylist,
 };

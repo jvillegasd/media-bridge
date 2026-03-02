@@ -14,6 +14,7 @@ import { Level, DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import {
   parseMasterPlaylist,
+  parseMediaPlaylist,
   parseLevelsPlaylist,
 } from "../../utils/m3u8-parser";
 import { getChunkCount } from "../../database/chunks";
@@ -152,8 +153,8 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         }
 
         const videoFragments = parseLevelsPlaylist(
-          videoPlaylistText,
-          videoPlaylistUrl,
+          parseMediaPlaylist(videoPlaylistText, videoPlaylistUrl),
+          0,
         );
 
         if (videoFragments.length === 0) {
@@ -161,16 +162,10 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         }
 
         logger.info(`Found ${videoFragments.length} video fragments`);
-
-        const indexedVideoFragments = videoFragments.map((frag, idx) => ({
-          ...frag,
-          index: idx,
-        }));
-
-        this.videoLength = indexedVideoFragments.length;
+        this.videoLength = videoFragments.length;
 
         await this.downloadAllFragments(
-          indexedVideoFragments,
+          videoFragments,
           this.downloadId,
           stateId,
         );
@@ -186,8 +181,8 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         }
 
         const audioFragments = parseLevelsPlaylist(
-          audioPlaylistText,
-          audioPlaylistUrl,
+          parseMediaPlaylist(audioPlaylistText, audioPlaylistUrl),
+          this.videoLength,
         );
 
         if (audioFragments.length === 0) {
@@ -195,16 +190,10 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         }
 
         logger.info(`Found ${audioFragments.length} audio fragments`);
-
-        const indexedAudioFragments = audioFragments.map((frag, idx) => ({
-          ...frag,
-          index: this.videoLength + idx,
-        }));
-
-        this.audioLength = indexedAudioFragments.length;
+        this.audioLength = audioFragments.length;
 
         await this.downloadAllFragments(
-          indexedAudioFragments,
+          audioFragments,
           this.downloadId,
           stateId,
         );
