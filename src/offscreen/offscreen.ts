@@ -153,58 +153,6 @@ function buildMissingChunksWarning(
   return `${missingCount} of ${totalCount} chunks were missing (${pct}%) — video may have gaps`;
 }
 
-async function processVideoAndAudio(
-  ffmpeg: FFmpeg,
-  downloadId: string,
-  videoLength: number,
-  audioLength: number,
-  outputFileName: string,
-  onProgress?: (progress: number, message: string) => void,
-): Promise<string | undefined> {
-  const videoFile = `${downloadId}_video.ts`;
-  const audioFile = `${downloadId}_audio.ts`;
-  const intermediateFiles = [videoFile, audioFile];
-
-  try {
-    onProgress?.(0.1, "Concatenating chunks");
-    const [videoResult, audioResult] = await Promise.all([
-      concatenateChunks(downloadId, 0, videoLength),
-      concatenateChunks(downloadId, videoLength, audioLength),
-    ]);
-
-    onProgress?.(0.5, "Writing video stream");
-    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
-
-    onProgress?.(0.6, "Writing audio stream");
-    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
-
-    onProgress?.(0.7, "Merging video and audio");
-    await ffmpeg.exec([
-      "-y",
-      "-i",
-      videoFile,
-      "-i",
-      audioFile,
-      "-c:v",
-      "copy",
-      "-c:a",
-      "copy",
-      "-bsf:a",
-      "aac_adtstoasc",
-      "-shortest",
-      "-movflags",
-      "+faststart",
-      outputFileName,
-    ]);
-
-    const totalMissing = videoResult.missingCount + audioResult.missingCount;
-    const totalChunks = videoResult.totalCount + audioResult.totalCount;
-    return buildMissingChunksWarning(totalMissing, totalChunks);
-  } finally {
-    await cleanupFiles(ffmpeg, intermediateFiles);
-  }
-}
-
 /**
  * Process a single stream (video-only, media playlist, or audio-only muxed content).
  * Handles concatenation, writing, and converting to MP4.
@@ -398,58 +346,6 @@ async function processHlsVideoAndAudioSeparate(
   }
 }
 
-/**
- * Process DASH chunks (ISOBMF/.m4s segments) and convert to MP4.
- *
- * Nearly identical to processHLSChunks() but:
- *   - Intermediate files use .mp4 extension (ISOBMF demuxer, not MPEG-TS)
- *   - No -bsf:a aac_adtstoasc bitstream filter (not needed for MP4 container)
- *   - Handles both dual-stream VOD (video+audio) and single-stream recording
- */
-
-async function processDashVideoAndAudio(
-  ffmpeg: FFmpeg,
-  downloadId: string,
-  videoLength: number,
-  audioLength: number,
-  outputFileName: string,
-  onProgress?: (progress: number, message: string) => void,
-): Promise<string | undefined> {
-  const videoFile = `${downloadId}_video.mp4`;
-  const audioFile = `${downloadId}_audio.mp4`;
-
-  try {
-    onProgress?.(0.1, "Concatenating chunks");
-    const [videoResult, audioResult] = await Promise.all([
-      concatenateChunks(downloadId, 0, videoLength),
-      concatenateChunks(downloadId, videoLength, audioLength),
-    ]);
-
-    onProgress?.(0.5, "Writing video stream");
-    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
-
-    onProgress?.(0.6, "Writing audio stream");
-    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
-
-    onProgress?.(0.7, "Merging video and audio");
-    await ffmpeg.exec([
-      "-y",
-      "-i", videoFile,
-      "-i", audioFile,
-      "-c:v", "copy",
-      "-c:a", "copy",
-      "-movflags", "+faststart",
-      outputFileName,
-    ]);
-
-    const totalMissing = videoResult.missingCount + audioResult.missingCount;
-    const totalChunks = videoResult.totalCount + audioResult.totalCount;
-    return buildMissingChunksWarning(totalMissing, totalChunks);
-  } finally {
-    await cleanupFiles(ffmpeg, [videoFile, audioFile]);
-  }
-}
-
 async function processDashSingleStream(
   ffmpeg: FFmpeg,
   downloadId: string,
@@ -545,29 +441,19 @@ async function processDashChunks(
     let warning: string | undefined;
 
     if (videoLength > 0 && audioLength > 0) {
-      if (audioDownloadId) {
-        // Recording path: audio stored under a separate namespace
-        validateDownloadId(audioDownloadId);
-        warning = await processDashVideoAndAudioSeparate(
-          ffmpeg,
-          downloadId,
-          videoLength,
-          audioDownloadId,
-          audioLength,
-          outputFileName,
-          onProgress,
-        );
-      } else {
-        // VOD path: audio follows video in same namespace (unchanged)
-        warning = await processDashVideoAndAudio(
-          ffmpeg,
-          downloadId,
-          videoLength,
-          audioLength,
-          outputFileName,
-          onProgress,
-        );
+      if (!audioDownloadId) {
+        throw new Error("audioDownloadId required for DASH video+audio mux");
       }
+      validateDownloadId(audioDownloadId);
+      warning = await processDashVideoAndAudioSeparate(
+        ffmpeg,
+        downloadId,
+        videoLength,
+        audioDownloadId,
+        audioLength,
+        outputFileName,
+        onProgress,
+      );
     } else if (videoLength > 0) {
       warning = await processDashSingleStream(
         ffmpeg,
