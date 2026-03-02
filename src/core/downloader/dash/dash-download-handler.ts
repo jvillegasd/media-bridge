@@ -57,6 +57,7 @@ export class DashDownloadHandler extends BasePlaylistHandler {
     selectedBandwidth?: number,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     this.resetDownloadState(stateId, abortSignal);
+    const audioId = this.downloadId + "_a";
 
     const headerRuleIds = await this.tryAddHeaderRules(stateId, mpdUrl, pageUrl);
 
@@ -92,21 +93,26 @@ export class DashDownloadHandler extends BasePlaylistHandler {
       logger.info(`Found ${videoFragments.length} DASH video fragments`);
       this.videoLength = videoFragments.length;
 
-      await this.downloadAllFragments(videoFragments, this.downloadId, stateId);
+      const downloadJobs: Promise<void>[] = [
+        this.downloadAllFragments(videoFragments, this.downloadId, stateId),
+      ];
 
-      throwIfAborted(this.abortSignal);
-
-      // Download audio stream if present (starts at videoLength)
+      // Download audio stream concurrently if present (separate namespace)
       this.audioLength = 0;
       if (audioPlaylist) {
-        const audioFragments = parseLevelsPlaylist(audioPlaylist, this.videoLength);
+        const audioFragments = parseLevelsPlaylist(audioPlaylist, 0);
         logger.info(`Found ${audioFragments.length} DASH audio fragments`);
         this.audioLength = audioFragments.length;
-
-        await this.downloadAllFragments(audioFragments, this.downloadId, stateId);
-
-        throwIfAborted(this.abortSignal);
+        downloadJobs.push(this.downloadAllFragments(audioFragments, audioId, stateId));
       }
+
+      const results = await Promise.allSettled(downloadJobs);
+      const cancelled = results.find(
+        (r) => r.status === "rejected" && r.reason instanceof CancellationError,
+      );
+      if (cancelled) throw new CancellationError();
+      const failed = results.find((r) => r.status === "rejected");
+      if (failed) throw (failed as PromiseRejectedResult).reason;
 
       await this.updateStage(
         stateId,
@@ -123,6 +129,7 @@ export class DashDownloadHandler extends BasePlaylistHandler {
         payload: {
           videoLength: this.videoLength,
           audioLength: this.audioLength,
+          audioDownloadId: this.audioLength > 0 ? audioId : undefined,
         },
         filename: baseFileName,
         timeout: this.ffmpegTimeout,
@@ -153,12 +160,10 @@ export class DashDownloadHandler extends BasePlaylistHandler {
     } catch (error) {
       if (error instanceof CancellationError && this.shouldSaveOnCancel?.()) {
         try {
-          const chunkCount = await getChunkCount(this.downloadId);
-          const effectiveVideoLength = Math.min(chunkCount, this.videoLength);
-          const effectiveAudioLength = Math.max(
-            0,
-            chunkCount - this.videoLength,
-          );
+          const videoChunkCount = await getChunkCount(this.downloadId);
+          const audioChunkCount = this.audioLength > 0 ? await getChunkCount(audioId) : 0;
+          const effectiveVideoLength = Math.min(videoChunkCount, this.videoLength);
+          const effectiveAudioLength = Math.min(audioChunkCount, this.audioLength);
           this.videoLength = effectiveVideoLength;
           this.audioLength = effectiveAudioLength;
 
@@ -168,6 +173,7 @@ export class DashDownloadHandler extends BasePlaylistHandler {
             payload: {
               videoLength: this.videoLength,
               audioLength: this.audioLength,
+              audioDownloadId: this.audioLength > 0 ? audioId : undefined,
             },
           });
           logger.info(`DASH partial download saved: ${result.filePath}`);
@@ -183,6 +189,7 @@ export class DashDownloadHandler extends BasePlaylistHandler {
     } finally {
       await this.tryRemoveHeaderRules(headerRuleIds);
       await this.cleanupChunks(this.downloadId || stateId);
+      await this.cleanupChunks((this.downloadId || stateId) + "_a");
     }
   }
 }

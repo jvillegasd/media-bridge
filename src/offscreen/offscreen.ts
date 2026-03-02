@@ -275,6 +275,7 @@ async function processHLSChunks(
   downloadId: string,
   videoLength: number,
   audioLength: number,
+  audioDownloadId?: string,
   onProgress?: (progress: number, message: string) => void,
 ): Promise<ProcessResult> {
   validateDownloadId(downloadId);
@@ -287,10 +288,15 @@ async function processHLSChunks(
     let warning: string | undefined;
 
     if (videoLength > 0 && audioLength > 0) {
-      warning = await processVideoAndAudio(
+      if (!audioDownloadId) {
+        throw new Error("audioDownloadId required for HLS video+audio mux");
+      }
+      validateDownloadId(audioDownloadId);
+      warning = await processHlsVideoAndAudioSeparate(
         ffmpeg,
         downloadId,
         videoLength,
+        audioDownloadId,
         audioLength,
         outputFileName,
         onProgress,
@@ -338,6 +344,57 @@ async function processHLSChunks(
     resetFFmpeg();
     logger.error(`FFmpeg processing failed for ${downloadId}:`, error);
     throw error;
+  }
+}
+
+/**
+ * Process HLS recording: video and audio stored under separate downloadId namespaces.
+ * Video: (videoDownloadId, 0, videoLength), Audio: (audioDownloadId, 0, audioLength).
+ * Uses .ts intermediate files and -bsf:a aac_adtstoasc (HLS/MPEG-TS container).
+ */
+async function processHlsVideoAndAudioSeparate(
+  ffmpeg: FFmpeg,
+  videoDownloadId: string,
+  videoLength: number,
+  audioDownloadId: string,
+  audioLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string | undefined> {
+  const videoFile = `${videoDownloadId}_video.ts`;
+  const audioFile = `${audioDownloadId}_audio.ts`;
+
+  try {
+    onProgress?.(0.1, "Concatenating chunks");
+    const [videoResult, audioResult] = await Promise.all([
+      concatenateChunks(videoDownloadId, 0, videoLength),
+      concatenateChunks(audioDownloadId, 0, audioLength),
+    ]);
+
+    onProgress?.(0.5, "Writing video stream");
+    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
+
+    onProgress?.(0.6, "Writing audio stream");
+    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
+
+    onProgress?.(0.7, "Merging video and audio");
+    await ffmpeg.exec([
+      "-y",
+      "-i", videoFile,
+      "-i", audioFile,
+      "-c:v", "copy",
+      "-c:a", "copy",
+      "-bsf:a", "aac_adtstoasc",
+      "-shortest",
+      "-movflags", "+faststart",
+      outputFileName,
+    ]);
+
+    const totalMissing = videoResult.missingCount + audioResult.missingCount;
+    const totalChunks = videoResult.totalCount + audioResult.totalCount;
+    return buildMissingChunksWarning(totalMissing, totalChunks);
+  } finally {
+    await cleanupFiles(ffmpeg, [videoFile, audioFile]);
   }
 }
 
@@ -670,6 +727,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           payload.downloadId as string,
           payload.videoLength as number,
           payload.audioLength as number,
+          payload.audioDownloadId as string | undefined,
           onProgress,
         ),
     )

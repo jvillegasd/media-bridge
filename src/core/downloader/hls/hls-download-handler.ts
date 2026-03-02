@@ -84,6 +84,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
     pageUrl?: string,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     this.resetDownloadState(stateId, abortSignal);
+    const audioId = this.downloadId + "_a";
 
     const headerRuleIds = await this.tryAddHeaderRules(stateId, masterPlaylistUrl, pageUrl);
 
@@ -145,6 +146,8 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
 
       throwIfAborted(this.abortSignal);
 
+      const downloadJobs: Promise<void>[] = [];
+
       // Process video playlist
       if (videoPlaylistUrl) {
         if (!videoPlaylistText) {
@@ -164,14 +167,10 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         logger.info(`Found ${videoFragments.length} video fragments`);
         this.videoLength = videoFragments.length;
 
-        await this.downloadAllFragments(
-          videoFragments,
-          this.downloadId,
-          stateId,
+        downloadJobs.push(
+          this.downloadAllFragments(videoFragments, this.downloadId, stateId),
         );
       }
-
-      throwIfAborted(this.abortSignal);
 
       // Process audio playlist
       if (audioPlaylistUrl) {
@@ -182,7 +181,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
 
         const audioFragments = parseLevelsPlaylist(
           parseMediaPlaylist(audioPlaylistText, audioPlaylistUrl),
-          this.videoLength,
+          0,
         );
 
         if (audioFragments.length === 0) {
@@ -192,14 +191,18 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         logger.info(`Found ${audioFragments.length} audio fragments`);
         this.audioLength = audioFragments.length;
 
-        await this.downloadAllFragments(
-          audioFragments,
-          this.downloadId,
-          stateId,
+        downloadJobs.push(
+          this.downloadAllFragments(audioFragments, audioId, stateId),
         );
       }
 
-      throwIfAborted(this.abortSignal);
+      const results = await Promise.allSettled(downloadJobs);
+      const cancelled = results.find(
+        (r) => r.status === "rejected" && r.reason instanceof CancellationError,
+      );
+      if (cancelled) throw new CancellationError();
+      const failed = results.find((r) => r.status === "rejected");
+      if (failed) throw (failed as PromiseRejectedResult).reason;
 
       await this.updateStage(stateId, DownloadStage.MERGING, "Merging streams...");
 
@@ -209,7 +212,11 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         requestType: MessageType.OFFSCREEN_PROCESS_HLS,
         responseType: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
         downloadId: this.downloadId,
-        payload: { videoLength: this.videoLength, audioLength: this.audioLength },
+        payload: {
+          videoLength: this.videoLength,
+          audioLength: this.audioLength,
+          audioDownloadId: this.audioLength > 0 ? audioId : undefined,
+        },
         filename: baseFileName,
         timeout: this.ffmpegTimeout,
         abortSignal: this.abortSignal,
@@ -239,16 +246,21 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
     } catch (error) {
       if (error instanceof CancellationError && this.shouldSaveOnCancel?.()) {
         try {
-          const chunkCount = await getChunkCount(this.downloadId);
-          const effectiveVideoLength = Math.min(chunkCount, this.videoLength);
-          const effectiveAudioLength = Math.max(0, chunkCount - this.videoLength);
+          const videoChunkCount = await getChunkCount(this.downloadId);
+          const audioChunkCount = this.audioLength > 0 ? await getChunkCount(audioId) : 0;
+          const effectiveVideoLength = Math.min(videoChunkCount, this.videoLength);
+          const effectiveAudioLength = Math.min(audioChunkCount, this.audioLength);
           this.videoLength = effectiveVideoLength;
           this.audioLength = effectiveAudioLength;
 
           const result = await this.savePartialDownload(stateId, filename, {
             requestType: MessageType.OFFSCREEN_PROCESS_HLS,
             responseType: MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE,
-            payload: { videoLength: this.videoLength, audioLength: this.audioLength },
+            payload: {
+              videoLength: this.videoLength,
+              audioLength: this.audioLength,
+              audioDownloadId: this.audioLength > 0 ? audioId : undefined,
+            },
           });
           logger.info(`HLS partial download saved: ${result.filePath}`);
           return result;
@@ -265,6 +277,7 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
     } finally {
       await this.tryRemoveHeaderRules(headerRuleIds);
       await this.cleanupChunks(this.downloadId || stateId);
+      await this.cleanupChunks((this.downloadId || stateId) + "_a");
     }
   }
 }
