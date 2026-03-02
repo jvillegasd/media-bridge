@@ -25,7 +25,7 @@
 
 import { VideoMetadata, VideoFormat } from "../../types";
 import { detectFormatFromUrl } from "../../utils/url-utils";
-import { extractThumbnail } from "../../utils/thumbnail-utils";
+import { extractThumbnail } from "../thumbnail-utils";
 
 const DOM_SCAN_DEBOUNCE_MS = 1000;
 const MAX_HEADING_SEARCH_DEPTH = 3;

@@ -4,7 +4,7 @@
 
 import { VideoMetadata, DownloadStage, VideoFormat } from "../core/types";
 import { normalizeUrl, detectFormatFromUrl } from "../core/utils/url-utils";
-import { parseMasterPlaylist, isMasterPlaylist, isMediaPlaylist } from "../core/utils/m3u8-parser";
+import { parseMasterPlaylist, isMasterPlaylist, isMediaPlaylist } from "../core/parsers/m3u8-parser";
 import { hasDrm, canDecrypt } from "../core/utils/drm-utils";
 import { MessageType } from "../shared/messages";
 import {

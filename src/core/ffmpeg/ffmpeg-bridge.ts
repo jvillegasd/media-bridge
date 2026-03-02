@@ -6,9 +6,9 @@
  * duplicated streamToMp4Blob / mergeToMp4 methods across handlers.
  */
 
-import { CancellationError } from "./errors";
+import { CancellationError } from "../utils/errors";
 import { createOffscreenDocument } from "./offscreen-manager";
-import { revokeBlobUrl } from "./blob-utils";
+import { revokeBlobUrl } from "../utils/blob-utils";
 import { MessageType } from "../../shared/messages";
 
 export interface ProcessWithFFmpegOptions {

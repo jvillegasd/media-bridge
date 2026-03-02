@@ -12,8 +12,8 @@ import { VideoMetadata, VideoFormat } from "../../types";
 import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
-import { extractThumbnail } from "../../utils/thumbnail-utils";
-import { isLive, hasDrm } from "../../utils/mpd-parser";
+import { extractThumbnail } from "../thumbnail-utils";
+import { isLive, hasDrm } from "../../parsers/mpd-parser";
 
 export interface DashDetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;

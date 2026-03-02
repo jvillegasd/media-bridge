@@ -20,7 +20,7 @@ import {
   isLive,
   getPollIntervalMs,
   getVideoPlaylist,
-} from "../../utils/mpd-parser";
+} from "../../parsers/mpd-parser";
 
 export class DashRecordingHandler extends BaseRecordingHandler {
   /**

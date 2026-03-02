@@ -16,10 +16,10 @@ import {
   parseMasterPlaylist,
   parseMediaPlaylist,
   parseLevelsPlaylist,
-} from "../../utils/m3u8-parser";
+} from "../../parsers/m3u8-parser";
 import { getChunkCount } from "../../database/chunks";
 import { MessageType } from "../../../shared/messages";
-import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
+import { processWithFFmpeg } from "../../ffmpeg/ffmpeg-bridge";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { BasePlaylistHandler } from "../base-playlist-handler";

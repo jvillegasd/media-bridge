@@ -15,7 +15,7 @@ import { getDownload, storeDownload } from "../database/downloads";
 import { logger } from "../utils/logger";
 import { MessageType } from "../../shared/messages";
 import { saveBlobUrlToFile } from "../utils/blob-utils";
-import { processWithFFmpeg } from "../utils/ffmpeg-bridge";
+import { processWithFFmpeg } from "../ffmpeg/ffmpeg-bridge";
 import { BasePlaylistHandler } from "./base-playlist-handler";
 import { runConcurrentWorkers } from "./concurrent-workers";
 import { SAVING_STAGE_PERCENTAGE } from "../../shared/constants";

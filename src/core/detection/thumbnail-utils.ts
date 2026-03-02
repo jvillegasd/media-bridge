@@ -82,4 +82,3 @@ function extractThumbnailFromPage(): string | undefined {
 
   return undefined;
 }
-

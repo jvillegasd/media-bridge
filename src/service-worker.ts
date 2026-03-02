@@ -35,7 +35,7 @@ import {
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
 import { deleteChunks, getChunkCount, getAllChunkDownloadIds } from "./core/database/chunks";
-import { createOffscreenDocument, closeOffscreenDocument } from "./core/utils/offscreen-manager";
+import { createOffscreenDocument, closeOffscreenDocument } from "./core/ffmpeg/offscreen-manager";
 import {
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_FFMPEG_TIMEOUT_MS,

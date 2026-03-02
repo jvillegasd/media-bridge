@@ -17,7 +17,7 @@ import {
   parseMasterPlaylist,
   parseMediaPlaylist,
   parseLevelsPlaylist,
-} from "../../utils/m3u8-parser";
+} from "../../parsers/m3u8-parser";
 import { logger } from "../../utils/logger";
 import { MessageType } from "../../../shared/messages";
 import { BaseRecordingHandler } from "../base-recording-handler";

@@ -7,7 +7,7 @@
  * network layer for requests matching a specific URL prefix.
  */
 
-import { logger } from "./logger";
+import { logger } from "../utils/logger";
 
 /**
  * Derive two deterministic rule IDs from a download ID string.

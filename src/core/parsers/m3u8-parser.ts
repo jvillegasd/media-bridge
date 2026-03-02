@@ -7,8 +7,8 @@ import { buildAbsoluteURL } from "url-toolkit";
 import { v4 as uuidv4 } from "uuid";
 import { Level, LevelType } from "../types";
 import type { ParsedPlaylist, ParsedSegment } from "./playlist-utils";
-import { normalizeUrl } from "./url-utils";
-import { logger } from "./logger";
+import { normalizeUrl } from "../utils/url-utils";
+import { logger } from "../utils/logger";
 
 export { parseLevelsPlaylist } from "./playlist-utils";
 import { parseLevelsPlaylist } from "./playlist-utils";

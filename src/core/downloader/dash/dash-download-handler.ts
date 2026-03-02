@@ -18,7 +18,7 @@ import { DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
 import { getChunkCount } from "../../database/chunks";
 import { MessageType } from "../../../shared/messages";
-import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
+import { processWithFFmpeg } from "../../ffmpeg/ffmpeg-bridge";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
 import { BasePlaylistHandler } from "../base-playlist-handler";
 import { SAVING_STAGE_PERCENTAGE } from "../../../shared/constants";
@@ -29,7 +29,7 @@ import {
   hasDrm,
   getVideoPlaylist,
   getAudioPlaylist,
-} from "../../utils/mpd-parser";
+} from "../../parsers/mpd-parser";
 
 export class DashDownloadHandler extends BasePlaylistHandler {
   private videoLength: number = 0;
