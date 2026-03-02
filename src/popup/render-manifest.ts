@@ -174,16 +174,48 @@ export async function handleLoadManifestPlaylist(): Promise<void> {
 
       const live = MpdParser.isLive(playlistText);
       setIsLiveManifest(live);
-      setIsMediaPlaylistMode(true); // DASH auto-selects quality — no quality picker needed
 
-      if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
-      if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
-      if (dom.manifestLiveStreamInfo) {
-        dom.manifestLiveStreamInfo.style.display = live ? "block" : "none";
-        if (live) {
-          const infoText = document.getElementById("hlsLiveStreamInfoText");
-          if (infoText) {
-            infoText.textContent = "This is a live DASH stream. Click Record to start capturing.";
+      const videoReps = MpdParser.parseMasterPlaylist(playlistText, normalizedUrl)
+        .filter((l) => l.type === "stream");
+
+      if (videoReps.length > 1) {
+        // Multiple representations → show quality picker (both VOD and live)
+        setIsMediaPlaylistMode(false);
+        if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
+        const { videoQualitySelect, audioQualitySelect, manifestQualitySelection } = dom;
+        if (manifestQualitySelection && videoQualitySelect && audioQualitySelect) {
+          manifestQualitySelection.style.display = "block";
+          videoReps.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+          videoQualitySelect.innerHTML = "";
+          videoReps.forEach((level) => {
+            const option = document.createElement("option");
+            option.value = String(level.bitrate);
+            option.textContent = formatQualityLabel(level);
+            videoQualitySelect!.appendChild(option);
+          });
+          videoQualitySelect.selectedIndex = 0;
+          videoQualitySelect.disabled = false;
+          // Audio is always auto-included for DASH
+          audioQualitySelect.innerHTML = '<option value="">Auto (included)</option>';
+          audioQualitySelect.disabled = true;
+        }
+        if (dom.manifestLiveStreamInfo) {
+          dom.manifestLiveStreamInfo.style.display = live ? "block" : "none";
+          if (live) {
+            const infoText = document.getElementById("hlsLiveStreamInfoText");
+            if (infoText) infoText.textContent = "This is a live DASH stream. Select a quality and click Record to start capturing.";
+          }
+        }
+      } else {
+        // Single representation → auto-select, no picker
+        setIsMediaPlaylistMode(true);
+        if (dom.manifestMediaPlaylistWarning) dom.manifestMediaPlaylistWarning.style.display = "none";
+        if (dom.manifestQualitySelection) dom.manifestQualitySelection.style.display = "none";
+        if (dom.manifestLiveStreamInfo) {
+          dom.manifestLiveStreamInfo.style.display = live ? "block" : "none";
+          if (live) {
+            const infoText = document.getElementById("hlsLiveStreamInfoText");
+            if (infoText) infoText.textContent = "This is a live DASH stream. Click Record to start capturing.";
           }
         }
       }
@@ -326,19 +358,29 @@ export async function handleStartManifestDownload(): Promise<void> {
 
   let videoPlaylistUrl: string | null = null;
   let audioPlaylistUrl: string | null = null;
+  let manifestQualityPayload:
+    | { videoPlaylistUrl?: string | null; audioPlaylistUrl?: string | null; selectedBandwidth?: number }
+    | undefined;
 
   if (!isMediaPlaylistMode) {
     if (!videoQualitySelect || !audioQualitySelect) return;
 
-    const rawVideoUrl = videoQualitySelect.value || null;
-    const rawAudioUrl = audioQualitySelect.value || null;
+    if (currentManifestFormat === VideoFormat.DASH) {
+      const bw = videoQualitySelect.value ? parseInt(videoQualitySelect.value, 10) : undefined;
+      manifestQualityPayload = { selectedBandwidth: bw };
+    } else {
+      // HLS: existing URL-based behaviour unchanged
+      const rawVideoUrl = videoQualitySelect.value || null;
+      const rawAudioUrl = audioQualitySelect.value || null;
 
-    videoPlaylistUrl = rawVideoUrl ? normalizeUrl(rawVideoUrl) : null;
-    audioPlaylistUrl = rawAudioUrl ? normalizeUrl(rawAudioUrl) : null;
+      videoPlaylistUrl = rawVideoUrl ? normalizeUrl(rawVideoUrl) : null;
+      audioPlaylistUrl = rawAudioUrl ? normalizeUrl(rawAudioUrl) : null;
 
-    if (!videoPlaylistUrl && !audioPlaylistUrl) {
-      alert("Please select at least one quality (video or audio)");
-      return;
+      if (!videoPlaylistUrl && !audioPlaylistUrl) {
+        alert("Please select at least one quality (video or audio)");
+        return;
+      }
+      manifestQualityPayload = { videoPlaylistUrl, audioPlaylistUrl };
     }
   }
 
@@ -392,18 +434,19 @@ export async function handleStartManifestDownload(): Promise<void> {
       : playlistUrl;
 
     const payload = isLiveManifest
-      ? { url: recordingUrl, metadata, tabTitle, website }
+      ? {
+          url: recordingUrl,
+          metadata,
+          tabTitle,
+          website,
+          selectedBandwidth: manifestQualityPayload?.selectedBandwidth,
+        }
       : {
           url: playlistUrl,
           metadata,
           tabTitle,
           website,
-          manifestQuality: isMediaPlaylistMode
-            ? undefined
-            : {
-                videoPlaylistUrl,
-                audioPlaylistUrl,
-              },
+          manifestQuality: isMediaPlaylistMode ? undefined : manifestQualityPayload,
           isManual: true,
         };
 

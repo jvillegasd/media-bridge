@@ -64,6 +64,20 @@ export function getVideoPlaylist(manifest: MpdManifest): ParsedPlaylist | null {
 }
 
 /**
+ * Select a video playlist by bandwidth, falling back to highest if not found.
+ */
+export function getVideoPlaylistByBandwidth(
+  manifest: MpdManifest,
+  bandwidth: number,
+): ParsedPlaylist | null {
+  const match = (manifest.playlists || []).find(
+    (p) => p.attributes?.BANDWIDTH === bandwidth,
+  );
+  if (!match) return getVideoPlaylist(manifest);
+  return mpdPlaylistToParsedPlaylist(match);
+}
+
+/**
  * Extract the first audio playlist from the parsed manifest's mediaGroups
  * and return it as a ParsedPlaylist, ready for parseLevelsPlaylist().
  * Returns null if no audio adaptation set is present.
@@ -112,6 +126,7 @@ export const MpdParser = {
   parseMasterPlaylist,
   parseLevelsPlaylist,
   getVideoPlaylist,
+  getVideoPlaylistByBandwidth,
   getAudioPlaylist,
   isLive,
   hasDrm,

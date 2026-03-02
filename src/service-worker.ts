@@ -133,6 +133,7 @@ async function handleDownloadRequestMessage(payload: {
   manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
+    selectedBandwidth?: number;
   };
 }): Promise<{ success: boolean; error?: string }> {
   try {
@@ -461,6 +462,7 @@ async function handleDownloadRequest(payload: {
   manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
+    selectedBandwidth?: number;
   };
   isManual?: boolean;
 }): Promise<{ error?: string } | void> {
@@ -730,6 +732,7 @@ async function startDownload(
   manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
+    selectedBandwidth?: number;
   },
   isManual?: boolean,
   abortSignal?: AbortSignal,
@@ -883,6 +886,7 @@ async function handleStartRecordingMessage(payload: {
   filename?: string;
   tabTitle?: string;
   website?: string;
+  selectedBandwidth?: number;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const { url, metadata, filename, tabTitle, website } = payload;
@@ -940,7 +944,7 @@ async function handleStartRecordingMessage(payload: {
 
     const handler =
       metadata.format === VideoFormat.DASH
-        ? new DashRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout })
+        ? new DashRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout, selectedBandwidth: payload.selectedBandwidth })
         : new HlsRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout });
 
     // Resolve filename

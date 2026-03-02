@@ -424,10 +424,59 @@ async function processDashSingleStream(
   }
 }
 
+/**
+ * Process DASH recording: video and audio stored under separate downloadId namespaces.
+ * Video: (videoDownloadId, 0, videoLength), Audio: (audioDownloadId, 0, audioLength).
+ */
+async function processDashVideoAndAudioSeparate(
+  ffmpeg: FFmpeg,
+  videoDownloadId: string,
+  videoLength: number,
+  audioDownloadId: string,
+  audioLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string | undefined> {
+  const videoFile = `${videoDownloadId}_video.mp4`;
+  const audioFile = `${audioDownloadId}_audio.mp4`;
+
+  try {
+    onProgress?.(0.1, "Concatenating chunks");
+    const [videoResult, audioResult] = await Promise.all([
+      concatenateChunks(videoDownloadId, 0, videoLength),
+      concatenateChunks(audioDownloadId, 0, audioLength),
+    ]);
+
+    onProgress?.(0.5, "Writing video stream");
+    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
+
+    onProgress?.(0.6, "Writing audio stream");
+    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
+
+    onProgress?.(0.7, "Merging video and audio");
+    await ffmpeg.exec([
+      "-y",
+      "-i", videoFile,
+      "-i", audioFile,
+      "-c:v", "copy",
+      "-c:a", "copy",
+      "-movflags", "+faststart",
+      outputFileName,
+    ]);
+
+    const totalMissing = videoResult.missingCount + audioResult.missingCount;
+    const totalChunks = videoResult.totalCount + audioResult.totalCount;
+    return buildMissingChunksWarning(totalMissing, totalChunks);
+  } finally {
+    await cleanupFiles(ffmpeg, [videoFile, audioFile]);
+  }
+}
+
 async function processDashChunks(
   downloadId: string,
   videoLength: number,
   audioLength: number,
+  audioDownloadId?: string,
   onProgress?: (progress: number, message: string) => void,
 ): Promise<ProcessResult> {
   validateDownloadId(downloadId);
@@ -439,14 +488,29 @@ async function processDashChunks(
     let warning: string | undefined;
 
     if (videoLength > 0 && audioLength > 0) {
-      warning = await processDashVideoAndAudio(
-        ffmpeg,
-        downloadId,
-        videoLength,
-        audioLength,
-        outputFileName,
-        onProgress,
-      );
+      if (audioDownloadId) {
+        // Recording path: audio stored under a separate namespace
+        validateDownloadId(audioDownloadId);
+        warning = await processDashVideoAndAudioSeparate(
+          ffmpeg,
+          downloadId,
+          videoLength,
+          audioDownloadId,
+          audioLength,
+          outputFileName,
+          onProgress,
+        );
+      } else {
+        // VOD path: audio follows video in same namespace (unchanged)
+        warning = await processDashVideoAndAudio(
+          ffmpeg,
+          downloadId,
+          videoLength,
+          audioLength,
+          outputFileName,
+          onProgress,
+        );
+      }
     } else if (videoLength > 0) {
       warning = await processDashSingleStream(
         ffmpeg,
@@ -639,6 +703,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           payload.downloadId as string,
           payload.videoLength as number,
           payload.audioLength as number,
+          payload.audioDownloadId as string | undefined,
           onProgress,
         ),
     )

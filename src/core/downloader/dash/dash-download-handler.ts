@@ -28,6 +28,7 @@ import {
   parseLevelsPlaylist,
   hasDrm,
   getVideoPlaylist,
+  getVideoPlaylistByBandwidth,
   getAudioPlaylist,
 } from "../../parsers/mpd-parser";
 
@@ -53,6 +54,7 @@ export class DashDownloadHandler extends BasePlaylistHandler {
     stateId: string,
     abortSignal?: AbortSignal,
     pageUrl?: string,
+    selectedBandwidth?: number,
   ): Promise<{ filePath: string; fileExtension?: string }> {
     this.resetDownloadState(stateId, abortSignal);
 
@@ -71,7 +73,9 @@ export class DashDownloadHandler extends BasePlaylistHandler {
 
       const manifest = parseManifest(mpdText, mpdUrl);
 
-      const videoPlaylist = getVideoPlaylist(manifest);
+      const videoPlaylist = selectedBandwidth
+        ? getVideoPlaylistByBandwidth(manifest, selectedBandwidth)
+        : getVideoPlaylist(manifest);
       if (!videoPlaylist) {
         throw new Error("No video streams found in MPD manifest");
       }

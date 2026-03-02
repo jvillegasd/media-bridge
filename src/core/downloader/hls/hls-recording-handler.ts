@@ -12,7 +12,7 @@
  */
 
 import { Fragment } from "../../types";
-import { fetchText } from "../../utils/fetch-utils";
+import { fetchText, fetchTextWithFinalUrl } from "../../utils/fetch-utils";
 import {
   parseMasterPlaylist,
   parseMediaPlaylist,
@@ -43,27 +43,29 @@ export class HlsRecordingHandler extends BaseRecordingHandler {
   /**
    * Resolve the media playlist URL from a master or media playlist URL.
    * If the URL points to a master playlist, selects the highest-bandwidth variant.
+   * Returns mediaUrl (URL to poll) and finalUrl (post-redirect URL for DNR header rules).
    */
   protected async resolveMediaUrl(
     url: string,
     abortSignal: AbortSignal,
-  ): Promise<string> {
-    const text = await fetchText(url, 3, abortSignal);
+  ): Promise<{ mediaUrl: string; finalUrl: string }> {
+    const { text, finalUrl: masterFinalUrl } = await fetchTextWithFinalUrl(url, 3, abortSignal);
 
     if (!text.includes("#EXT-X-STREAM-INF")) {
       logger.info(
         `[REC] URL is already a media playlist: ${url.substring(0, 100)}...`,
       );
-      return url;
+      return { mediaUrl: url, finalUrl: masterFinalUrl };
     }
 
-    const levels = parseMasterPlaylist(text, url);
+    // Use masterFinalUrl for relative URI resolution in case of redirect
+    const levels = parseMasterPlaylist(text, masterFinalUrl);
     const videoLevels = levels.filter((l) => l.type === "stream");
     if (videoLevels.length === 0) {
       logger.warn(
         `[REC] No video levels found in master playlist, using URL as-is`,
       );
-      return url;
+      return { mediaUrl: url, finalUrl: masterFinalUrl };
     }
 
     videoLevels.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
@@ -71,7 +73,8 @@ export class HlsRecordingHandler extends BaseRecordingHandler {
     logger.info(
       `[REC] Resolved media playlist: ${resolvedUrl.substring(0, 100)}...`,
     );
-    return resolvedUrl;
+    // finalUrl for segments is the media playlist URL itself
+    return { mediaUrl: resolvedUrl, finalUrl: resolvedUrl };
   }
 
   /**

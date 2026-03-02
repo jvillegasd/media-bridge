@@ -22,6 +22,7 @@ import { SAVING_STAGE_PERCENTAGE } from "../../shared/constants";
 
 export abstract class BaseRecordingHandler extends BasePlaylistHandler {
   protected segmentIndex: number = 0;
+  protected audioSegmentIndex: number = 0;
 
   protected override resetDownloadState(
     stateId: string,
@@ -29,6 +30,7 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
   ): void {
     super.resetDownloadState(stateId, abortSignal);
     this.segmentIndex = 0;
+    this.audioSegmentIndex = 0;
   }
 
   /**
@@ -44,11 +46,10 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
   ): Promise<{ filePath: string; fileExtension?: string }> {
     this.resetDownloadState(stateId, abortSignal);
 
-    const headerRuleIds = await this.tryAddHeaderRules(stateId, url, pageUrl);
+    const { mediaUrl, finalUrl } = await this.resolveMediaUrl(url, abortSignal);
+    const headerRuleIds = await this.tryAddHeaderRules(stateId, finalUrl, pageUrl);
 
     try {
-      const mediaUrl = await this.resolveMediaUrl(url, abortSignal);
-
       await this.collectSegments(mediaUrl, stateId, abortSignal);
 
       if (this.segmentIndex === 0) {
@@ -108,13 +109,14 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
 
   /**
    * Resolve the URL to poll for manifest/playlist updates.
+   * Returns both the mediaUrl (URL to poll) and finalUrl (post-redirect URL for DNR header rules).
    * HLS: may follow a master playlist → media playlist redirect.
-   * DASH: returns the MPD URL as-is.
+   * DASH: fetches MPD once to capture response.url, returns original url as mediaUrl.
    */
   protected abstract resolveMediaUrl(
     url: string,
     abortSignal: AbortSignal,
-  ): Promise<string>;
+  ): Promise<{ mediaUrl: string; finalUrl: string }>;
 
   /**
    * Fetch the latest manifest and return new segments not already in seenUris.
@@ -127,7 +129,7 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
     url: string,
     abortSignal: AbortSignal,
     seenUris: Set<string>,
-  ): Promise<{ fragments: Fragment[]; pollIntervalMs: number; ended: boolean }>;
+  ): Promise<{ fragments: Fragment[]; audioFragments?: Fragment[]; pollIntervalMs: number; ended: boolean }>;
 
   /**
    * Return the FFmpeg request/response/payload options for merging.
@@ -174,13 +176,13 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
         continue;
       }
 
-      const { fragments: newFragments, pollIntervalMs: interval, ended } = result;
+      const { fragments: newFragments, audioFragments: newAudioFragments, pollIntervalMs: interval, ended } = result;
       pollIntervalMs = interval;
 
       if (abortSignal.aborted) break;
 
       logger.info(
-        `[REC] Poll #${pollCount}: new=${newFragments.length}, seen=${seenUris.size}, ended=${ended}`,
+        `[REC] Poll #${pollCount}: new=${newFragments.length}, audio=${newAudioFragments?.length ?? 0}, seen=${seenUris.size}, ended=${ended}`,
       );
 
       if (newFragments.length > 0) {
@@ -192,6 +194,21 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
         indexedFragments.forEach((f) => seenUris.add(f.uri));
 
         await this.downloadFragmentsConcurrently(indexedFragments, abortSignal);
+      }
+
+      if (newAudioFragments && newAudioFragments.length > 0) {
+        const indexedAudioFragments: Fragment[] = newAudioFragments.map((f) => ({
+          ...f,
+          index: this.audioSegmentIndex++,
+        }));
+        await this.downloadFragmentsConcurrently(
+          indexedAudioFragments,
+          abortSignal,
+          this.downloadId + "_a",
+        );
+      }
+
+      if (newFragments.length > 0 || (newAudioFragments && newAudioFragments.length > 0)) {
         await this.updateRecordingProgress(stateId);
       }
 
@@ -211,13 +228,15 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
   protected async downloadFragmentsConcurrently(
     fragments: Fragment[],
     abortSignal: AbortSignal,
+    storeId?: string,
   ): Promise<void> {
+    const targetId = storeId ?? this.downloadId;
     await runConcurrentWorkers({
       items: fragments,
       maxConcurrent: this.maxConcurrent,
       shouldStop: () => abortSignal.aborted,
       processItem: async (fragment) => {
-        const size = await this.downloadFragment(fragment, this.downloadId);
+        const size = await this.downloadFragment(fragment, targetId);
         this.bytesDownloaded += size;
       },
       onError: (fragment, err) => {

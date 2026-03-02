@@ -32,6 +32,7 @@ export interface BasePlaylistHandlerOptions {
   maxConcurrent?: number;
   ffmpegTimeout?: number;
   shouldSaveOnCancel?: () => boolean;
+  selectedBandwidth?: number;
 }
 
 export abstract class BasePlaylistHandler {
@@ -39,6 +40,7 @@ export abstract class BasePlaylistHandler {
   protected readonly maxConcurrent: number;
   protected readonly ffmpegTimeout: number;
   protected readonly shouldSaveOnCancel?: () => boolean;
+  protected readonly selectedBandwidth?: number;
 
   protected downloadId: string = "";
   protected bytesDownloaded: number = 0;
@@ -57,6 +59,7 @@ export abstract class BasePlaylistHandler {
     this.maxConcurrent = options.maxConcurrent || DEFAULT_MAX_CONCURRENT;
     this.ffmpegTimeout = options.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
     this.shouldSaveOnCancel = options.shouldSaveOnCancel;
+    this.selectedBandwidth = options.selectedBandwidth;
   }
 
   // ---- Shared utility methods ----
