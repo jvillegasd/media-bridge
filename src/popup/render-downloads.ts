@@ -347,14 +347,8 @@ export function renderDownloads(forceFullRebuild = false): void {
       d.progress.stage !== DownloadStage.FAILED &&
       d.progress.stage !== DownloadStage.CANCELLED,
   );
-  const completed = downloadStates.filter(
-    (d) => d.progress.stage === DownloadStage.COMPLETED,
-  );
-  const failed = downloadStates.filter(
-    (d) => d.progress.stage === DownloadStage.FAILED || d.progress.stage === DownloadStage.CANCELLED,
-  );
 
-  if (inProgress.length === 0 && completed.length === 0 && failed.length === 0) {
+  if (inProgress.length === 0) {
     downloadsList.innerHTML = `
       <div class="empty-state">
         <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -394,11 +388,8 @@ export function renderDownloads(forceFullRebuild = false): void {
   downloadsList.innerHTML = "";
   renderedDownloadCards.clear();
 
-  const hasTerminal = completed.length > 0 || failed.length > 0;
   const sections: Array<{ label: string; items: DownloadState[]; showClear: boolean }> = [];
   if (inProgress.length > 0) sections.push({ label: "In Progress", items: inProgress, showClear: false });
-  if (completed.length > 0) sections.push({ label: "Completed", items: completed, showClear: hasTerminal });
-  if (failed.length > 0) sections.push({ label: "Failed", items: failed, showClear: hasTerminal && completed.length === 0 });
 
   for (const section of sections) {
     const sectionEl = createSectionHeader(section.label, section.items.length, section.showClear);
