@@ -373,8 +373,13 @@ async function saveS3Settings(): Promise<void> {
 // Section: History View
 // ─────────────────────────────────────────────
 
+const PAGE_SIZE = 50;
 let allHistory: DownloadState[] = [];
 const selectedIds = new Set<string>();
+let currentFiltered: DownloadState[] = [];
+let currentPage = 0;
+let historyObserver: IntersectionObserver | null = null;
+let historySentinel: HTMLElement | null = null;
 
 async function loadHistory(): Promise<void> {
   const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
@@ -455,8 +460,9 @@ async function fetchAndRenderHistory(): Promise<void> {
 }
 
 function rerenderHistory(): void {
-  const filtered = applyFilters(allHistory);
-  renderHistoryList(filtered);
+  currentFiltered = applyFilters(allHistory);
+  currentPage = 0;
+  renderHistoryList();
 }
 
 function applyFilters(all: DownloadState[]): DownloadState[] {
@@ -493,26 +499,60 @@ function dateInRange(ts: number, range: string): boolean {
   return true;
 }
 
-function renderHistoryList(items: DownloadState[]): void {
+function renderHistoryList(): void {
   const list = document.getElementById("history-list")!;
   const emptyEl = document.getElementById("history-empty")!;
   const disabledEl = document.getElementById("history-disabled")!;
 
+  disconnectHistoryObserver();
   disabledEl.classList.remove("visible");
   list.innerHTML = "";
 
-  if (items.length === 0) {
+  if (currentFiltered.length === 0) {
     emptyEl.classList.add("visible");
     return;
   }
 
   emptyEl.classList.remove("visible");
-  items.forEach((state) => {
-    list.appendChild(renderHistoryItem(state));
-  });
+  currentFiltered.slice(0, PAGE_SIZE).forEach((s) => list.appendChild(renderHistoryItem(s)));
+  currentPage = 1;
+
+  if (currentFiltered.length > PAGE_SIZE) {
+    setupHistorySentinel();
+  }
+}
+
+function appendHistoryBatch(): void {
+  const list = document.getElementById("history-list")!;
+  const start = currentPage * PAGE_SIZE;
+  const batch = currentFiltered.slice(start, start + PAGE_SIZE);
+  if (batch.length === 0) { disconnectHistoryObserver(); return; }
+  batch.forEach((s) => list.appendChild(renderHistoryItem(s)));
+  currentPage++;
+  if (currentPage * PAGE_SIZE >= currentFiltered.length) disconnectHistoryObserver();
+}
+
+function setupHistorySentinel(): void {
+  disconnectHistoryObserver();
+  historySentinel = document.createElement("div");
+  document.getElementById("history-list")!.after(historySentinel);
+  const root = document.querySelector<HTMLElement>(".content") ?? null;
+  historyObserver = new IntersectionObserver(
+    (entries) => { if (entries[0].isIntersecting) appendHistoryBatch(); },
+    { root, rootMargin: "120px" },
+  );
+  historyObserver.observe(historySentinel);
+}
+
+function disconnectHistoryObserver(): void {
+  historyObserver?.disconnect();
+  historyObserver = null;
+  historySentinel?.remove();
+  historySentinel = null;
 }
 
 function showHistoryDisabled(): void {
+  disconnectHistoryObserver();
   const list = document.getElementById("history-list")!;
   const emptyEl = document.getElementById("history-empty")!;
   const disabledEl = document.getElementById("history-disabled")!;
@@ -753,7 +793,7 @@ async function redownload(url: string, metadata?: VideoMetadata): Promise<void> 
       showToast(response.error, "error");
     } else {
       showToast("Download queued", "success");
-      await loadHistory();
+      await fetchAndRenderHistory();
     }
   } catch {
     showToast("Failed to start download", "error");
