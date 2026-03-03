@@ -637,7 +637,10 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   }
 
   menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url)));
-  menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", () => navigator.clipboard.writeText(state.url)));
+  menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", async () => {
+    await navigator.clipboard.writeText(state.url);
+    showToast("URL copied to clipboard", "success");
+  }));
 
   menu.appendChild(makeMenuItem(iconLink(), "Check manifest", () => checkManifest(state.url)));
 
