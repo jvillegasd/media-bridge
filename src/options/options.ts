@@ -729,10 +729,22 @@ function syncBulkBar(): void {
 }
 
 async function redownload(url: string, metadata?: VideoMetadata): Promise<void> {
+  let website: string | undefined;
+  try {
+    const urlObj = new URL(metadata?.pageUrl ?? url);
+    website = urlObj.hostname.replace(/^www\./, "");
+  } catch {}
+  const tabTitle = metadata?.title;
+
   try {
     const response = await chrome.runtime.sendMessage({
       type: MessageType.DOWNLOAD_REQUEST,
-      payload: { url, metadata: metadata ?? { url, format: "unknown" as any, pageUrl: url } },
+      payload: {
+        url,
+        metadata: metadata ?? { url, format: "unknown" as any, pageUrl: url },
+        tabTitle,
+        website,
+      },
     });
     if (response?.error) {
       showToast(response.error, "error");
