@@ -161,10 +161,6 @@ function renderDownloadItem(download: DownloadState): string {
     download.progress.stage !== DownloadStage.COMPLETED &&
     download.progress.stage !== DownloadStage.FAILED &&
     download.progress.stage !== DownloadStage.CANCELLED;
-  const isCompleted = download.progress.stage === DownloadStage.COMPLETED;
-  const isFailed =
-    download.progress.stage === DownloadStage.FAILED ||
-    download.progress.stage === DownloadStage.CANCELLED;
 
   const title =
     download.metadata.title ||
@@ -261,21 +257,7 @@ function renderDownloadItem(download: DownloadState): string {
   const dateText = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   let actionButtons = "";
-  if (isCompleted && download.localPath) {
-    actionButtons = `
-      <div class="card-actions">
-        <button class="video-btn download-open-btn" data-download-id="${escapeHtml(download.id)}">Open File</button>
-        <button class="video-btn-manifest download-remove-btn" data-download-id="${escapeHtml(download.id)}">Remove</button>
-      </div>
-    `;
-  } else if (isFailed) {
-    actionButtons = `
-      <div class="card-actions">
-        <button class="video-btn download-retry-btn" data-download-id="${escapeHtml(download.id)}">Retry</button>
-        <button class="video-btn-manifest download-remove-btn" data-download-id="${escapeHtml(download.id)}">Remove</button>
-      </div>
-    `;
-  } else if (isRecording) {
+  if (isRecording) {
     actionButtons = `
       <div class="card-actions">
         <button class="btn-stop-rec download-stop-rec-btn" data-url="${escapeHtml(download.url)}">Stop</button>

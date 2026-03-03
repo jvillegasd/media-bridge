@@ -579,6 +579,25 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   date.textContent = relativeTime(state.createdAt);
   actions.appendChild(date);
 
+  // Open file button (completed downloads with a known local path)
+  if (state.progress.stage === DownloadStage.COMPLETED && state.localPath) {
+    const localPath = state.localPath;
+    actions.appendChild(
+      makeIconBtn(iconFolder(), "Open file", async () => {
+        const filename = localPath.split(/[/\\]/).pop();
+        if (!filename) return;
+        const results = await new Promise<chrome.downloads.DownloadItem[]>((resolve) =>
+          chrome.downloads.search({ filenameRegex: filename }, resolve),
+        );
+        if (results.length > 0) {
+          chrome.downloads.show(results[0].id);
+        } else {
+          chrome.downloads.showDefaultFolder();
+        }
+      }),
+    );
+  }
+
   // Re-download button
   actions.appendChild(
     makeIconBtn(
@@ -765,6 +784,10 @@ function relativeTime(ts: number): string {
 // ─────────────────────────────────────────────
 // SVG icon snippets (inner SVG path strings)
 // ─────────────────────────────────────────────
+
+function iconFolder(): string {
+  return `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>`;
+}
 
 function iconDownload(): string {
   return `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>`;
