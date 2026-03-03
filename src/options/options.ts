@@ -639,14 +639,7 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url)));
   menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", () => navigator.clipboard.writeText(state.url)));
 
-  // Check manifest item (keeps state feedback inline)
-  const checkItem = makeMenuItem(iconLink(), "Check manifest", () => {});
-  checkItem.classList.add("check-btn");
-  checkItem.addEventListener("click", (e) => {
-    e.stopPropagation();
-    checkManifest(state.url, checkItem);
-  });
-  menu.appendChild(checkItem);
+  menu.appendChild(makeMenuItem(iconLink(), "Check manifest", () => checkManifest(state.url)));
 
   menu.appendChild(makeMenuItem(iconTrash(), "Delete", async () => {
     await deleteDownload(state.id);
@@ -742,33 +735,43 @@ function redownload(url: string): void {
   });
 }
 
-async function checkManifest(
-  url: string,
-  btn: HTMLButtonElement,
-): Promise<void> {
-  btn.dataset.state = "checking";
-  btn.querySelector("svg")!.innerHTML = iconSpinner();
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showToast(message: string, type: "success" | "error" | "warning"): void {
+  const toast = document.getElementById("toast");
+  if (!toast) return;
+
+  const icons: Record<string, string> = {
+    success: iconCheck(),
+    error: iconX(),
+    warning: iconQuestion(),
+  };
+
+  toast.className = type;
+  toast.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icons[type]}</svg>${message}`;
+
+  if (toastTimer) clearTimeout(toastTimer);
+  // Force reflow so the transition triggers even when re-showing
+  toast.classList.remove("show");
+  void toast.offsetWidth;
+  toast.classList.add("show");
+  toastTimer = setTimeout(() => toast.classList.remove("show"), 3000);
+}
+
+async function checkManifest(url: string): Promise<void> {
+  showToast("Checking…", "warning");
 
   const result = await chrome.runtime.sendMessage({
     type: MessageType.CHECK_URL,
     payload: { url },
   });
 
-  if (!result) {
-    btn.dataset.state = "unknown";
-    btn.querySelector("svg")!.innerHTML = iconQuestion();
-    return;
-  }
-
-  if (result.ok) {
-    btn.dataset.state = "ok";
-    btn.querySelector("svg")!.innerHTML = iconCheck();
-  } else if (result.status === 0) {
-    btn.dataset.state = "unknown";
-    btn.querySelector("svg")!.innerHTML = iconQuestion();
+  if (!result || result.status === 0) {
+    showToast("Manifest unreachable or CORS blocked", "warning");
+  } else if (result.ok) {
+    showToast("Manifest is live ✓", "success");
   } else {
-    btn.dataset.state = "dead";
-    btn.querySelector("svg")!.innerHTML = iconX();
+    showToast(`Manifest returned ${result.status}`, "error");
   }
 }
 
