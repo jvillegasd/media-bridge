@@ -900,7 +900,7 @@ async function checkManifest(url: string): Promise<void> {
   if (!result || result.status === 0) {
     showToast("Manifest unreachable or CORS blocked", "warning");
   } else if (result.ok) {
-    showToast("Manifest is live ✓", "success");
+    showToast("Manifest is live", "success");
   } else {
     showToast(`Manifest returned ${result.status}`, "error");
   }
