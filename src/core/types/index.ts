@@ -3,9 +3,10 @@
  */
 
 export enum VideoFormat {
-  DIRECT  = "direct",
-  HLS     = "hls",
-  M3U8    = "m3u8",
+  DIRECT = "direct",
+  HLS = "hls",
+  M3U8 = "m3u8",
+  DASH = "dash",
   UNKNOWN = "unknown",
 }
 
@@ -100,8 +101,6 @@ export interface MessageResponse {
   error?: string;
 }
 
-export type FetchFn<Data> = () => Promise<Data>;
-
 // HLS Playlist Types
 export type LevelType = "stream" | "audio";
 
@@ -124,3 +123,4 @@ export interface Level {
   height?: number;
   width?: number;
 }
+

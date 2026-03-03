@@ -6,7 +6,7 @@
  * and the manifest tab.
  */
 
-import { DownloadState, VideoMetadata } from "../core/types";
+import { DownloadState, VideoFormat, VideoMetadata } from "../core/types";
 import { getAllDownloads } from "../core/database/downloads";
 
 // ---- Detected videos ----
@@ -60,9 +60,11 @@ export let isLiveManifest = false;
 export let currentManualManifestUrl: string | null = null;
 export let hasDrmInManifest = false;
 export let unsupportedManifest = false;
+export let currentManifestFormat: VideoFormat = VideoFormat.HLS;
 
 export function setIsMediaPlaylistMode(v: boolean): void { isMediaPlaylistMode = v; }
 export function setIsLiveManifest(v: boolean): void { isLiveManifest = v; }
 export function setCurrentManualManifestUrl(v: string | null): void { currentManualManifestUrl = v; }
 export function setHasDrmInManifest(v: boolean): void { hasDrmInManifest = v; }
 export function setUnsupportedManifest(v: boolean): void { unsupportedManifest = v; }
+export function setCurrentManifestFormat(v: VideoFormat): void { currentManifestFormat = v; }

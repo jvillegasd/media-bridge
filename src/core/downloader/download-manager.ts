@@ -16,6 +16,7 @@ import { DownloadProgressCallback } from "./types";
 import { DirectDownloadHandler } from "./direct/direct-download-handler";
 import { HlsDownloadHandler } from "./hls/hls-download-handler";
 import { M3u8DownloadHandler } from "./m3u8/m3u8-download-handler";
+import { DashDownloadHandler } from "./dash/dash-download-handler";
 import { DEFAULT_MAX_CONCURRENT, DEFAULT_FFMPEG_TIMEOUT_MS } from "../../shared/constants";
 
 /**
@@ -49,6 +50,7 @@ export class DownloadManager {
   private readonly directDownloadHandler: DirectDownloadHandler;
   private readonly hlsDownloadHandler: HlsDownloadHandler;
   private readonly m3u8DownloadHandler: M3u8DownloadHandler;
+  private readonly dashDownloadHandler: DashDownloadHandler;
 
   /**
    * Creates a new DownloadManager instance
@@ -80,6 +82,14 @@ export class DownloadManager {
       ffmpegTimeout,
       shouldSaveOnCancel: options.shouldSaveOnCancel,
     });
+
+    // Initialize DASH download handler
+    this.dashDownloadHandler = new DashDownloadHandler({
+      onProgress: this.onProgress,
+      maxConcurrent: this.maxConcurrent,
+      ffmpegTimeout,
+      shouldSaveOnCancel: options.shouldSaveOnCancel,
+    });
   }
 
   /**
@@ -99,6 +109,7 @@ export class DownloadManager {
     manifestQuality?: {
       videoPlaylistUrl?: string | null;
       audioPlaylistUrl?: string | null;
+      selectedBandwidth?: number;
     },
     isManual?: boolean,
     abortSignal?: AbortSignal,
@@ -164,6 +175,16 @@ export class DownloadManager {
           state.id,
           abortSignal,
           metadata.pageUrl,
+        );
+      } else if (format === VideoFormat.DASH) {
+        // Use DASH download handler
+        await this.dashDownloadHandler.download(
+          actualVideoUrl,
+          filename,
+          state.id,
+          abortSignal,
+          metadata.pageUrl,
+          manifestQuality?.selectedBandwidth,
         );
       } else {
         throw new Error(`Unsupported format: ${format}`);

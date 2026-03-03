@@ -3,8 +3,8 @@
  * Supports AES-CBC decryption for encrypted video segments (e.g., HLS with AES-128)
  */
 
-import { fetchArrayBuffer } from "./fetch-utils";
-import { logger } from "./logger";
+import { fetchArrayBuffer } from "../utils/fetch-utils";
+import { logger } from "../utils/logger";
 
 /** Encryption key information for fragment decryption */
 export interface FragmentKey {

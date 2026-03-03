@@ -5,6 +5,7 @@
 
 import { DownloadManager } from "./core/downloader/download-manager";
 import { HlsRecordingHandler } from "./core/downloader/hls/hls-recording-handler";
+import { DashRecordingHandler } from "./core/downloader/dash/dash-recording-handler";
 import {
   getAllDownloads,
   getDownload,
@@ -34,7 +35,7 @@ import {
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
 import { deleteChunks, getChunkCount, getAllChunkDownloadIds } from "./core/database/chunks";
-import { createOffscreenDocument, closeOffscreenDocument } from "./core/utils/offscreen-manager";
+import { createOffscreenDocument, closeOffscreenDocument } from "./core/ffmpeg/offscreen-manager";
 import {
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_FFMPEG_TIMEOUT_MS,
@@ -132,6 +133,7 @@ async function handleDownloadRequestMessage(payload: {
   manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
+    selectedBandwidth?: number;
   };
 }): Promise<{ success: boolean; error?: string }> {
   try {
@@ -323,6 +325,10 @@ chrome.webRequest.onCompleted.addListener(
       "https://*/*.m3u8",
       "http://*/*.m3u8?*",
       "https://*/*.m3u8?*",
+      "http://*/*.mpd",
+      "https://*/*.mpd",
+      "http://*/*.mpd?*",
+      "https://*/*.mpd?*",
     ],
     types: ["xmlhttprequest"],
   },
@@ -387,6 +393,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE:
+      case MessageType.OFFSCREEN_PROCESS_DASH_RESPONSE:
         // Handled by ffmpeg-bridge's dynamic onMessage listener in processWithFFmpeg()
         return false;
 
@@ -410,7 +417,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function cleanupOrphanedChunks(existing: DownloadState) {
   if (
     existing.metadata.format !== VideoFormat.HLS &&
-    existing.metadata.format !== VideoFormat.M3U8
+    existing.metadata.format !== VideoFormat.M3U8 &&
+    existing.metadata.format !== VideoFormat.DASH
   ) {
     return;
   }
@@ -454,6 +462,7 @@ async function handleDownloadRequest(payload: {
   manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
+    selectedBandwidth?: number;
   };
   isManual?: boolean;
 }): Promise<{ error?: string } | void> {
@@ -576,8 +585,8 @@ async function handleDownloadRequest(payload: {
   // Start keep-alive if this is the first active download
   if (activeDownloads.size === 1) {
     keepAlive(true);
-    // Pre-warm FFmpeg for HLS/M3U8 downloads while segments download
-    if (metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8) {
+    // Pre-warm FFmpeg for HLS/M3U8/DASH downloads while segments download
+    if (metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8 || metadata.format === VideoFormat.DASH) {
       createOffscreenDocument()
         .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
         .catch((err) => logger.error("FFmpeg pre-warm failed:", err));
@@ -723,6 +732,7 @@ async function startDownload(
   manifestQuality?: {
     videoPlaylistUrl?: string | null;
     audioPlaylistUrl?: string | null;
+    selectedBandwidth?: number;
   },
   isManual?: boolean,
   abortSignal?: AbortSignal,
@@ -731,10 +741,13 @@ async function startDownload(
     // Generate filename if not provided
     let finalFilename = filename;
     if (!finalFilename) {
-      // HLS/M3U8 formats always produce MP4 after FFmpeg processing
-      const extension = metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8
-        ? "mp4"
-        : metadata.fileExtension || "mp4";
+      // HLS/M3U8/DASH formats always produce MP4 after FFmpeg processing
+      const extension =
+        metadata.format === VideoFormat.HLS ||
+        metadata.format === VideoFormat.M3U8 ||
+        metadata.format === VideoFormat.DASH
+          ? "mp4"
+          : metadata.fileExtension || "mp4";
       // Use tab info if available, otherwise fall back to URL-based generation
       if (tabTitle || website) {
         finalFilename = generateFilenameFromTabInfo(
@@ -833,11 +846,12 @@ async function handleCancelDownload(id: string): Promise<void> {
   // 2. Cancel Chrome downloads
   await cancelChromeDownloads(download);
 
-  // 3. Clean up chunks for HLS/M3U8 downloads
-  // Only cleanup if format is HLS or M3U8 (these use IndexedDB chunks)
+  // 3. Clean up chunks for HLS/M3U8/DASH downloads
+  // Only cleanup if format uses IndexedDB chunks
   if (
     download.metadata.format === VideoFormat.HLS ||
-    download.metadata.format === VideoFormat.M3U8
+    download.metadata.format === VideoFormat.M3U8 ||
+    download.metadata.format === VideoFormat.DASH
   ) {
     try {
       await deleteChunks(download.id);
@@ -872,6 +886,7 @@ async function handleStartRecordingMessage(payload: {
   filename?: string;
   tabTitle?: string;
   website?: string;
+  selectedBandwidth?: number;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const { url, metadata, filename, tabTitle, website } = payload;
@@ -927,19 +942,21 @@ async function handleStartRecordingMessage(payload: {
       } catch (_) {}
     };
 
-    const handler = new HlsRecordingHandler({
-      onProgress,
-      maxConcurrent,
-      ffmpegTimeout,
-    });
+    const handler =
+      metadata.format === VideoFormat.DASH
+        ? new DashRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout, selectedBandwidth: payload.selectedBandwidth })
+        : new HlsRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout });
 
     // Resolve filename
     let finalFilename = filename;
     if (!finalFilename) {
-      // HLS/M3U8 formats always produce MP4 after FFmpeg processing
-      const extension = metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8
-        ? "mp4"
-        : metadata.fileExtension || "mp4";
+      // HLS/M3U8/DASH formats always produce MP4 after FFmpeg processing
+      const extension =
+        metadata.format === VideoFormat.HLS ||
+        metadata.format === VideoFormat.M3U8 ||
+        metadata.format === VideoFormat.DASH
+          ? "mp4"
+          : metadata.fileExtension || "mp4";
       if (tabTitle || website) {
         finalFilename = generateFilenameFromTabInfo(tabTitle, website, extension);
       } else {
@@ -975,7 +992,13 @@ async function handleStartRecordingMessage(payload: {
       });
 
     activeDownloads.set(normalizedUrl, recordingPromise);
-    if (activeDownloads.size === 1) keepAlive(true);
+    if (activeDownloads.size === 1) {
+      keepAlive(true);
+      // Pre-warm FFmpeg — recordings always need FFmpeg for the merge phase
+      createOffscreenDocument()
+        .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
+        .catch((err) => logger.error("FFmpeg pre-warm failed for recording:", err));
+    }
 
     return { success: true };
   } catch (error) {

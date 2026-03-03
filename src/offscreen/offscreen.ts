@@ -153,58 +153,6 @@ function buildMissingChunksWarning(
   return `${missingCount} of ${totalCount} chunks were missing (${pct}%) — video may have gaps`;
 }
 
-async function processVideoAndAudio(
-  ffmpeg: FFmpeg,
-  downloadId: string,
-  videoLength: number,
-  audioLength: number,
-  outputFileName: string,
-  onProgress?: (progress: number, message: string) => void,
-): Promise<string | undefined> {
-  const videoFile = `${downloadId}_video.ts`;
-  const audioFile = `${downloadId}_audio.ts`;
-  const intermediateFiles = [videoFile, audioFile];
-
-  try {
-    onProgress?.(0.1, "Concatenating chunks");
-    const [videoResult, audioResult] = await Promise.all([
-      concatenateChunks(downloadId, 0, videoLength),
-      concatenateChunks(downloadId, videoLength, audioLength),
-    ]);
-
-    onProgress?.(0.5, "Writing video stream");
-    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
-
-    onProgress?.(0.6, "Writing audio stream");
-    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
-
-    onProgress?.(0.7, "Merging video and audio");
-    await ffmpeg.exec([
-      "-y",
-      "-i",
-      videoFile,
-      "-i",
-      audioFile,
-      "-c:v",
-      "copy",
-      "-c:a",
-      "copy",
-      "-bsf:a",
-      "aac_adtstoasc",
-      "-shortest",
-      "-movflags",
-      "+faststart",
-      outputFileName,
-    ]);
-
-    const totalMissing = videoResult.missingCount + audioResult.missingCount;
-    const totalChunks = videoResult.totalCount + audioResult.totalCount;
-    return buildMissingChunksWarning(totalMissing, totalChunks);
-  } finally {
-    await cleanupFiles(ffmpeg, intermediateFiles);
-  }
-}
-
 /**
  * Process a single stream (video-only, media playlist, or audio-only muxed content).
  * Handles concatenation, writing, and converting to MP4.
@@ -275,6 +223,7 @@ async function processHLSChunks(
   downloadId: string,
   videoLength: number,
   audioLength: number,
+  audioDownloadId?: string,
   onProgress?: (progress: number, message: string) => void,
 ): Promise<ProcessResult> {
   validateDownloadId(downloadId);
@@ -287,10 +236,15 @@ async function processHLSChunks(
     let warning: string | undefined;
 
     if (videoLength > 0 && audioLength > 0) {
-      warning = await processVideoAndAudio(
+      if (!audioDownloadId) {
+        throw new Error("audioDownloadId required for HLS video+audio mux");
+      }
+      validateDownloadId(audioDownloadId);
+      warning = await processHlsVideoAndAudioSeparate(
         ffmpeg,
         downloadId,
         videoLength,
+        audioDownloadId,
         audioLength,
         outputFileName,
         onProgress,
@@ -337,6 +291,198 @@ async function processHLSChunks(
   } catch (error) {
     resetFFmpeg();
     logger.error(`FFmpeg processing failed for ${downloadId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Process HLS recording: video and audio stored under separate downloadId namespaces.
+ * Video: (videoDownloadId, 0, videoLength), Audio: (audioDownloadId, 0, audioLength).
+ * Uses .ts intermediate files and -bsf:a aac_adtstoasc (HLS/MPEG-TS container).
+ */
+async function processHlsVideoAndAudioSeparate(
+  ffmpeg: FFmpeg,
+  videoDownloadId: string,
+  videoLength: number,
+  audioDownloadId: string,
+  audioLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string | undefined> {
+  const videoFile = `${videoDownloadId}_video.ts`;
+  const audioFile = `${audioDownloadId}_audio.ts`;
+
+  try {
+    onProgress?.(0.1, "Concatenating chunks");
+    const [videoResult, audioResult] = await Promise.all([
+      concatenateChunks(videoDownloadId, 0, videoLength),
+      concatenateChunks(audioDownloadId, 0, audioLength),
+    ]);
+
+    onProgress?.(0.5, "Writing video stream");
+    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
+
+    onProgress?.(0.6, "Writing audio stream");
+    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
+
+    onProgress?.(0.7, "Merging video and audio");
+    await ffmpeg.exec([
+      "-y",
+      "-i", videoFile,
+      "-i", audioFile,
+      "-c:v", "copy",
+      "-c:a", "copy",
+      "-bsf:a", "aac_adtstoasc",
+      "-shortest",
+      "-movflags", "+faststart",
+      outputFileName,
+    ]);
+
+    const totalMissing = videoResult.missingCount + audioResult.missingCount;
+    const totalChunks = videoResult.totalCount + audioResult.totalCount;
+    return buildMissingChunksWarning(totalMissing, totalChunks);
+  } finally {
+    await cleanupFiles(ffmpeg, [videoFile, audioFile]);
+  }
+}
+
+async function processDashSingleStream(
+  ffmpeg: FFmpeg,
+  downloadId: string,
+  fragmentCount: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string | undefined> {
+  const inputFile = `${downloadId}_media.mp4`;
+
+  try {
+    onProgress?.(0.2, "Concatenating segments");
+    const result = await concatenateChunks(downloadId, 0, fragmentCount);
+
+    onProgress?.(0.5, "Writing media stream");
+    await ffmpeg.writeFile(inputFile, await fetchFile(result.blob));
+
+    onProgress?.(0.7, "Converting to MP4");
+    await ffmpeg.exec([
+      "-y",
+      "-i", inputFile,
+      "-c", "copy",
+      "-movflags", "+faststart",
+      outputFileName,
+    ]);
+
+    return buildMissingChunksWarning(result.missingCount, result.totalCount);
+  } finally {
+    await cleanupFiles(ffmpeg, [inputFile]);
+  }
+}
+
+/**
+ * Process DASH recording: video and audio stored under separate downloadId namespaces.
+ * Video: (videoDownloadId, 0, videoLength), Audio: (audioDownloadId, 0, audioLength).
+ */
+async function processDashVideoAndAudioSeparate(
+  ffmpeg: FFmpeg,
+  videoDownloadId: string,
+  videoLength: number,
+  audioDownloadId: string,
+  audioLength: number,
+  outputFileName: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<string | undefined> {
+  const videoFile = `${videoDownloadId}_video.mp4`;
+  const audioFile = `${audioDownloadId}_audio.mp4`;
+
+  try {
+    onProgress?.(0.1, "Concatenating chunks");
+    const [videoResult, audioResult] = await Promise.all([
+      concatenateChunks(videoDownloadId, 0, videoLength),
+      concatenateChunks(audioDownloadId, 0, audioLength),
+    ]);
+
+    onProgress?.(0.5, "Writing video stream");
+    await ffmpeg.writeFile(videoFile, await fetchFile(videoResult.blob));
+
+    onProgress?.(0.6, "Writing audio stream");
+    await ffmpeg.writeFile(audioFile, await fetchFile(audioResult.blob));
+
+    onProgress?.(0.7, "Merging video and audio");
+    await ffmpeg.exec([
+      "-y",
+      "-i", videoFile,
+      "-i", audioFile,
+      "-c:v", "copy",
+      "-c:a", "copy",
+      "-shortest",
+      "-movflags", "+faststart",
+      outputFileName,
+    ]);
+
+    const totalMissing = videoResult.missingCount + audioResult.missingCount;
+    const totalChunks = videoResult.totalCount + audioResult.totalCount;
+    return buildMissingChunksWarning(totalMissing, totalChunks);
+  } finally {
+    await cleanupFiles(ffmpeg, [videoFile, audioFile]);
+  }
+}
+
+async function processDashChunks(
+  downloadId: string,
+  videoLength: number,
+  audioLength: number,
+  audioDownloadId?: string,
+  onProgress?: (progress: number, message: string) => void,
+): Promise<ProcessResult> {
+  validateDownloadId(downloadId);
+  const ffmpeg = await getFFmpeg();
+
+  const outputFileName = `/tmp/${downloadId}.mp4`;
+
+  try {
+    let warning: string | undefined;
+
+    if (videoLength > 0 && audioLength > 0) {
+      if (!audioDownloadId) {
+        throw new Error("audioDownloadId required for DASH video+audio mux");
+      }
+      validateDownloadId(audioDownloadId);
+      warning = await processDashVideoAndAudioSeparate(
+        ffmpeg,
+        downloadId,
+        videoLength,
+        audioDownloadId,
+        audioLength,
+        outputFileName,
+        onProgress,
+      );
+    } else if (videoLength > 0) {
+      warning = await processDashSingleStream(
+        ffmpeg,
+        downloadId,
+        videoLength,
+        outputFileName,
+        onProgress,
+      );
+    } else {
+      throw new Error("No DASH chunks to process");
+    }
+
+    const data = await ffmpeg.readFile(outputFileName);
+    onProgress?.(1, "Done");
+
+    const blob = new Blob([data as BlobPart], { type: "video/mp4" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    try {
+      await ffmpeg.deleteFile(outputFileName);
+    } catch {
+      // File may not exist, ignore error
+    }
+
+    return { blobUrl, warning };
+  } catch (error) {
+    resetFFmpeg();
+    logger.error(`FFmpeg DASH processing failed for ${downloadId}:`, error);
     throw error;
   }
 }
@@ -468,6 +614,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           payload.downloadId as string,
           payload.videoLength as number,
           payload.audioLength as number,
+          payload.audioDownloadId as string | undefined,
           onProgress,
         ),
     )
@@ -484,6 +631,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         processM3u8Chunks(
           payload.downloadId as string,
           payload.fragmentCount as number,
+          onProgress,
+        ),
+    )
+  )
+    return true;
+
+  if (
+    handleProcessingMessage(
+      message,
+      sendResponse,
+      MessageType.OFFSCREEN_PROCESS_DASH,
+      MessageType.OFFSCREEN_PROCESS_DASH_RESPONSE,
+      (payload, onProgress) =>
+        processDashChunks(
+          payload.downloadId as string,
+          payload.videoLength as number,
+          payload.audioLength as number,
+          payload.audioDownloadId as string | undefined,
           onProgress,
         ),
     )

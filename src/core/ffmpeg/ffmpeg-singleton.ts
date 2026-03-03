@@ -3,7 +3,7 @@
  */
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { logger } from "./logger";
+import { logger } from "../utils/logger";
 
 /**
  * Singleton FFmpeg instance

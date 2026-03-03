@@ -3,7 +3,7 @@
  * Creates and manages the offscreen document lifecycle
  */
 
-import { logger } from "./logger";
+import { logger } from "../utils/logger";
 
 const OFFSCREEN_DOCUMENT_PATH = "offscreen/offscreen.html";
 const OFFSCREEN_LOAD_DELAY_MS = 100;

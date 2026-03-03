@@ -30,11 +30,11 @@ import {
   isMasterPlaylist,
   isMediaPlaylist,
   parseMasterPlaylist,
-} from "../../utils/m3u8-parser";
+} from "../../parsers/m3u8-parser";
 import { fetchText } from "../../utils/fetch-utils";
 import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
-import { extractThumbnail } from "../../utils/thumbnail-utils";
+import { extractThumbnail } from "../thumbnail-utils";
 import { hasDrm, canDecrypt } from "../../utils/drm-utils";
 
 /** Configuration options for HlsDetectionHandler */

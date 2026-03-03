@@ -11,10 +11,10 @@
 import { CancellationError } from "../../utils/errors";
 import { DownloadStage } from "../../types";
 import { logger } from "../../utils/logger";
-import { parseLevelsPlaylist } from "../../utils/m3u8-parser";
+import { parseMediaPlaylist, parseLevelsPlaylist } from "../../parsers/m3u8-parser";
 import { getChunkCount } from "../../database/chunks";
 import { MessageType } from "../../../shared/messages";
-import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
+import { processWithFFmpeg } from "../../ffmpeg/ffmpeg-bridge";
 import { throwIfAborted } from "../../utils/cancellation";
 import { canDownloadHLSManifest } from "../../utils/drm-utils";
 import { saveBlobUrlToFile } from "../../utils/blob-utils";
@@ -61,8 +61,7 @@ export class M3u8DownloadHandler extends BasePlaylistHandler {
       canDownloadHLSManifest(mediaPlaylistText);
 
       const fragments = parseLevelsPlaylist(
-        mediaPlaylistText,
-        mediaPlaylistUrl,
+        parseMediaPlaylist(mediaPlaylistText, mediaPlaylistUrl),
       );
 
       if (fragments.length === 0) {

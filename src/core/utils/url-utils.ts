@@ -44,6 +44,11 @@ export function detectFormatFromUrl(url: string): VideoFormat {
 
   const pathnameLower = urlObj.pathname.toLowerCase();
 
+  // Check for DASH manifest files (.mpd) on pathname only
+  if (pathnameLower.endsWith(".mpd")) {
+    return VideoFormat.DASH;
+  }
+
   // Check for HLS playlist files (.m3u8) on pathname only
   if (pathnameLower.endsWith(".m3u8")) {
     return VideoFormat.HLS;

@@ -2,9 +2,10 @@
  * Fetch utility functions with retry logic
  */
 
-import { FetchFn } from "../types";
 import { MessageType } from "../../shared/messages";
 import { INITIAL_RETRY_DELAY_MS, RETRY_BACKOFF_FACTOR } from "../../shared/constants";
+
+type FetchFn<Data> = () => Promise<Data>;
 
 /**
  * Check if we're running in a service worker/background context
@@ -146,6 +147,36 @@ export async function fetchText(
   const fetchFn: FetchFn<string> = () =>
     fetchResource(url, { signal, headers, cache: noCache ? "no-store" : undefined }).then((res) => res.text());
   return fetchWithRetry(fetchFn, attempts);
+}
+
+/**
+ * Like fetchText, but also returns the post-redirect URL (response.url).
+ * In service worker context, captures the real final URL after any HTTP redirects.
+ * In content script context, falls back to the original URL (response.url unavailable via proxy).
+ */
+export async function fetchTextWithFinalUrl(
+  url: string,
+  attempts: number = 1,
+  signal?: AbortSignal,
+  noCache?: boolean,
+): Promise<{ text: string; finalUrl: string }> {
+  if (isServiceWorkerContext()) {
+    const fetchFn: FetchFn<{ text: string; finalUrl: string }> = async () => {
+      const response = await fetch(url, {
+        signal,
+        cache: noCache ? "no-store" : undefined,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      }
+      const text = await response.text();
+      return { text, finalUrl: response.url || url };
+    };
+    return fetchWithRetry(fetchFn, attempts);
+  }
+  // In content script context: response.url unavailable after proxy, fall back to original url
+  const text = await fetchText(url, attempts, signal, noCache);
+  return { text, finalUrl: url };
 }
 
 export async function fetchArrayBuffer(

@@ -5,79 +5,48 @@
 import { Parser } from "m3u8-parser";
 import { buildAbsoluteURL } from "url-toolkit";
 import { v4 as uuidv4 } from "uuid";
-import { Fragment, Level, LevelType } from "../types";
-import { normalizeUrl } from "./url-utils";
-import { logger } from "./logger";
+import { Level, LevelType } from "../types";
+import type { ParsedPlaylist, ParsedSegment } from "./playlist-utils";
+import { normalizeUrl } from "../utils/url-utils";
+import { logger } from "../utils/logger";
+
+export { parseLevelsPlaylist } from "./playlist-utils";
+import { parseLevelsPlaylist } from "./playlist-utils";
 
 /**
- * Parse a level playlist into fragments
+ * Parse a media playlist into a ParsedPlaylist (protocol-agnostic intermediate).
+ * Pass the result to parseLevelsPlaylist() to get Fragment[].
  */
-export function parseLevelsPlaylist(
-  playlistText: string,
-  baseUrl: string,
-): Fragment[] {
+export function parseMediaPlaylist(playlistText: string, baseUrl: string): ParsedPlaylist {
   const parser = new Parser();
   parser.push(playlistText);
   parser.end();
 
-  const segments = parser.manifest.segments || [];
-  const fragments: Fragment[] = [];
+  const segments: ParsedSegment[] = (parser.manifest.segments || []).map((segment) => {
+    const ps: ParsedSegment = { uri: buildAbsoluteURL(baseUrl, segment.uri) };
 
-  let index = 0;
-  let currentMapUri: string | null = null;
-  let currentMapByteRange: string | null = null;
-
-  segments.forEach((segment) => {
-    // Handle initialization segments (EXT-X-MAP)
-    if (segment.map && segment.map.uri) {
-      const mapUri = buildAbsoluteURL(baseUrl, segment.map.uri);
-      const mapByteRange = segment.map.byterange
-        ? `${segment.map.byterange.offset}:${segment.map.byterange.length}`
-        : null;
-
-      // Only add map if it's different from the current one
-      if (mapUri !== currentMapUri || mapByteRange !== currentMapByteRange) {
-        fragments.push({
-          index,
-          key:
-            segment.key && segment.key.uri
-              ? {
-                  iv: segment.key.iv
-                    ? Array.from(segment.key.iv)
-                        .map((b) => b.toString(16).padStart(2, "0"))
-                        .join("")
-                    : null,
-                  uri: buildAbsoluteURL(baseUrl, segment.key.uri),
-                }
-              : { iv: null, uri: null },
-          uri: mapUri,
-        });
-        index++;
-        currentMapUri = mapUri;
-        currentMapByteRange = mapByteRange;
+    if (segment.map?.uri) {
+      ps.initUri = buildAbsoluteURL(baseUrl, segment.map.uri);
+      if (segment.map.byterange) {
+        ps.initByteRange = `${segment.map.byterange.offset}:${segment.map.byterange.length}`;
       }
     }
 
-    // Add the segment fragment
-    fragments.push({
-      index,
-      key:
-        segment.key && segment.key.uri
-          ? {
-              iv: segment.key.iv
-                ? Array.from(segment.key.iv)
-                    .map((b) => b.toString(16).padStart(2, "0"))
-                    .join("")
-                : null,
-              uri: buildAbsoluteURL(baseUrl, segment.key.uri),
-            }
-          : { iv: null, uri: null },
-      uri: buildAbsoluteURL(baseUrl, segment.uri),
-    });
-    index++;
+    if (segment.key?.uri) {
+      ps.key = {
+        uri: buildAbsoluteURL(baseUrl, segment.key.uri),
+        iv: segment.key.iv
+          ? Array.from(segment.key.iv)
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("")
+          : null,
+      };
+    }
+
+    return ps;
   });
 
-  return fragments;
+  return { segments };
 }
 
 /**
@@ -202,6 +171,7 @@ export function belongsToMasterPlaylist(
 
 export const M3u8Parser = {
   parseLevelsPlaylist,
+  parseMediaPlaylist,
   parseMasterPlaylist,
   isMasterPlaylist,
   isMediaPlaylist,

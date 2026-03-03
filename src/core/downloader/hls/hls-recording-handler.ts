@@ -6,29 +6,21 @@
  * #EXT-X-ENDLIST is detected) — hands off to the existing M3U8/FFmpeg merge path
  * to produce an MP4 file.
  *
- * Extends BasePlaylistHandler for shared constructor, state, notifyProgress,
- * sanitizeBaseFilename, updateStage, and cleanupChunks.
- *
- * The handler is controlled via an AbortSignal:
- *   - Normal abort (user clicks STOP) → polling loop exits, merge begins.
- *   - #EXT-X-ENDLIST detected         → polling loop exits naturally, merge begins.
+ * Extends BaseRecordingHandler for the shared polling/recording orchestration.
+ * Implements the HLS-specific abstract methods: resolveMediaUrl, fetchNewSegments,
+ * and buildFfmpegOptions.
  */
 
-import { DownloadStage, Fragment } from "../../types";
-import { getDownload, storeDownload } from "../../database/downloads";
-import { fetchText } from "../../utils/fetch-utils";
+import { Fragment } from "../../types";
+import { fetchText, fetchTextWithFinalUrl } from "../../utils/fetch-utils";
 import {
   parseMasterPlaylist,
+  parseMediaPlaylist,
   parseLevelsPlaylist,
-} from "../../utils/m3u8-parser";
+} from "../../parsers/m3u8-parser";
 import { logger } from "../../utils/logger";
-import { CancellationError } from "../../utils/errors";
 import { MessageType } from "../../../shared/messages";
-import { saveBlobUrlToFile } from "../../utils/blob-utils";
-import { processWithFFmpeg } from "../../utils/ffmpeg-bridge";
-import { BasePlaylistHandler } from "../base-playlist-handler";
-import { runConcurrentWorkers } from "../concurrent-workers";
-import { SAVING_STAGE_PERCENTAGE } from "../../../shared/constants";
+import { BaseRecordingHandler } from "../base-recording-handler";
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 const MIN_POLL_INTERVAL_MS = 1000;
@@ -42,118 +34,38 @@ const POLL_INTERVAL_FRACTION = 0.5;
 function computePollInterval(playlistText: string): number {
   const match = playlistText.match(/#EXT-X-TARGETDURATION:\s*(\d+(?:\.\d+)?)/);
   if (!match) return DEFAULT_POLL_INTERVAL_MS;
-  const targetDuration = parseFloat(match[1]!) * 1000; // convert to ms
+  const targetDuration = parseFloat(match[1]!) * 1000;
   const interval = Math.round(targetDuration * POLL_INTERVAL_FRACTION);
   return Math.max(MIN_POLL_INTERVAL_MS, Math.min(interval, MAX_POLL_INTERVAL_MS));
 }
 
-export class HlsRecordingHandler extends BasePlaylistHandler {
-  private segmentIndex: number = 0;
-
-  protected override resetDownloadState(
-    stateId: string,
-    abortSignal?: AbortSignal,
-  ): void {
-    super.resetDownloadState(stateId, abortSignal);
-    this.segmentIndex = 0;
-  }
-
+export class HlsRecordingHandler extends BaseRecordingHandler {
   /**
-   * Start recording a live HLS stream.
-   * Returns when the user aborts or #EXT-X-ENDLIST is detected,
-   * then merges collected segments and saves the file.
+   * Resolve the media playlist URL from a master or media playlist URL.
+   * If the URL points to a master playlist, selects the highest-bandwidth variant.
+   * Returns mediaUrl (URL to poll) and finalUrl (post-redirect URL for DNR header rules).
    */
-  async record(
-    manifestUrl: string,
-    filename: string,
-    stateId: string,
-    abortSignal: AbortSignal,
-    pageUrl?: string,
-  ): Promise<{ filePath: string; fileExtension?: string }> {
-    this.resetDownloadState(stateId, abortSignal);
-
-    const headerRuleIds = await this.tryAddHeaderRules(stateId, manifestUrl, pageUrl);
-
-    try {
-      const mediaPlaylistUrl = await this.resolveMediaPlaylistUrl(
-        manifestUrl,
-        abortSignal,
-      );
-
-      await this.collectSegments(mediaPlaylistUrl, stateId, abortSignal);
-
-      if (this.segmentIndex === 0) {
-        throw new Error("No segments were recorded");
-      }
-
-      await this.updateStage(
-        stateId,
-        DownloadStage.MERGING,
-        "Merging recorded segments...",
-      );
-
-      const baseFileName = this.sanitizeBaseFilename(filename, "recording");
-
-      const { blobUrl, warning } = await processWithFFmpeg({
-        requestType: MessageType.OFFSCREEN_PROCESS_M3U8,
-        responseType: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
-        downloadId: this.downloadId,
-        payload: { fragmentCount: this.segmentIndex },
-        filename: baseFileName,
-        timeout: this.ffmpegTimeout,
-        onProgress: this.createMergingProgressCallback(stateId),
-      });
-
-      await this.updateStage(
-        stateId,
-        DownloadStage.SAVING,
-        "Saving file...",
-        SAVING_STAGE_PERCENTAGE,
-      );
-
-      const finalFilename = `${baseFileName}.mp4`;
-      const filePath = await saveBlobUrlToFile(blobUrl, finalFilename, stateId);
-
-      const completionMessage = warning
-        ? `Recording saved — ${warning}`
-        : "Recording saved";
-      await this.markCompleted(stateId, filePath, completionMessage);
-
-      logger.info(`HLS recording completed: ${filePath}`);
-      return { filePath, fileExtension: "mp4" };
-    } catch (error) {
-      logger.error("HLS recording failed:", error);
-      throw error;
-    } finally {
-      await this.tryRemoveHeaderRules(headerRuleIds);
-      await this.cleanupChunks(this.downloadId || stateId);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
-  private async resolveMediaPlaylistUrl(
+  protected async resolveMediaUrl(
     url: string,
     abortSignal: AbortSignal,
-  ): Promise<string> {
-    const text = await fetchText(url, 3, abortSignal);
+  ): Promise<{ mediaUrl: string; finalUrl: string }> {
+    const { text, finalUrl: masterFinalUrl } = await fetchTextWithFinalUrl(url, 3, abortSignal);
 
     if (!text.includes("#EXT-X-STREAM-INF")) {
       logger.info(
         `[REC] URL is already a media playlist: ${url.substring(0, 100)}...`,
       );
-      return url;
+      return { mediaUrl: url, finalUrl: masterFinalUrl };
     }
 
-    const levels = parseMasterPlaylist(text, url);
+    // Use masterFinalUrl for relative URI resolution in case of redirect
+    const levels = parseMasterPlaylist(text, masterFinalUrl);
     const videoLevels = levels.filter((l) => l.type === "stream");
     if (videoLevels.length === 0) {
       logger.warn(
         `[REC] No video levels found in master playlist, using URL as-is`,
       );
-      return url;
+      return { mediaUrl: url, finalUrl: masterFinalUrl };
     }
 
     videoLevels.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
@@ -161,128 +73,37 @@ export class HlsRecordingHandler extends BasePlaylistHandler {
     logger.info(
       `[REC] Resolved media playlist: ${resolvedUrl.substring(0, 100)}...`,
     );
-    return resolvedUrl;
+    // finalUrl for segments is the media playlist URL itself
+    return { mediaUrl: resolvedUrl, finalUrl: resolvedUrl };
   }
 
-  private async collectSegments(
-    mediaPlaylistUrl: string,
-    stateId: string,
+  /**
+   * Fetch the media playlist and return new segments not yet seen.
+   */
+  protected async fetchNewSegments(
+    url: string,
     abortSignal: AbortSignal,
-  ): Promise<void> {
-    const seenUris = new Set<string>();
-    let pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
+    seenUris: Set<string>,
+  ): Promise<{ fragments: Fragment[]; pollIntervalMs: number; ended: boolean }> {
+    const playlistText = await fetchText(url, 3, abortSignal, true);
 
-    logger.info(
-      `[REC] Starting polling loop, abortSignal.aborted=${abortSignal.aborted}`,
-    );
-    let pollCount = 0;
+    const allFragments = parseLevelsPlaylist(parseMediaPlaylist(playlistText, url));
+    const newFragments = allFragments.filter((f) => !seenUris.has(f.uri));
 
-    while (!abortSignal.aborted) {
-      pollCount++;
-      let playlistText: string;
-      try {
-        playlistText = await fetchText(mediaPlaylistUrl, 3, abortSignal, true);
-      } catch (err) {
-        if (abortSignal.aborted) break;
-        logger.warn(
-          "Failed to fetch manifest during recording, retrying...",
-          err,
-        );
-        await this.sleep(pollIntervalMs, abortSignal);
-        continue;
-      }
+    const ended = playlistText.includes("#EXT-X-ENDLIST");
+    const pollIntervalMs = computePollInterval(playlistText);
 
-      // Adapt poll interval from target duration on first successful fetch
-      if (pollCount === 1) {
-        pollIntervalMs = computePollInterval(playlistText);
-        logger.info(`[REC] Adaptive poll interval: ${pollIntervalMs}ms`);
-      }
-
-      if (abortSignal.aborted) break;
-
-      logger.info(
-        `[REC] Poll #${pollCount}: playlist length=${playlistText.length}, aborted=${abortSignal.aborted}`,
-      );
-
-      const allFragments = parseLevelsPlaylist(playlistText, mediaPlaylistUrl);
-      const newFragments = allFragments.filter((f) => !seenUris.has(f.uri));
-
-      logger.info(
-        `[REC] Poll #${pollCount}: total fragments=${allFragments.length}, new=${newFragments.length}, seen=${seenUris.size}`,
-      );
-
-      if (newFragments.length > 0) {
-        const indexedFragments: Fragment[] = newFragments.map((f) => ({
-          ...f,
-          index: this.segmentIndex++,
-        }));
-
-        indexedFragments.forEach((f) => seenUris.add(f.uri));
-
-        await this.downloadFragmentsConcurrently(indexedFragments, abortSignal);
-
-        await this.updateRecordingProgress(stateId);
-      }
-
-      const hasEndList = playlistText.includes("#EXT-X-ENDLIST");
-      logger.info(`[REC] Poll #${pollCount}: hasEndList=${hasEndList}`);
-      if (hasEndList) {
-        logger.info("HLS stream ended naturally (#EXT-X-ENDLIST detected)");
-        break;
-      }
-
-      await this.sleep(pollIntervalMs, abortSignal);
-    }
-    logger.info(
-      `[REC] Polling loop exited after ${pollCount} polls, segments=${this.segmentIndex}, aborted=${abortSignal.aborted}`,
-    );
+    return { fragments: newFragments, pollIntervalMs, ended };
   }
 
-  private async downloadFragmentsConcurrently(
-    fragments: Fragment[],
-    abortSignal: AbortSignal,
-  ): Promise<void> {
-    await runConcurrentWorkers({
-      items: fragments,
-      maxConcurrent: this.maxConcurrent,
-      shouldStop: () => abortSignal.aborted,
-      processItem: async (fragment) => {
-        const size = await this.downloadFragment(fragment, this.downloadId);
-        this.bytesDownloaded += size;
-      },
-      onError: (fragment, err) => {
-        logger.warn(`Failed to download segment ${fragment.index}:`, err);
-      },
-    });
-  }
-
-  private async updateRecordingProgress(stateId: string): Promise<void> {
-    const state = await getDownload(stateId);
-    if (!state) return;
-    state.progress.stage = DownloadStage.RECORDING;
-    state.progress.segmentsCollected = this.segmentIndex;
-    state.progress.downloaded = this.bytesDownloaded;
-    state.progress.message = `${this.segmentIndex} segments collected`;
-    state.updatedAt = Date.now();
-    await storeDownload(state);
-    this.notifyProgress(state);
-  }
-
-  private sleep(ms: number, abortSignal: AbortSignal): Promise<void> {
-    return new Promise((resolve) => {
-      if (abortSignal.aborted) {
-        resolve();
-        return;
-      }
-      const id = setTimeout(resolve, ms);
-      abortSignal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(id);
-          resolve();
-        },
-        { once: true },
-      );
-    });
+  /**
+   * FFmpeg options for merging HLS recording segments (MPEG-TS → MP4).
+   */
+  protected buildFfmpegOptions() {
+    return {
+      requestType: MessageType.OFFSCREEN_PROCESS_M3U8,
+      responseType: MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE,
+      payload: { fragmentCount: this.segmentIndex } as Record<string, unknown>,
+    };
   }
 }

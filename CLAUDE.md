@@ -50,6 +50,26 @@ Download state is persisted in **IndexedDB** (not `chrome.storage`), in the `med
 
 Configuration (Google Drive settings, FFmpeg timeout, max concurrent) lives in `chrome.storage.local` via `ChromeStorage` (`core/storage/chrome-storage.ts`).
 
+IndexedDB is used as the shared state store because the five execution contexts don't share memory. The service worker writes state via `storeDownload()` (`core/database/downloads.ts`), which is a single IDB `put` upsert keyed by `id`. The popup reads the full list via `getAllDownloads()` on open. The offscreen document reads raw chunks from the `chunks` store during FFmpeg processing. `chrome.storage` is only used for config because it has a 10MB quota and can't store `ArrayBuffer`.
+
+Progress updates use two complementary channels:
+- **IndexedDB** — durable source of truth; survives popup close/reopen and service worker restarts. Popup reads this on mount.
+- **`chrome.runtime.sendMessage` (`DOWNLOAD_PROGRESS`)** — low-latency live updates broadcast by the service worker while the popup is open. Fire-and-forget; missed if popup is closed.
+
+### Progress Update Design (BasePlaylistHandler)
+
+`updateProgress()` (`core/downloader/base-playlist-handler.ts`) is the hot-path progress method called after every segment download. It uses two optimizations to avoid overwhelming the service worker event loop:
+
+1. **`cachedState`** — a class field holding the `DownloadState` object read from IDB on the first call. Every subsequent call mutates this same in-memory object directly (updating `downloaded`, `total`, `percentage`, `speed`, etc.) — zero DB reads. The cache is invalidated (`cachedState = null`) only on `resetDownloadState()` (new download) and `updateStage()` (stage transition), which forces a fresh IDB read to pick up any external changes.
+
+2. **`DB_SYNC_INTERVAL_MS = 500ms` throttle** — `storeDownload()` is only called if at least 500ms have elapsed since the last write. The popup still receives every update via `notifyProgress()` (which fires unconditionally), but IDB writes are capped at ~2/second regardless of segment download frequency.
+
+`updateStage()` bypasses both optimizations — it always does a full IDB read + write because stage transitions are rare and need to reflect the true persisted state.
+
+`HlsRecordingHandler.updateRecordingProgress()` also always does a full IDB read + write, but is naturally rate-limited to once per poll cycle (every 1–10 seconds), so throttling is unnecessary.
+
+**Do not add `getDownload()` calls inside `updateProgress()` or the `onProgress` callback** — that was the root cause of the UI freezing bug fixed in commit `9f2a21e`. With 3 concurrent downloads each firing per segment, even one extra IDB read per callback produces dozens of blocking reads per second that queue up behind user interaction messages in the service worker event loop.
+
 ### Message Protocol
 
 All inter-component communication uses the `MessageType` enum in `src/shared/messages.ts`. When adding new message types, add them to this enum and handle them in the service worker's `onMessage` listener switch statement.
@@ -68,7 +88,7 @@ FFmpeg WASM files are served from `public/ffmpeg/` and copied to `dist/ffmpeg/` 
 
 ### Format Detection
 
-`VideoFormat` is `"direct" | "hls" | "m3u8" | "unknown"`. The distinction between `hls` (master playlist with quality variants) and `m3u8` (direct media playlist with segments) is significant — they use different handlers and FFmpeg processing paths.
+`VideoFormat` is a string enum (`VideoFormat.DIRECT | HLS | M3U8 | UNKNOWN`). The distinction between `HLS` (master playlist with quality variants) and `M3U8` (direct media playlist with segments) is significant — they use different handlers and FFmpeg processing paths. Use enum values everywhere; the underlying strings are lowercase for IndexedDB backward compatibility.
 
 ### Live Stream Recording
 

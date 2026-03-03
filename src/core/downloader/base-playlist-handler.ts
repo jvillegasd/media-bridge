@@ -10,16 +10,16 @@ import { cancelIfAborted, throwIfAborted } from "../utils/cancellation";
 import { getDownload, storeDownload } from "../database/downloads";
 import { DownloadState, Fragment, DownloadStage } from "../types";
 import { logger } from "../utils/logger";
-import { decryptFragment } from "../utils/crypto-utils";
+import { decryptFragment } from "./crypto-utils";
 import { fetchArrayBuffer, fetchText } from "../utils/fetch-utils";
 import { storeChunk, deleteChunks, getChunkCount } from "../database/chunks";
 import { sanitizeFilename } from "../utils/file-utils";
 import { formatFileSize } from "../utils/format-utils";
 import { DownloadProgressCallback } from "./types";
 import { MessageType } from "../../shared/messages";
-import { processWithFFmpeg } from "../utils/ffmpeg-bridge";
+import { processWithFFmpeg } from "../ffmpeg/ffmpeg-bridge";
 import { saveBlobUrlToFile } from "../utils/blob-utils";
-import { addHeaderRules, removeHeaderRules } from "../utils/header-rules";
+import { addHeaderRules, removeHeaderRules } from "./header-rules";
 import {
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_FFMPEG_TIMEOUT_MS,
@@ -32,6 +32,7 @@ export interface BasePlaylistHandlerOptions {
   maxConcurrent?: number;
   ffmpegTimeout?: number;
   shouldSaveOnCancel?: () => boolean;
+  selectedBandwidth?: number;
 }
 
 export abstract class BasePlaylistHandler {
@@ -39,6 +40,7 @@ export abstract class BasePlaylistHandler {
   protected readonly maxConcurrent: number;
   protected readonly ffmpegTimeout: number;
   protected readonly shouldSaveOnCancel?: () => boolean;
+  protected readonly selectedBandwidth?: number;
 
   protected downloadId: string = "";
   protected bytesDownloaded: number = 0;
@@ -57,6 +59,7 @@ export abstract class BasePlaylistHandler {
     this.maxConcurrent = options.maxConcurrent || DEFAULT_MAX_CONCURRENT;
     this.ffmpegTimeout = options.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
     this.shouldSaveOnCancel = options.shouldSaveOnCancel;
+    this.selectedBandwidth = options.selectedBandwidth;
   }
 
   // ---- Shared utility methods ----
