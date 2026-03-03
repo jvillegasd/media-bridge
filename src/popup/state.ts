@@ -31,6 +31,7 @@ export const dom = {
   closeNoVideoNoticeBtn: null as HTMLButtonElement | null,
   noVideoNotice: null as HTMLDivElement | null,
   settingsBtn: null as HTMLButtonElement | null,
+  historyBtn: null as HTMLButtonElement | null,
   autoDetectTab: null as HTMLButtonElement | null,
   manifestTab: null as HTMLButtonElement | null,
   downloadsTab: null as HTMLButtonElement | null,

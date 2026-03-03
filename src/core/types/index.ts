@@ -88,6 +88,16 @@ export interface StorageConfig {
     folderName?: string;
   };
   ffmpegTimeout?: number; // FFmpeg processing timeout in milliseconds (default: 15 minutes)
+  historyEnabled?: boolean; // Whether to persist completed/failed/cancelled downloads (default: true)
+  s3?: {
+    enabled: boolean;
+    bucket?: string;
+    region?: string;
+    endpoint?: string; // For S3-compatible providers (Cloudflare R2, Backblaze, etc.)
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    prefix?: string;
+  };
 }
 
 export interface MessageRequest {

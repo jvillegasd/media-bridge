@@ -391,6 +391,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleStopAndSaveMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.CHECK_URL: {
+        const checkUrl = async () => {
+          try {
+            const res = await fetch(message.payload.url, {
+              method: "HEAD",
+              signal: AbortSignal.timeout(5000),
+            });
+            return { ok: res.ok, status: res.status };
+          } catch {
+            return { ok: false, status: 0 };
+          }
+        };
+        checkUrl().then(sendResponse);
+        return true;
+      }
+
       case MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_DASH_RESPONSE:
@@ -596,6 +612,11 @@ async function handleDownloadRequest(payload: {
   downloadPromise
     .then(async () => {
       await cleanupDownloadResources(normalizedUrl);
+      const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+      if (cfg?.historyEnabled === false) {
+        const completed = await getDownloadByUrl(normalizedUrl);
+        if (completed) await deleteDownload(completed.id);
+      }
     })
     .catch(async (error: unknown) => {
       // Only log error if not cancelled
@@ -609,6 +630,11 @@ async function handleDownloadRequest(payload: {
         logger.error(`Download failed for ${url}:`, String(error));
       }
       await cleanupDownloadResources(normalizedUrl);
+      const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+      if (cfg?.historyEnabled === false) {
+        const failed = await getDownloadByUrl(normalizedUrl);
+        if (failed) await deleteDownload(failed.id);
+      }
     })
     .finally(() => {
       // Ensure promise is removed from activeDownloads when it completes
@@ -969,6 +995,8 @@ async function handleStartRecordingMessage(payload: {
       .then(async () => {
         await cleanupDownloadResources(normalizedUrl);
         sendDownloadComplete(stateId);
+        const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+        if (cfg?.historyEnabled === false) await deleteDownload(stateId);
       })
       .catch(async (error: unknown) => {
         // Persist FAILED state to IndexedDB so the downloads tab reflects the real status
@@ -985,6 +1013,8 @@ async function handleStartRecordingMessage(payload: {
           sendDownloadFailed(url, error instanceof Error ? error.message : String(error));
         }
         await cleanupDownloadResources(normalizedUrl);
+        const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+        if (cfg?.historyEnabled === false) await deleteDownload(stateId);
       })
       .finally(() => {
         activeDownloads.delete(normalizedUrl);
