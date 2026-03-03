@@ -5,7 +5,7 @@
 
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "../core/cloud/google-auth";
-import { StorageConfig, DownloadState, DownloadStage } from "../core/types";
+import { StorageConfig, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
 import { MessageType } from "../shared/messages";
 import {
   getAllDownloads,
@@ -636,7 +636,7 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     }));
   }
 
-  menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url)));
+  menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url, state.metadata)));
   menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", async () => {
     await navigator.clipboard.writeText(state.url);
     showToast("URL copied to clipboard", "success");
@@ -728,14 +728,21 @@ function syncBulkBar(): void {
     !selectAll.checked && visible.some((d) => selectedIds.has(d.id));
 }
 
-function redownload(url: string): void {
-  chrome.runtime.sendMessage({
-    type: MessageType.DOWNLOAD_REQUEST,
-    payload: {
-      url,
-      metadata: { url, format: "unknown" as any, pageUrl: url },
-    },
-  });
+async function redownload(url: string, metadata?: VideoMetadata): Promise<void> {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: MessageType.DOWNLOAD_REQUEST,
+      payload: { url, metadata: metadata ?? { url, format: "unknown" as any, pageUrl: url } },
+    });
+    if (response?.error) {
+      showToast(response.error, "error");
+    } else {
+      showToast("Download queued", "success");
+      await loadHistory();
+    }
+  } catch {
+    showToast("Failed to start download", "error");
+  }
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
