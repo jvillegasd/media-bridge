@@ -68,6 +68,9 @@ function switchView(viewId: string): void {
   );
   if (navBtn) navBtn.classList.add("active");
 
+  // Keep URL in sync so refresh restores the same section
+  history.replaceState(null, "", `#${viewId}`);
+
   if (initializedViews.has(viewId)) return;
   initializedViews.add(viewId);
 
