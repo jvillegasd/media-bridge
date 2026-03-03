@@ -579,56 +579,86 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   date.textContent = relativeTime(state.createdAt);
   actions.appendChild(date);
 
-  // Open file button (completed downloads with a known local path)
-  if (state.progress.stage === DownloadStage.COMPLETED && state.localPath) {
-    const localPath = state.localPath;
-    actions.appendChild(
-      makeIconBtn(iconFolder(), "Open file", async () => {
-        const filename = localPath.split(/[/\\]/).pop();
-        if (!filename) return;
-        const results = await new Promise<chrome.downloads.DownloadItem[]>((resolve) =>
-          chrome.downloads.search({ filenameRegex: filename }, resolve),
-        );
-        if (results.length > 0) {
-          chrome.downloads.show(results[0].id);
-        } else {
-          chrome.downloads.showDefaultFolder();
-        }
-      }),
-    );
+  // Actions menu
+  const menuWrap = document.createElement("div");
+  menuWrap.className = "history-menu-wrap";
+
+  const menuBtn = document.createElement("button");
+  menuBtn.className = "history-menu-btn";
+  menuBtn.title = "Actions";
+  menuBtn.textContent = "···";
+
+  const menu = document.createElement("div");
+  menu.className = "history-menu";
+
+  function closeMenu(): void {
+    menu.classList.remove("open");
+    document.removeEventListener("click", onOutsideClick);
   }
 
-  // Re-download button
-  actions.appendChild(
-    makeIconBtn(
-      iconDownload(),
-      "Re-download",
-      () => redownload(state.url),
-    ),
-  );
+  function onOutsideClick(e: MouseEvent): void {
+    if (!menuWrap.contains(e.target as Node)) closeMenu();
+  }
 
-  // Copy URL button
-  actions.appendChild(
-    makeIconBtn(iconCopy(), "Copy URL", () =>
-      navigator.clipboard.writeText(state.url),
-    ),
-  );
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = menu.classList.contains("open");
+    // Close any other open menus
+    document.querySelectorAll(".history-menu.open").forEach((m) => m.classList.remove("open"));
+    if (!isOpen) {
+      menu.classList.add("open");
+      document.addEventListener("click", onOutsideClick);
+    }
+  });
 
-  // Check manifest button
-  const checkBtn = makeIconBtn(iconLink(), "Check manifest");
-  checkBtn.classList.add("check-btn");
-  checkBtn.addEventListener("click", () => checkManifest(state.url, checkBtn));
-  actions.appendChild(checkBtn);
+  function makeMenuItem(svgContent: string, label: string, onClick: () => void, extraClass?: string): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.className = "history-menu-item" + (extraClass ? ` ${extraClass}` : "");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgContent}</svg>${label}`;
+    btn.addEventListener("click", () => { closeMenu(); onClick(); });
+    return btn;
+  }
 
-  // Delete button
-  const deleteBtn = makeIconBtn(iconTrash(), "Delete", async () => {
+  // Open file (completed with known path only)
+  if (state.progress.stage === DownloadStage.COMPLETED && state.localPath) {
+    const localPath = state.localPath;
+    menu.appendChild(makeMenuItem(iconFolder(), "Open file", async () => {
+      const filename = localPath.split(/[/\\]/).pop();
+      if (!filename) return;
+      const results = await new Promise<chrome.downloads.DownloadItem[]>((resolve) =>
+        chrome.downloads.search({ filenameRegex: filename }, resolve),
+      );
+      if (results.length > 0) {
+        chrome.downloads.show(results[0].id);
+      } else {
+        chrome.downloads.showDefaultFolder();
+      }
+    }));
+  }
+
+  menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url)));
+  menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", () => navigator.clipboard.writeText(state.url)));
+
+  // Check manifest item (keeps state feedback inline)
+  const checkItem = makeMenuItem(iconLink(), "Check manifest", () => {});
+  checkItem.classList.add("check-btn");
+  checkItem.addEventListener("click", (e) => {
+    e.stopPropagation();
+    checkManifest(state.url, checkItem);
+  });
+  menu.appendChild(checkItem);
+
+  menu.appendChild(makeMenuItem(iconTrash(), "Delete", async () => {
     await deleteDownload(state.id);
     allHistory = allHistory.filter((d) => d.id !== state.id);
     selectedIds.delete(state.id);
     syncBulkBar();
     rerenderHistory();
-  });
-  actions.appendChild(deleteBtn);
+  }, "danger"));
+
+  menuWrap.appendChild(menuBtn);
+  menuWrap.appendChild(menu);
+  actions.appendChild(menuWrap);
 
   item.appendChild(actions);
 

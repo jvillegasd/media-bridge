@@ -758,7 +758,7 @@
     .history-actions {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 8px;
       flex-shrink: 0;
     }
 
@@ -768,7 +768,87 @@
       white-space: nowrap;
     }
 
-    /* Manifest check button states */
+    /* Actions menu */
+    .history-menu-wrap {
+      position: relative;
+    }
+
+    .history-menu-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 16px;
+      letter-spacing: 1px;
+      line-height: 1;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .history-menu-btn:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+      color: var(--text-primary);
+    }
+
+    .history-menu {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+      min-width: 160px;
+      z-index: 100;
+      overflow: hidden;
+    }
+
+    .history-menu.open { display: block; }
+
+    .history-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 8px 14px;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    .history-menu-item:hover { background: var(--surface-2); }
+
+    .history-menu-item svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      color: var(--text-secondary);
+    }
+
+    .history-menu-item.danger { color: var(--error); }
+    .history-menu-item.danger svg { color: var(--error); }
+
+    /* Manifest check states on the menu item */
+    .history-menu-item.check-btn[data-state="checking"] svg { animation: spin 1s linear infinite; }
+    .history-menu-item.check-btn[data-state="ok"] { color: var(--success); }
+    .history-menu-item.check-btn[data-state="ok"] svg { color: var(--success); }
+    .history-menu-item.check-btn[data-state="dead"] { color: var(--error); }
+    .history-menu-item.check-btn[data-state="dead"] svg { color: var(--error); }
+    .history-menu-item.check-btn[data-state="unknown"] { color: var(--warning); }
+    .history-menu-item.check-btn[data-state="unknown"] svg { color: var(--warning); }
+
+    /* Manifest check button states (legacy, kept for compat) */
     .check-btn[data-state="checking"] svg { animation: spin 1s linear infinite; }
     .check-btn[data-state="ok"] { color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
     .check-btn[data-state="dead"] { color: var(--error); border-color: rgba(248, 113, 113, 0.3); }
