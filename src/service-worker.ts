@@ -82,7 +82,7 @@ async function init() {
 }
 
 /**
- * Remove chunks whose download no longer exists or is in a terminal state.
+ * Remove chunks whose download no longer exists or is in a finished state.
  * Runs once at startup to reclaim IndexedDB storage from crashed downloads.
  */
 async function cleanupStaleChunks(): Promise<void> {

@@ -649,6 +649,14 @@
       background: var(--accent-subtle);
     }
 
+    @keyframes history-item-flash {
+      0%   { background-color: var(--accent-subtle); border-color: var(--accent); }
+      100% { background-color: var(--surface-1);     border-color: var(--border); }
+    }
+    .history-item--new {
+      animation: history-item-flash 1.4s ease-out;
+    }
+
     .history-item-checkbox {
       accent-color: var(--accent);
       cursor: pointer;

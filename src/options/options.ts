@@ -9,6 +9,7 @@ import { StorageConfig, DownloadState, DownloadStage, VideoMetadata } from "../c
 import { MessageType } from "../shared/messages";
 import {
   getAllDownloads,
+  getDownload,
   deleteDownload,
   bulkDeleteDownloads,
   clearAllDownloads,
@@ -25,7 +26,7 @@ import {
 } from "../shared/constants";
 
 const STATUS_MESSAGE_DURATION_MS = 4000;
-const TERMINAL_STAGES = new Set([
+const FINISHED_STAGES = new Set([
   DownloadStage.COMPLETED,
   DownloadStage.FAILED,
   DownloadStage.CANCELLED,
@@ -380,6 +381,68 @@ let currentFiltered: DownloadState[] = [];
 let currentPage = 0;
 let historyObserver: IntersectionObserver | null = null;
 let historySentinel: HTMLElement | null = null;
+let historyMessageListener: ((msg: unknown) => void) | null = null;
+
+function isProgressMsg(
+  msg: unknown,
+): msg is { type: MessageType.DOWNLOAD_PROGRESS; payload: { id: string; progress: { stage: string } } } {
+  return (
+    typeof msg === "object" &&
+    msg !== null &&
+    (msg as { type?: unknown }).type === MessageType.DOWNLOAD_PROGRESS &&
+    typeof (msg as { payload?: { id?: unknown } }).payload?.id === "string"
+  );
+}
+
+function registerHistoryListener(): void {
+  if (historyMessageListener) return;
+  historyMessageListener = (msg) => {
+    if (!isProgressMsg(msg)) return;
+    if (!FINISHED_STAGES.has(msg.payload.progress.stage as DownloadStage)) return;
+    handleFinishedDownload(msg.payload.id);
+  };
+  chrome.runtime.onMessage.addListener(historyMessageListener);
+}
+
+function unregisterHistoryListener(): void {
+  if (!historyMessageListener) return;
+  chrome.runtime.onMessage.removeListener(historyMessageListener);
+  historyMessageListener = null;
+}
+
+async function handleFinishedDownload(id: string): Promise<void> {
+  const state = await getDownload(id);
+  if (!state) return;
+
+  const idx = allHistory.findIndex((d) => d.id === id);
+  if (idx !== -1) {
+    allHistory[idx] = state;
+  } else {
+    allHistory.unshift(state);
+  }
+
+  const list = document.getElementById("history-list");
+  if (!list) return;
+
+  const existing = list.querySelector<HTMLElement>(`[data-id="${id}"]`);
+  if (existing) {
+    const el = renderHistoryItem(state);
+    flashItem(el);
+    list.replaceChild(el, existing);
+    return;
+  }
+
+  currentFiltered = applyFilters(allHistory);
+  currentPage = 0;
+  renderHistoryList();
+  flashItem(list.querySelector<HTMLElement>(`[data-id="${id}"]`));
+}
+
+function flashItem(el: HTMLElement | null): void {
+  if (!el) return;
+  el.classList.add("history-item--new");
+  el.addEventListener("animationend", () => el.classList.remove("history-item--new"), { once: true });
+}
 
 async function loadHistory(): Promise<void> {
   const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
@@ -433,6 +496,7 @@ async function loadHistory(): Promise<void> {
     return;
   }
 
+  registerHistoryListener();
   await fetchAndRenderHistory();
 }
 
@@ -444,18 +508,20 @@ async function onHistoryEnabledChange(): Promise<void> {
   await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
 
   if (!enabled) {
+    unregisterHistoryListener();
     await clearAllDownloads();
     allHistory = [];
     selectedIds.clear();
     showHistoryDisabled();
   } else {
+    registerHistoryListener();
     await fetchAndRenderHistory();
   }
 }
 
 async function fetchAndRenderHistory(): Promise<void> {
   const all = await getAllDownloads();
-  allHistory = all.filter((d) => TERMINAL_STAGES.has(d.progress.stage));
+  allHistory = all.filter((d) => FINISHED_STAGES.has(d.progress.stage));
   rerenderHistory();
 }
 
