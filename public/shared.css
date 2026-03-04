@@ -187,3 +187,38 @@ body {
   background: rgba(217, 119, 6, 0.08);
   color: #d97706;
 }
+
+/* ---- Segmented Tabs (shared pill style) ---- */
+.seg-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  margin-bottom: 20px;
+  width: fit-content;
+}
+
+.seg-tab {
+  padding: 7px 14px;
+  border: none;
+  outline: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.seg-tab:hover {
+  color: var(--text-primary);
+}
+
+.seg-tab.active {
+  background: var(--surface-3);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}

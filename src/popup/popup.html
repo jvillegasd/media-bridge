@@ -62,34 +62,20 @@
     /* ---- Tabs ---- */
     .tabs {
       display: flex;
-      background: var(--surface-1);
-      border-bottom: 1px solid var(--border);
+      align-items: center;
+      padding: 14px var(--space-4) 14px;
+      background: linear-gradient(to bottom, var(--surface-1) 0%, var(--surface-0) 100%);
       flex-shrink: 0;
     }
 
-    .tab {
+    .tabs .seg-tabs {
+      width: 100%;
+      margin-bottom: 0;
+    }
+
+    .tabs .seg-tab {
       flex: 1;
-      padding: 10px var(--space-4);
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      color: var(--text-tertiary);
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s;
       text-align: center;
-    }
-
-    .tab:hover {
-      color: var(--text-secondary);
-      background: var(--surface-2);
-    }
-
-    .tab.active {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
     }
 
     /* ---- Tab Content ---- */
@@ -876,9 +862,11 @@
 
   <!-- Tabs -->
   <div class="tabs">
-    <button id="autoDetectTab" class="tab active" data-tab="auto">Videos</button>
-    <button id="manifestTab" class="tab" data-tab="manual" title="Download from manifest links of HLS or DASH streaming protocols">Manifest</button>
-    <button id="downloadsTab" class="tab" data-tab="downloads">Downloads</button>
+    <div class="seg-tabs" style="margin-bottom:0;">
+      <button id="autoDetectTab" class="seg-tab active" data-tab="auto">Videos</button>
+      <button id="manifestTab" class="seg-tab" data-tab="manual" title="Download from manifest links of HLS or DASH streaming protocols">Manifest</button>
+      <button id="downloadsTab" class="seg-tab" data-tab="downloads">Downloads</button>
+    </div>
   </div>
 
   <!-- Auto Detect Tab Content -->

@@ -399,61 +399,13 @@
     }
 
 
-    /* ---- Provider Tabs ---- */
-    .provider-tabs {
-      display: flex;
-      gap: 4px;
-      padding: 4px;
-      background: var(--surface-2);
-      border-radius: var(--radius-sm);
-      margin-bottom: 20px;
-      width: fit-content;
-    }
-
-    .provider-tab {
-      padding: 6px 14px;
-      border: none;
-      border-radius: calc(var(--radius-sm) - 2px);
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      background: transparent;
-      color: var(--text-secondary);
-      transition: all 0.15s;
-    }
-
-    .provider-tab.active {
-      background: var(--surface-1);
-      color: var(--text-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-    }
-
+    /* ---- Provider / Advanced Panels ---- */
     .provider-panel {
       display: none;
     }
 
     .provider-panel.active {
       display: block;
-    }
-
-    .advanced-tab {
-      padding: 6px 14px;
-      border: none;
-      border-radius: calc(var(--radius-sm) - 2px);
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      background: transparent;
-      color: var(--text-secondary);
-      transition: all 0.15s;
-    }
-
-    .advanced-tab.active {
-      background: var(--surface-1);
-      color: var(--text-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     }
 
     .advanced-panel {
@@ -1021,9 +973,9 @@
           <p>Connect cloud storage for automatic upload after download.</p>
         </div>
 
-        <div class="provider-tabs">
-          <button class="provider-tab active" data-provider="google-drive">Google Drive</button>
-          <button class="provider-tab" data-provider="s3">S3 / Compatible</button>
+        <div class="seg-tabs">
+          <button class="provider-tab seg-tab active" data-provider="google-drive">Google Drive</button>
+          <button class="provider-tab seg-tab" data-provider="s3">S3 / Compatible</button>
         </div>
 
         <!-- Google Drive Panel -->
@@ -1324,10 +1276,10 @@
           <p>Fine-tune retry behaviour, detection caches, and internal write frequency.</p>
         </div>
 
-        <div class="provider-tabs">
-          <button class="advanced-tab active" data-tab="retry">Retry &amp; Reliability</button>
-          <button class="advanced-tab" data-tab="caches">Detection Caches</button>
-          <button class="advanced-tab" data-tab="performance">Performance</button>
+        <div class="seg-tabs">
+          <button class="advanced-tab seg-tab active" data-tab="retry">Retry &amp; Reliability</button>
+          <button class="advanced-tab seg-tab" data-tab="caches">Detection Caches</button>
+          <button class="advanced-tab seg-tab" data-tab="performance">Performance</button>
         </div>
 
         <!-- Retry & Reliability Panel -->
