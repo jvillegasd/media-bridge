@@ -4,6 +4,7 @@
  */
 
 import { ChromeStorage } from "../core/storage/chrome-storage";
+import { loadSettings } from "../core/storage/settings";
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "../core/cloud/google-auth";
 import { StorageConfig, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
 import { MessageType } from "../shared/messages";
@@ -22,7 +23,6 @@ import {
   MS_PER_MINUTE,
   DEFAULT_MAX_CONCURRENT,
   STORAGE_CONFIG_KEY,
-  MAX_CONCURRENT_KEY,
   DEFAULT_MAX_RETRIES,
   DEFAULT_MIN_POLL_MS,
   DEFAULT_MAX_POLL_MS,
@@ -148,17 +148,13 @@ async function toggleTheme(): Promise<void> {
 // ─────────────────────────────────────────────
 
 async function loadDownloadSettings(): Promise<void> {
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const maxConc = await ChromeStorage.get<number>(MAX_CONCURRENT_KEY);
+  const config = await loadSettings();
 
   const maxInput = document.getElementById("max-concurrent") as HTMLInputElement;
   const timeoutInput = document.getElementById("ffmpeg-timeout") as HTMLInputElement;
 
-  if (maxInput && maxConc) maxInput.value = maxConc.toString();
-  if (timeoutInput) {
-    const ms = config?.ffmpegTimeout ?? DEFAULT_FFMPEG_TIMEOUT_MS;
-    timeoutInput.value = Math.round(ms / MS_PER_MINUTE).toString();
-  }
+  maxInput.value = config.maxConcurrent.toString();
+  timeoutInput.value = Math.round(config.ffmpegTimeout / MS_PER_MINUTE).toString();
 
   document
     .getElementById("save-download-settings")
@@ -184,11 +180,8 @@ async function saveDownloadSettings(): Promise<void> {
       ) * MS_PER_MINUTE;
 
     config.ffmpegTimeout = clampedMs;
+    config.maxConcurrent = parseInt(maxInput.value) || DEFAULT_MAX_CONCURRENT;
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
-    await ChromeStorage.set(
-      MAX_CONCURRENT_KEY,
-      parseInt(maxInput.value) || DEFAULT_MAX_CONCURRENT,
-    );
 
     showStatus("settings-status", "Settings saved.", "success");
   } catch (err) {
@@ -230,17 +223,15 @@ function setupCloudProviderTabs(): void {
 // -- Google Drive --
 
 async function loadDriveSettings(): Promise<void> {
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+  const config = await loadSettings();
 
   const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
   const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
   const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
 
-  if (config?.googleDrive) {
-    enabledCb.checked = config.googleDrive.enabled ?? false;
-    folderNameIn.value = config.googleDrive.folderName ?? "MediaBridge Uploads";
-    folderIdIn.value = config.googleDrive.targetFolderId ?? "";
-  }
+  enabledCb.checked = config.googleDrive.enabled;
+  folderNameIn.value = config.googleDrive.folderName;
+  folderIdIn.value = config.googleDrive.targetFolderId ?? "";
 
   const driveSettingsEl = document.getElementById("drive-settings");
   if (driveSettingsEl)
@@ -335,20 +326,17 @@ async function saveDriveSettings(): Promise<void> {
 // -- S3 --
 
 async function loadS3Settings(): Promise<void> {
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const s3 = config?.s3;
+  const { s3 } = await loadSettings();
 
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-  if (s3) {
-    get("s3-enabled").checked = s3.enabled ?? false;
-    get("s3-bucket").value = s3.bucket ?? "";
-    get("s3-region").value = s3.region ?? "";
-    get("s3-endpoint").value = s3.endpoint ?? "";
-    get("s3-access-key").value = s3.accessKeyId ?? "";
-    get("s3-secret-key").value = s3.secretAccessKey ?? "";
-    get("s3-prefix").value = s3.prefix ?? "";
-  }
+  get("s3-enabled").checked = s3.enabled;
+  get("s3-bucket").value = s3.bucket ?? "";
+  get("s3-region").value = s3.region ?? "";
+  get("s3-endpoint").value = s3.endpoint ?? "";
+  get("s3-access-key").value = s3.accessKeyId ?? "";
+  get("s3-secret-key").value = s3.secretAccessKey ?? "";
+  get("s3-prefix").value = s3.prefix ?? "";
 
   document.getElementById("save-s3-settings")?.addEventListener("click", saveS3Settings);
 }
@@ -459,12 +447,12 @@ function flashItem(el: HTMLElement | null): void {
 }
 
 async function loadHistory(): Promise<void> {
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+  const config = await loadSettings();
 
   const historyEnabledCb = document.getElementById(
     "history-enabled",
   ) as HTMLInputElement;
-  historyEnabledCb.checked = config?.historyEnabled !== false;
+  historyEnabledCb.checked = config.historyEnabled;
 
   historyEnabledCb.addEventListener("change", onHistoryEnabledChange);
 
@@ -505,7 +493,7 @@ async function loadHistory(): Promise<void> {
     rerenderHistory();
   });
 
-  if (config?.historyEnabled === false) {
+  if (!config.historyEnabled) {
     showHistoryDisabled();
     return;
   }
@@ -999,14 +987,13 @@ function iconSpinner(): string {
 // ─────────────────────────────────────────────
 
 async function loadRecordingSettings(): Promise<void> {
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const rec = config?.recording;
+  const { recording } = await loadSettings();
 
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-  get("poll-min").value = (rec?.minPollIntervalMs ?? DEFAULT_MIN_POLL_MS).toString();
-  get("poll-max").value = (rec?.maxPollIntervalMs ?? DEFAULT_MAX_POLL_MS).toString();
-  get("poll-fraction").value = (rec?.pollFraction ?? DEFAULT_POLL_FRACTION).toString();
+  get("poll-min").value = recording.minPollIntervalMs.toString();
+  get("poll-max").value = recording.maxPollIntervalMs.toString();
+  get("poll-fraction").value = recording.pollFraction.toString();
 
   document
     .getElementById("save-recording-settings")
@@ -1047,14 +1034,13 @@ async function saveRecordingSettings(): Promise<void> {
 // ─────────────────────────────────────────────
 
 async function loadNotificationSettings(): Promise<void> {
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const notif = config?.notifications;
+  const { notifications } = await loadSettings();
 
   const notifyCb = document.getElementById("notify-on-completion") as HTMLInputElement;
   const autoOpenCb = document.getElementById("auto-open-file") as HTMLInputElement;
 
-  notifyCb.checked = notif?.notifyOnCompletion ?? false;
-  autoOpenCb.checked = notif?.autoOpenFile ?? false;
+  notifyCb.checked = notifications.notifyOnCompletion;
+  autoOpenCb.checked = notifications.autoOpenFile;
 
   document
     .getElementById("save-notification-settings")
@@ -1090,18 +1076,17 @@ async function saveNotificationSettings(): Promise<void> {
 // ─────────────────────────────────────────────
 
 async function loadAdvancedSettings(): Promise<void> {
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const adv = config?.advanced;
+  const { advanced } = await loadSettings();
 
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-  get("max-retries").value = (adv?.maxRetries ?? DEFAULT_MAX_RETRIES).toString();
-  get("retry-delay").value = (adv?.retryDelayMs ?? INITIAL_RETRY_DELAY_MS).toString();
-  get("retry-backoff").value = (adv?.retryBackoffFactor ?? RETRY_BACKOFF_FACTOR).toString();
-  get("failure-rate").value = Math.round((adv?.fragmentFailureRate ?? MAX_FRAGMENT_FAILURE_RATE) * 100).toString();
-  get("detection-cache-size").value = (adv?.detectionCacheSize ?? DEFAULT_DETECTION_CACHE_SIZE).toString();
-  get("master-playlist-cache-size").value = (adv?.masterPlaylistCacheSize ?? DEFAULT_MASTER_PLAYLIST_CACHE_SIZE).toString();
-  get("db-sync-interval").value = (adv?.dbSyncIntervalMs ?? DEFAULT_DB_SYNC_INTERVAL_MS).toString();
+  get("max-retries").value = advanced.maxRetries.toString();
+  get("retry-delay").value = advanced.retryDelayMs.toString();
+  get("retry-backoff").value = advanced.retryBackoffFactor.toString();
+  get("failure-rate").value = Math.round(advanced.fragmentFailureRate * 100).toString();
+  get("detection-cache-size").value = advanced.detectionCacheSize.toString();
+  get("master-playlist-cache-size").value = advanced.masterPlaylistCacheSize.toString();
+  get("db-sync-interval").value = advanced.dbSyncIntervalMs.toString();
 
   document
     .getElementById("save-advanced-settings")

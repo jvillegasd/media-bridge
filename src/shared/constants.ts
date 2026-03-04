@@ -79,4 +79,3 @@ export const DEFAULT_DB_SYNC_INTERVAL_MS = 500;
 // ---- Chrome storage keys ----
 
 export const STORAGE_CONFIG_KEY = "storage_config";
-export const MAX_CONCURRENT_KEY = "max_concurrent";

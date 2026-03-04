@@ -88,6 +88,7 @@ export interface StorageConfig {
     folderName?: string;
   };
   ffmpegTimeout?: number; // FFmpeg processing timeout in milliseconds (default: 15 minutes)
+  maxConcurrent?: number; // Max concurrent segment downloads (default: 3)
   historyEnabled?: boolean; // Whether to persist completed/failed/cancelled downloads (default: true)
   s3?: {
     enabled: boolean;

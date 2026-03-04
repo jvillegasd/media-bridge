@@ -14,6 +14,7 @@ import {
   deleteDownload,
 } from "./core/database/downloads";
 import { ChromeStorage } from "./core/storage/chrome-storage";
+import { loadSettings } from "./core/storage/settings";
 import { MessageType } from "./shared/messages";
 import {
   DownloadState,
@@ -44,11 +45,8 @@ import {
   closeOffscreenDocument,
 } from "./core/ffmpeg/offscreen-manager";
 import {
-  DEFAULT_MAX_CONCURRENT,
-  DEFAULT_FFMPEG_TIMEOUT_MS,
   KEEPALIVE_INTERVAL_MS,
   STORAGE_CONFIG_KEY,
-  MAX_CONCURRENT_KEY,
 } from "./shared/constants";
 
 const activeDownloads = new Map<string, Promise<void>>();
@@ -531,24 +529,19 @@ async function handleDownloadRequest(payload: {
     };
   }
 
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const maxConcurrent =
-    (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) ||
-    DEFAULT_MAX_CONCURRENT;
-  // FFmpeg timeout is stored in milliseconds (converted from minutes in settings UI)
-  const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
+  const config = await loadSettings();
 
   const downloadManager = new DownloadManager({
-    maxConcurrent,
-    ffmpegTimeout,
-    maxRetries: config?.advanced?.maxRetries,
-    retryDelayMs: config?.advanced?.retryDelayMs,
-    retryBackoffFactor: config?.advanced?.retryBackoffFactor,
-    fragmentFailureRate: config?.advanced?.fragmentFailureRate,
-    dbSyncIntervalMs: config?.advanced?.dbSyncIntervalMs,
-    minPollIntervalMs: config?.recording?.minPollIntervalMs,
-    maxPollIntervalMs: config?.recording?.maxPollIntervalMs,
-    pollFraction: config?.recording?.pollFraction,
+    maxConcurrent: config.maxConcurrent,
+    ffmpegTimeout: config.ffmpegTimeout,
+    maxRetries: config.advanced.maxRetries,
+    retryDelayMs: config.advanced.retryDelayMs,
+    retryBackoffFactor: config.advanced.retryBackoffFactor,
+    fragmentFailureRate: config.advanced.fragmentFailureRate,
+    dbSyncIntervalMs: config.advanced.dbSyncIntervalMs,
+    minPollIntervalMs: config.recording.minPollIntervalMs,
+    maxPollIntervalMs: config.recording.maxPollIntervalMs,
+    pollFraction: config.recording.pollFraction,
     shouldSaveOnCancel: () => savePartialDownloads.has(normalizedUrl),
     onProgress: async (state) => {
       // Use the pre-normalized URL from the outer scope instead of re-normalizing
@@ -640,8 +633,8 @@ async function handleDownloadRequest(payload: {
   downloadPromise
     .then(async () => {
       await cleanupDownloadResources(normalizedUrl);
-      const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-      if (cfg?.historyEnabled === false) {
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) {
         const completed = await getDownloadByUrl(normalizedUrl);
         if (completed) await deleteDownload(completed.id);
       }
@@ -658,8 +651,8 @@ async function handleDownloadRequest(payload: {
         logger.error(`Download failed for ${url}:`, String(error));
       }
       await cleanupDownloadResources(normalizedUrl);
-      const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-      if (cfg?.historyEnabled === false) {
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) {
         const failed = await getDownloadByUrl(normalizedUrl);
         if (failed) await deleteDownload(failed.id);
       }
@@ -705,9 +698,8 @@ function sendDownloadComplete(downloadId: string): void {
 
 async function handlePostDownloadActions(downloadId: string): Promise<void> {
   try {
-    const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-    const notif = config?.notifications;
-    if (!notif?.notifyOnCompletion && !notif?.autoOpenFile) return;
+    const { notifications } = await loadSettings();
+    if (!notifications.notifyOnCompletion && !notifications.autoOpenFile) return;
 
     const state = await getDownload(downloadId);
     if (!state) return;
@@ -715,7 +707,7 @@ async function handlePostDownloadActions(downloadId: string): Promise<void> {
     const title = state.metadata.title || "Media Bridge";
     const filename = state.localPath?.split(/[/\\]/).pop() ?? "Download";
 
-    if (notif.notifyOnCompletion) {
+    if (notifications.notifyOnCompletion) {
       chrome.notifications.create(`download-complete-${downloadId}`, {
         type: "basic",
         iconUrl: "icons/icon-48.png",
@@ -724,7 +716,7 @@ async function handlePostDownloadActions(downloadId: string): Promise<void> {
       });
     }
 
-    if (notif.autoOpenFile && state.chromeDownloadId != null) {
+    if (notifications.autoOpenFile && state.chromeDownloadId != null) {
       chrome.downloads.show(state.chromeDownloadId);
     }
   } catch (err) {
@@ -1015,20 +1007,18 @@ async function handleStartRecording(payload: {
     };
   }
 
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const maxConcurrent =
-    (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) ||
-    DEFAULT_MAX_CONCURRENT;
-  const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
+  const config = await loadSettings();
   const recordingHandlerOptions = {
-    maxRetries: config?.advanced?.maxRetries,
-    retryDelayMs: config?.advanced?.retryDelayMs,
-    retryBackoffFactor: config?.advanced?.retryBackoffFactor,
-    fragmentFailureRate: config?.advanced?.fragmentFailureRate,
-    dbSyncIntervalMs: config?.advanced?.dbSyncIntervalMs,
-    minPollIntervalMs: config?.recording?.minPollIntervalMs,
-    maxPollIntervalMs: config?.recording?.maxPollIntervalMs,
-    pollFraction: config?.recording?.pollFraction,
+    maxConcurrent: config.maxConcurrent,
+    ffmpegTimeout: config.ffmpegTimeout,
+    maxRetries: config.advanced.maxRetries,
+    retryDelayMs: config.advanced.retryDelayMs,
+    retryBackoffFactor: config.advanced.retryBackoffFactor,
+    fragmentFailureRate: config.advanced.fragmentFailureRate,
+    dbSyncIntervalMs: config.advanced.dbSyncIntervalMs,
+    minPollIntervalMs: config.recording.minPollIntervalMs,
+    maxPollIntervalMs: config.recording.maxPollIntervalMs,
+    pollFraction: config.recording.pollFraction,
   };
 
   // Build initial download state
@@ -1079,12 +1069,10 @@ async function handleStartRecording(payload: {
     metadata.format === VideoFormat.DASH
       ? new DashRecordingHandler({
           onProgress,
-          maxConcurrent,
-          ffmpegTimeout,
           selectedBandwidth: payload.selectedBandwidth,
           ...recordingHandlerOptions,
         })
-      : new HlsRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout, ...recordingHandlerOptions });
+      : new HlsRecordingHandler({ onProgress, ...recordingHandlerOptions });
 
   const finalFilename = resolveFilename(url, metadata, filename, tabTitle, website);
 
@@ -1099,8 +1087,8 @@ async function handleStartRecording(payload: {
     .then(async () => {
       await cleanupDownloadResources(normalizedUrl);
       sendDownloadComplete(stateId);
-      const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-      if (cfg?.historyEnabled === false) await deleteDownload(stateId);
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) await deleteDownload(stateId);
     })
     .catch(async (error: unknown) => {
       // Persist FAILED state to IndexedDB so the downloads tab reflects the real status
@@ -1123,8 +1111,8 @@ async function handleStartRecording(payload: {
         );
       }
       await cleanupDownloadResources(normalizedUrl);
-      const cfg = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-      if (cfg?.historyEnabled === false) await deleteDownload(stateId);
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) await deleteDownload(stateId);
     })
     .finally(() => {
       activeDownloads.delete(normalizedUrl);
