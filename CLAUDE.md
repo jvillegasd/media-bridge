@@ -130,6 +130,16 @@ HLS, M3U8, and DASH handlers support saving partial downloads when cancelled. If
 
 **Time representation**: All runtime/storage values use **milliseconds** (`StorageConfig`, `AppSettings`, all handlers). The options UI uses **seconds** exclusively. Conversion happens only in `options.ts`: divide by 1000 on load, multiply by 1000 on save.
 
+### Options Page Field Validation
+
+All numeric inputs are validated **before** saving via three helpers in `options.ts`:
+
+- `validateField(input, min, max, isInteger?)` — parses the value, returns the number on success or `null` on failure. Calls `markInvalid` automatically.
+- `markInvalid(input, message)` — adds `.invalid` class (red border) and inserts a `.form-error` div after the input. Registers a one-time `input` listener to auto-clear when the user edits.
+- `clearInvalid(input)` — removes `.invalid` and the `.form-error` div.
+
+Each save handler validates all fields upfront and returns early if any are invalid — the button is never disabled and no write is attempted. Cross-field constraints (e.g. `pollMin < pollMax`) call `markInvalid` on the relevant field directly rather than relying on the toast. The toast is reserved for storage/network errors.
+
 ### History
 
 Completed, failed, and cancelled downloads are persisted in IndexedDB when `historyEnabled` (default `true`) is set. The options page History section renders all finished downloads with infinite scroll (`IntersectionObserver`). From history, users can re-download (reuses stored metadata for filename), copy the original URL, or delete entries. `bulkDeleteDownloads()` (`core/database/downloads.ts`) handles batch removal. The popup "History" button navigates to `options.html#history`.

@@ -189,17 +189,18 @@ async function saveDownloadSettings(): Promise<void> {
   const maxInput = document.getElementById("max-concurrent") as HTMLInputElement;
   const timeoutInput = document.getElementById("ffmpeg-timeout") as HTMLInputElement;
 
+  const maxConcurrent = validateField(maxInput, 1, 10, true);
+  const timeoutSeconds = validateField(timeoutInput, MIN_FFMPEG_TIMEOUT_S, MAX_FFMPEG_TIMEOUT_S, true);
+  if (maxConcurrent === null || timeoutSeconds === null) return;
+
   btn.disabled = true;
   btn.textContent = "Saving…";
 
   try {
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
-    const timeoutSeconds = parseInt(timeoutInput.value) || DEFAULT_FFMPEG_TIMEOUT_S;
-    config.ffmpegTimeout =
-      Math.max(MIN_FFMPEG_TIMEOUT_S, Math.min(MAX_FFMPEG_TIMEOUT_S, timeoutSeconds)) * 1000;
-    config.maxConcurrent = parseInt(maxInput.value) || DEFAULT_MAX_CONCURRENT;
+    config.ffmpegTimeout = timeoutSeconds * 1000;
+    config.maxConcurrent = maxConcurrent;
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
-
     showStatus("Settings saved.", "success");
   } catch (err) {
     showStatus(`Save failed: ${errorMsg(err)}`, "error");
@@ -913,6 +914,66 @@ function showStatus(message: string, type: "success" | "error" | "warning" | "in
   showToast(message, type === "info" ? "warning" : type);
 }
 
+// ─────────────────────────────────────────────
+// Section: Field Validation
+// ─────────────────────────────────────────────
+
+/**
+ * Validate a numeric input against [min, max].
+ * Marks the field invalid and shows an inline error if out of range or not a number.
+ * Returns the parsed value on success, null on failure.
+ */
+function validateField(
+  input: HTMLInputElement,
+  min: number,
+  max: number,
+  isInteger = false,
+): number | null {
+  const raw = input.value.trim();
+  const val = isInteger ? parseInt(raw, 10) : parseFloat(raw);
+
+  if (isNaN(val) || val < min || val > max) {
+    const lo = isInteger ? min : min;
+    const hi = isInteger ? max : max;
+    markInvalid(
+      input,
+      isNaN(val)
+        ? "Must be a number"
+        : `Must be between ${lo} and ${hi}`,
+    );
+    return null;
+  }
+
+  clearInvalid(input);
+  return val;
+}
+
+function markInvalid(input: HTMLInputElement, message: string): void {
+  input.classList.add("invalid");
+
+  // Remove any existing error for this field
+  const next = input.nextElementSibling;
+  if (next?.classList.contains("form-error")) next.remove();
+
+  const err = document.createElement("div");
+  err.className = "form-error";
+  err.textContent = message;
+  input.insertAdjacentElement("afterend", err);
+
+  // Clear on next user edit
+  input.addEventListener(
+    "input",
+    () => clearInvalid(input),
+    { once: true },
+  );
+}
+
+function clearInvalid(input: HTMLInputElement): void {
+  input.classList.remove("invalid");
+  const next = input.nextElementSibling;
+  if (next?.classList.contains("form-error")) next.remove();
+}
+
 function errorMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -992,23 +1053,28 @@ async function loadRecordingSettings(): Promise<void> {
 
 async function saveRecordingSettings(): Promise<void> {
   const btn = document.getElementById("save-recording-settings") as HTMLButtonElement;
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  const pollMinS = validateField(get("poll-min"), MIN_POLL_MIN_S, MAX_POLL_MIN_S);
+  const pollMaxS = validateField(get("poll-max"), MIN_POLL_MAX_S, MAX_POLL_MAX_S);
+  const pollFraction = validateField(get("poll-fraction"), MIN_POLL_FRACTION, MAX_POLL_FRACTION);
+  if (pollMinS === null || pollMaxS === null || pollFraction === null) return;
+
+  if (pollMinS >= pollMaxS) {
+    markInvalid(get("poll-min"), "Must be less than the maximum poll interval");
+    return;
+  }
+
   btn.disabled = true;
   btn.textContent = "Saving…";
 
   try {
-    const get = (id: string) => document.getElementById(id) as HTMLInputElement;
-
-    const minPollIntervalMs = Math.max(MIN_POLL_MIN_S, Math.min(MAX_POLL_MIN_S, parseFloat(get("poll-min").value) || (DEFAULT_MIN_POLL_MS / 1000))) * 1000;
-    const maxPollIntervalMs = Math.max(MIN_POLL_MAX_S, Math.min(MAX_POLL_MAX_S, parseFloat(get("poll-max").value) || (DEFAULT_MAX_POLL_MS / 1000))) * 1000;
-    const pollFraction = Math.max(MIN_POLL_FRACTION, Math.min(MAX_POLL_FRACTION, parseFloat(get("poll-fraction").value) || DEFAULT_POLL_FRACTION));
-
-    if (minPollIntervalMs >= maxPollIntervalMs) {
-      showStatus("Minimum poll interval must be less than maximum.", "error");
-      return;
-    }
-
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
-    config.recording = { minPollIntervalMs, maxPollIntervalMs, pollFraction };
+    config.recording = {
+      minPollIntervalMs: pollMinS * 1000,
+      maxPollIntervalMs: pollMaxS * 1000,
+      pollFraction,
+    };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
     showStatus("Settings saved.", "success");
   } catch (err) {
@@ -1088,29 +1154,34 @@ async function loadAdvancedSettings(): Promise<void> {
 
 async function saveAdvancedSettings(): Promise<void> {
   const btn = document.getElementById("save-advanced-settings") as HTMLButtonElement;
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  const maxRetries       = validateField(get("max-retries"),               MIN_MAX_RETRIES,               MAX_MAX_RETRIES,               true);
+  const retryDelayS      = validateField(get("retry-delay"),               MIN_RETRY_DELAY_S,             MAX_RETRY_DELAY_S);
+  const retryBackoff     = validateField(get("retry-backoff"),             MIN_RETRY_BACKOFF_FACTOR,      MAX_RETRY_BACKOFF_FACTOR);
+  const failureRatePct   = validateField(get("failure-rate"),              MIN_FAILURE_RATE * 100,        MAX_FAILURE_RATE * 100,        true);
+  const detectionCache   = validateField(get("detection-cache-size"),      MIN_DETECTION_CACHE_SIZE,      MAX_DETECTION_CACHE_SIZE,      true);
+  const masterCache      = validateField(get("master-playlist-cache-size"),MIN_MASTER_PLAYLIST_CACHE_SIZE,MAX_MASTER_PLAYLIST_CACHE_SIZE, true);
+  const dbSyncS          = validateField(get("db-sync-interval"),          MIN_DB_SYNC_S,                 MAX_DB_SYNC_S);
+
+  if (
+    maxRetries === null || retryDelayS === null || retryBackoff === null ||
+    failureRatePct === null || detectionCache === null || masterCache === null || dbSyncS === null
+  ) return;
+
   btn.disabled = true;
   btn.textContent = "Saving…";
 
   try {
-    const get = (id: string) => document.getElementById(id) as HTMLInputElement;
-
-    const maxRetries = Math.max(MIN_MAX_RETRIES, Math.min(MAX_MAX_RETRIES, parseInt(get("max-retries").value) || DEFAULT_MAX_RETRIES));
-    const retryDelayMs = Math.max(MIN_RETRY_DELAY_S, Math.min(MAX_RETRY_DELAY_S, parseFloat(get("retry-delay").value) || (INITIAL_RETRY_DELAY_MS / 1000))) * 1000;
-    const retryBackoffFactor = Math.max(MIN_RETRY_BACKOFF_FACTOR, Math.min(MAX_RETRY_BACKOFF_FACTOR, parseFloat(get("retry-backoff").value) || RETRY_BACKOFF_FACTOR));
-    const fragmentFailureRate = Math.max(MIN_FAILURE_RATE, Math.min(MAX_FAILURE_RATE, (parseInt(get("failure-rate").value) || Math.round(MAX_FRAGMENT_FAILURE_RATE * 100)) / 100));
-    const detectionCacheSize = Math.max(MIN_DETECTION_CACHE_SIZE, Math.min(MAX_DETECTION_CACHE_SIZE, parseInt(get("detection-cache-size").value) || DEFAULT_DETECTION_CACHE_SIZE));
-    const masterPlaylistCacheSize = Math.max(MIN_MASTER_PLAYLIST_CACHE_SIZE, Math.min(MAX_MASTER_PLAYLIST_CACHE_SIZE, parseInt(get("master-playlist-cache-size").value) || DEFAULT_MASTER_PLAYLIST_CACHE_SIZE));
-    const dbSyncIntervalMs = Math.max(MIN_DB_SYNC_S, Math.min(MAX_DB_SYNC_S, parseFloat(get("db-sync-interval").value) || (DEFAULT_DB_SYNC_INTERVAL_MS / 1000))) * 1000;
-
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.advanced = {
       maxRetries,
-      retryDelayMs,
-      retryBackoffFactor,
-      fragmentFailureRate,
-      detectionCacheSize,
-      masterPlaylistCacheSize,
-      dbSyncIntervalMs,
+      retryDelayMs:          retryDelayS * 1000,
+      retryBackoffFactor:    retryBackoff,
+      fragmentFailureRate:   failureRatePct / 100,
+      detectionCacheSize:    detectionCache,
+      masterPlaylistCacheSize: masterCache,
+      dbSyncIntervalMs:      dbSyncS * 1000,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
     showStatus("Settings saved.", "success");
