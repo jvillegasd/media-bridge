@@ -88,6 +88,35 @@ export interface StorageConfig {
     folderName?: string;
   };
   ffmpegTimeout?: number; // FFmpeg processing timeout in milliseconds (default: 15 minutes)
+  maxConcurrent?: number; // Max concurrent segment downloads (default: 3)
+  historyEnabled?: boolean; // Whether to persist completed/failed/cancelled downloads (default: true)
+  s3?: {
+    enabled: boolean;
+    bucket?: string;
+    region?: string;
+    endpoint?: string; // For S3-compatible providers (Cloudflare R2, Backblaze, etc.)
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    prefix?: string;
+  };
+  recording?: {
+    minPollIntervalMs?: number; // Minimum HLS poll interval (default: 1000ms)
+    maxPollIntervalMs?: number; // Maximum HLS poll interval (default: 10000ms)
+    pollFraction?: number; // Fraction of #EXT-X-TARGETDURATION used for poll cadence (default: 0.5)
+  };
+  notifications?: {
+    notifyOnCompletion?: boolean; // Show OS notification when download finishes (default: false)
+    autoOpenFile?: boolean; // Open file in Finder/Explorer after download (default: false)
+  };
+  advanced?: {
+    maxRetries?: number; // Max segment/manifest fetch retries (default: 3)
+    retryDelayMs?: number; // Initial retry backoff delay in ms (default: 100)
+    retryBackoffFactor?: number; // Exponential backoff multiplier (default: 1.15)
+    fragmentFailureRate?: number; // Max tolerated fragment failure rate 0–1 (default: 0.1)
+    detectionCacheSize?: number; // Max URL path keys tracked per page (default: 500)
+    masterPlaylistCacheSize?: number; // Max master playlists in memory (default: 50)
+    dbSyncIntervalMs?: number; // IDB write throttle during segment downloads (default: 500)
+  };
 }
 
 export interface MessageRequest {

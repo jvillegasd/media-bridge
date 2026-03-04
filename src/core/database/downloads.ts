@@ -206,6 +206,35 @@ export async function deleteDownload(id: string): Promise<void> {
 }
 
 /**
+ * Delete multiple download states in a single transaction
+ */
+export async function bulkDeleteDownloads(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    const db = await openDatabase();
+    const transaction = db.transaction([DOWNLOADS_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(DOWNLOADS_STORE_NAME);
+
+    await Promise.all(
+      ids.map(
+        (id) =>
+          new Promise<void>((resolve, reject) => {
+            const request = store.delete(id);
+            request.onsuccess = () => resolve();
+            request.onerror = () =>
+              reject(new Error(`Failed to delete download: ${request.error}`));
+          }),
+      ),
+    );
+
+    logger.debug(`Bulk deleted ${ids.length} download(s)`);
+  } catch (error) {
+    logger.error("Failed to bulk delete downloads:", error);
+    throw error;
+  }
+}
+
+/**
  * Clear all downloads
  */
 export async function clearAllDownloads(): Promise<void> {

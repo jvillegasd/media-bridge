@@ -112,12 +112,14 @@ export async function fetchResource(
 async function fetchWithRetry<Data>(
   fetchFn: FetchFn<Data>,
   attempts: number = 1,
+  retryDelayMs: number = INITIAL_RETRY_DELAY_MS,
+  retryBackoffFactor: number = RETRY_BACKOFF_FACTOR,
 ): Promise<Data> {
   if (attempts < 1) {
     throw new Error("Attempts less then 1");
   }
   let countdown = attempts;
-  let retryTime = INITIAL_RETRY_DELAY_MS;
+  let retryTime = retryDelayMs;
   let lastError: unknown;
   while (countdown--) {
     try {
@@ -130,7 +132,7 @@ async function fetchWithRetry<Data>(
       }
       if (countdown > 0) {
         await new Promise((resolve) => setTimeout(resolve, retryTime));
-        retryTime *= RETRY_BACKOFF_FACTOR;
+        retryTime *= retryBackoffFactor;
       }
     }
   }
@@ -143,10 +145,12 @@ export async function fetchText(
   signal?: AbortSignal,
   noCache?: boolean,
   headers?: Record<string, string>,
+  retryDelayMs?: number,
+  retryBackoffFactor?: number,
 ) {
   const fetchFn: FetchFn<string> = () =>
     fetchResource(url, { signal, headers, cache: noCache ? "no-store" : undefined }).then((res) => res.text());
-  return fetchWithRetry(fetchFn, attempts);
+  return fetchWithRetry(fetchFn, attempts, retryDelayMs, retryBackoffFactor);
 }
 
 /**
@@ -159,6 +163,8 @@ export async function fetchTextWithFinalUrl(
   attempts: number = 1,
   signal?: AbortSignal,
   noCache?: boolean,
+  retryDelayMs?: number,
+  retryBackoffFactor?: number,
 ): Promise<{ text: string; finalUrl: string }> {
   if (isServiceWorkerContext()) {
     const fetchFn: FetchFn<{ text: string; finalUrl: string }> = async () => {
@@ -172,10 +178,10 @@ export async function fetchTextWithFinalUrl(
       const text = await response.text();
       return { text, finalUrl: response.url || url };
     };
-    return fetchWithRetry(fetchFn, attempts);
+    return fetchWithRetry(fetchFn, attempts, retryDelayMs, retryBackoffFactor);
   }
   // In content script context: response.url unavailable after proxy, fall back to original url
-  const text = await fetchText(url, attempts, signal, noCache);
+  const text = await fetchText(url, attempts, signal, noCache, undefined, retryDelayMs, retryBackoffFactor);
   return { text, finalUrl: url };
 }
 
@@ -184,10 +190,12 @@ export async function fetchArrayBuffer(
   attempts: number = 1,
   signal?: AbortSignal,
   headers?: Record<string, string>,
+  retryDelayMs?: number,
+  retryBackoffFactor?: number,
 ) {
   const fetchFn: FetchFn<ArrayBuffer> = () =>
     fetchResource(url, { signal, headers }).then((res) => res.arrayBuffer());
-  return fetchWithRetry(fetchFn, attempts);
+  return fetchWithRetry(fetchFn, attempts, retryDelayMs, retryBackoffFactor);
 }
 
 export const FetchLoader = {

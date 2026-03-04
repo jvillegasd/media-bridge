@@ -384,6 +384,7 @@ async function init(): Promise<void> {
   dom.closeNoVideoNoticeBtn = document.getElementById("closeNoVideoNotice") as HTMLButtonElement;
   dom.noVideoNotice = document.getElementById("noVideoNotice") as HTMLDivElement;
   dom.settingsBtn = document.getElementById("settingsBtn") as HTMLButtonElement;
+  dom.historyBtn = document.getElementById("historyBtn") as HTMLButtonElement;
   dom.autoDetectTab = document.getElementById("autoDetectTab") as HTMLButtonElement;
   dom.manifestTab = document.getElementById("manifestTab") as HTMLButtonElement;
   dom.downloadsTab = document.getElementById("downloadsTab") as HTMLButtonElement;
@@ -422,6 +423,13 @@ async function init(): Promise<void> {
   if (dom.settingsBtn) {
     dom.settingsBtn.addEventListener("click", () => {
       chrome.runtime.openOptionsPage();
+    });
+  }
+
+  // History
+  if (dom.historyBtn) {
+    dom.historyBtn.addEventListener("click", () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html") + "#history" });
     });
   }
 

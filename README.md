@@ -14,6 +14,9 @@ A Manifest V3 Chromium extension that detects and downloads videos from the web 
 - **Partial Save on Cancel**: Save whatever segments were collected before cancellation
 - **AES-128 Decryption**: Decrypts encrypted HLS segments transparently
 - **Header Injection**: Injects `Origin`/`Referer` headers via `declarativeNetRequest` for CDNs that require them
+- **Download History**: Completed, failed, and cancelled downloads are persisted and browsable in the options page History section with infinite scroll
+- **Notifications**: Optional OS notification and auto-open file on download completion
+- **Configurable Settings**: Recording poll intervals, fetch retry behaviour, detection cache sizes, IDB sync rate — all tunable from the options page
 
 ## ⚠️ Output File Size Limit
 
@@ -103,8 +106,8 @@ Media Bridge has five distinct execution contexts that communicate via `chrome.r
 1. **Service Worker** (`src/service-worker.ts`): Central orchestrator. Routes messages, manages download lifecycle, keeps itself alive via heartbeat.
 2. **Content Script** (`src/content.ts`): Runs on all pages. Detects videos via DOM observation and network interception. Proxies fetch requests through the service worker to bypass CORS.
 3. **Offscreen Document** (`src/offscreen/`): Hidden page that runs FFmpeg.wasm. Reads segment data from IndexedDB, muxes into MP4, returns a blob URL.
-4. **Popup** (`src/popup/`): Extension action UI — Videos tab, Downloads tab, Manifest tab.
-5. **Options Page** (`src/options/`): Configuration (FFmpeg timeout, max concurrent).
+4. **Popup** (`src/popup/`): Extension action UI — Videos tab (detected videos), Downloads tab (in-progress only), Manifest tab (manual URL + quality selector). A History button opens the options page directly on the history section.
+5. **Options Page** (`src/options/`): Full settings UI with sidebar navigation — Download, History, Google Drive, S3, Recording, Notifications, and Advanced sections. All settings changes are confirmed via a bottom toast notification.
 
 ### Download Flow
 
@@ -123,8 +126,8 @@ Media Bridge has five distinct execution contexts that communicate via `chrome.r
 
 | Store | Data | Reason |
 |-------|------|--------|
-| **IndexedDB** (`media-bridge` v3) | `downloads` (state), `chunks` (segments) | Survives restarts; supports large `ArrayBuffer` |
-| **`chrome.storage.local`** | Config (FFmpeg timeout, concurrency) | Simple K/V; 10 MB quota |
+| **IndexedDB** (`media-bridge` v3) | `downloads` (state + history), `chunks` (segments) | Survives restarts; supports large `ArrayBuffer` |
+| **`chrome.storage.local`** | All config via `loadSettings()` / `AppSettings` | Simple K/V; 10 MB quota |
 
 ### Project Structure
 
@@ -168,7 +171,8 @@ src/
 │   │   ├── downloads.ts       # Download state CRUD
 │   │   └── chunks.ts          # Segment chunk storage
 │   ├── storage/
-│   │   └── chrome-storage.ts  # Config via chrome.storage.local
+│   │   ├── chrome-storage.ts  # Raw chrome.storage.local access
+│   │   └── settings.ts        # AppSettings interface + loadSettings() — always use this
 │   ├── cloud/                 # ⚠️ Planned — infrastructure exists, not yet wired up
 │   │   ├── google-auth.ts
 │   │   ├── google-drive.ts
@@ -189,7 +193,7 @@ src/
 │       ├── logger.ts
 │       └── url-utils.ts
 ├── popup/                     # Popup UI (Videos / Downloads / Manifest tabs)
-├── options/                   # Options page (FFmpeg timeout, concurrency)
+├── options/                   # Options page (Download, History, Drive, S3, Recording, Notifications, Advanced)
 ├── offscreen/                 # Offscreen document (FFmpeg.wasm processing)
 └── types/
     └── mpd-parser.d.ts        # Type declarations for mpd-parser
@@ -251,7 +255,7 @@ npm run type-check
 
 ### FFmpeg Merge Fails
 - File may exceed the ~2 GB limit — try a shorter clip or lower quality
-- Increase FFmpeg timeout in Options if processing is slow
+- Increase FFmpeg timeout in **Options → Download Settings** if processing is slow
 - Check the offscreen document console for FFmpeg error output
 
 ### Extension Not Detecting Videos

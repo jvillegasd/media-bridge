@@ -161,10 +161,6 @@ function renderDownloadItem(download: DownloadState): string {
     download.progress.stage !== DownloadStage.COMPLETED &&
     download.progress.stage !== DownloadStage.FAILED &&
     download.progress.stage !== DownloadStage.CANCELLED;
-  const isCompleted = download.progress.stage === DownloadStage.COMPLETED;
-  const isFailed =
-    download.progress.stage === DownloadStage.FAILED ||
-    download.progress.stage === DownloadStage.CANCELLED;
 
   const title =
     download.metadata.title ||
@@ -261,21 +257,7 @@ function renderDownloadItem(download: DownloadState): string {
   const dateText = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   let actionButtons = "";
-  if (isCompleted && download.localPath) {
-    actionButtons = `
-      <div class="card-actions">
-        <button class="video-btn download-open-btn" data-download-id="${escapeHtml(download.id)}">Open File</button>
-        <button class="video-btn-manifest download-remove-btn" data-download-id="${escapeHtml(download.id)}">Remove</button>
-      </div>
-    `;
-  } else if (isFailed) {
-    actionButtons = `
-      <div class="card-actions">
-        <button class="video-btn download-retry-btn" data-download-id="${escapeHtml(download.id)}">Retry</button>
-        <button class="video-btn-manifest download-remove-btn" data-download-id="${escapeHtml(download.id)}">Remove</button>
-      </div>
-    `;
-  } else if (isRecording) {
+  if (isRecording) {
     actionButtons = `
       <div class="card-actions">
         <button class="btn-stop-rec download-stop-rec-btn" data-url="${escapeHtml(download.url)}">Stop</button>
@@ -347,14 +329,8 @@ export function renderDownloads(forceFullRebuild = false): void {
       d.progress.stage !== DownloadStage.FAILED &&
       d.progress.stage !== DownloadStage.CANCELLED,
   );
-  const completed = downloadStates.filter(
-    (d) => d.progress.stage === DownloadStage.COMPLETED,
-  );
-  const failed = downloadStates.filter(
-    (d) => d.progress.stage === DownloadStage.FAILED || d.progress.stage === DownloadStage.CANCELLED,
-  );
 
-  if (inProgress.length === 0 && completed.length === 0 && failed.length === 0) {
+  if (inProgress.length === 0) {
     downloadsList.innerHTML = `
       <div class="empty-state">
         <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -394,11 +370,8 @@ export function renderDownloads(forceFullRebuild = false): void {
   downloadsList.innerHTML = "";
   renderedDownloadCards.clear();
 
-  const hasTerminal = completed.length > 0 || failed.length > 0;
   const sections: Array<{ label: string; items: DownloadState[]; showClear: boolean }> = [];
   if (inProgress.length > 0) sections.push({ label: "In Progress", items: inProgress, showClear: false });
-  if (completed.length > 0) sections.push({ label: "Completed", items: completed, showClear: hasTerminal });
-  if (failed.length > 0) sections.push({ label: "Failed", items: failed, showClear: hasTerminal && completed.length === 0 });
 
   for (const section of sections) {
     const sectionEl = createSectionHeader(section.label, section.items.length, section.showClear);

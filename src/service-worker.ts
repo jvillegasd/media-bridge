@@ -14,6 +14,7 @@ import {
   deleteDownload,
 } from "./core/database/downloads";
 import { ChromeStorage } from "./core/storage/chrome-storage";
+import { loadSettings } from "./core/storage/settings";
 import { MessageType } from "./shared/messages";
 import {
   DownloadState,
@@ -34,14 +35,18 @@ import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
-import { deleteChunks, getChunkCount, getAllChunkDownloadIds } from "./core/database/chunks";
-import { createOffscreenDocument, closeOffscreenDocument } from "./core/ffmpeg/offscreen-manager";
 import {
-  DEFAULT_MAX_CONCURRENT,
-  DEFAULT_FFMPEG_TIMEOUT_MS,
+  deleteChunks,
+  getChunkCount,
+  getAllChunkDownloadIds,
+} from "./core/database/chunks";
+import {
+  createOffscreenDocument,
+  closeOffscreenDocument,
+} from "./core/ffmpeg/offscreen-manager";
+import {
   KEEPALIVE_INTERVAL_MS,
   STORAGE_CONFIG_KEY,
-  MAX_CONCURRENT_KEY,
 } from "./shared/constants";
 
 const activeDownloads = new Map<string, Promise<void>>();
@@ -54,19 +59,25 @@ const savePartialDownloads = new Set<string>();
  * Keep-alive heartbeat mechanism to prevent service worker termination
  * Calls chrome.runtime.getPlatformInfo() every 20 seconds to keep worker alive
  * during long-running operations like downloads and FFmpeg processing
- * 
+ *
  * Source: https://stackoverflow.com/a/66618269
  */
-const keepAlive = ((i?: ReturnType<typeof setInterval> | 0) => (state: boolean) => {
-  if (state && !i) {
-    // If service worker has been running for more than 20 seconds, call immediately
-    if (performance.now() > KEEPALIVE_INTERVAL_MS) chrome.runtime.getPlatformInfo();
-    i = setInterval(() => chrome.runtime.getPlatformInfo(), KEEPALIVE_INTERVAL_MS);
-  } else if (!state && i) {
-    clearInterval(i);
-    i = 0;
+const keepAlive = (
+  (i?: ReturnType<typeof setInterval> | 0) => (state: boolean) => {
+    if (state && !i) {
+      // If service worker has been running for more than 20 seconds, call immediately
+      if (performance.now() > KEEPALIVE_INTERVAL_MS)
+        chrome.runtime.getPlatformInfo();
+      i = setInterval(
+        () => chrome.runtime.getPlatformInfo(),
+        KEEPALIVE_INTERVAL_MS,
+      );
+    } else if (!state && i) {
+      clearInterval(i);
+      i = 0;
+    }
   }
-})();
+)();
 
 /**
  * Initialize service worker
@@ -82,7 +93,7 @@ async function init() {
 }
 
 /**
- * Remove chunks whose download no longer exists or is in a terminal state.
+ * Remove chunks whose download no longer exists or is in a finished state.
  * Runs once at startup to reclaim IndexedDB storage from crashed downloads.
  */
 async function cleanupStaleChunks(): Promise<void> {
@@ -138,16 +149,11 @@ async function handleDownloadRequestMessage(payload: {
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const downloadResult = await handleDownloadRequest(payload);
-    if (downloadResult && downloadResult.error) {
-      return { success: false, error: downloadResult.error };
-    }
+    if (downloadResult?.error) return { success: false, error: downloadResult.error };
     return { success: true };
   } catch (error) {
     logger.error("Download request error:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -391,6 +397,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleStopAndSaveMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.CHECK_URL: {
+        const checkUrl = async () => {
+          try {
+            const format = detectFormatFromUrl(message.payload.url);
+            const isManifest =
+              format === VideoFormat.DASH || format === VideoFormat.HLS;
+            const res = await fetch(message.payload.url, {
+              method: isManifest ? "GET" : "HEAD",
+              signal: AbortSignal.timeout(5000),
+            });
+            return { ok: res.ok, status: res.status };
+          } catch {
+            return { ok: false, status: 0 };
+          }
+        };
+        checkUrl().then(sendResponse);
+        return true;
+      }
+
       case MessageType.OFFSCREEN_PROCESS_HLS_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_M3U8_RESPONSE:
       case MessageType.OFFSCREEN_PROCESS_DASH_RESPONSE:
@@ -504,15 +529,19 @@ async function handleDownloadRequest(payload: {
     };
   }
 
-  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-  const maxConcurrent =
-    (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || DEFAULT_MAX_CONCURRENT;
-  // FFmpeg timeout is stored in milliseconds (converted from minutes in settings UI)
-  const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
+  const config = await loadSettings();
 
   const downloadManager = new DownloadManager({
-    maxConcurrent,
-    ffmpegTimeout,
+    maxConcurrent: config.maxConcurrent,
+    ffmpegTimeout: config.ffmpegTimeout,
+    maxRetries: config.advanced.maxRetries,
+    retryDelayMs: config.advanced.retryDelayMs,
+    retryBackoffFactor: config.advanced.retryBackoffFactor,
+    fragmentFailureRate: config.advanced.fragmentFailureRate,
+    dbSyncIntervalMs: config.advanced.dbSyncIntervalMs,
+    minPollIntervalMs: config.recording.minPollIntervalMs,
+    maxPollIntervalMs: config.recording.maxPollIntervalMs,
+    pollFraction: config.recording.pollFraction,
     shouldSaveOnCancel: () => savePartialDownloads.has(normalizedUrl),
     onProgress: async (state) => {
       // Use the pre-normalized URL from the outer scope instead of re-normalizing
@@ -521,7 +550,9 @@ async function handleDownloadRequest(payload: {
       // Get abort controller and store signal reference ONCE to avoid stale reference issues
       const controller = downloadAbortControllers.get(normalizedUrlForProgress);
       // Allow progress updates through if we're in stop-and-save mode (partial save in progress)
-      const isSavingPartial = savePartialDownloads.has(normalizedUrlForProgress);
+      const isSavingPartial = savePartialDownloads.has(
+        normalizedUrlForProgress,
+      );
 
       // If no controller exists (already cleaned up) or signal is aborted, skip update
       // BUT allow updates through if we're saving a partial download
@@ -586,9 +617,15 @@ async function handleDownloadRequest(payload: {
   if (activeDownloads.size === 1) {
     keepAlive(true);
     // Pre-warm FFmpeg for HLS/M3U8/DASH downloads while segments download
-    if (metadata.format === VideoFormat.HLS || metadata.format === VideoFormat.M3U8 || metadata.format === VideoFormat.DASH) {
+    if (
+      metadata.format === VideoFormat.HLS ||
+      metadata.format === VideoFormat.M3U8 ||
+      metadata.format === VideoFormat.DASH
+    ) {
       createOffscreenDocument()
-        .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
+        .then(() =>
+          chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }),
+        )
         .catch((err) => logger.error("FFmpeg pre-warm failed:", err));
     }
   }
@@ -596,6 +633,11 @@ async function handleDownloadRequest(payload: {
   downloadPromise
     .then(async () => {
       await cleanupDownloadResources(normalizedUrl);
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) {
+        const completed = await getDownloadByUrl(normalizedUrl);
+        if (completed) await deleteDownload(completed.id);
+      }
     })
     .catch(async (error: unknown) => {
       // Only log error if not cancelled
@@ -609,12 +651,17 @@ async function handleDownloadRequest(payload: {
         logger.error(`Download failed for ${url}:`, String(error));
       }
       await cleanupDownloadResources(normalizedUrl);
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) {
+        const failed = await getDownloadByUrl(normalizedUrl);
+        if (failed) await deleteDownload(failed.id);
+      }
     })
     .finally(() => {
       // Ensure promise is removed from activeDownloads when it completes
       // This handles both success and failure cases
       activeDownloads.delete(normalizedUrl);
-      
+
       // Stop keep-alive if no more active downloads
       if (activeDownloads.size === 0) {
         keepAlive(false);
@@ -644,6 +691,36 @@ function sendDownloadComplete(downloadId: string): void {
     );
   } catch (error) {
     // Ignore errors - popup/content script might not be listening
+  }
+  // Fire post-download actions (notifications, auto-open) if configured
+  handlePostDownloadActions(downloadId);
+}
+
+async function handlePostDownloadActions(downloadId: string): Promise<void> {
+  try {
+    const { notifications } = await loadSettings();
+    if (!notifications.notifyOnCompletion && !notifications.autoOpenFile) return;
+
+    const state = await getDownload(downloadId);
+    if (!state) return;
+
+    const title = state.metadata.title || "Media Bridge";
+    const filename = state.localPath?.split(/[/\\]/).pop() ?? "Download";
+
+    if (notifications.notifyOnCompletion) {
+      chrome.notifications.create(`download-complete-${downloadId}`, {
+        type: "basic",
+        iconUrl: "icons/icon-48.png",
+        title: "Download complete",
+        message: `${title}\n${filename}`,
+      });
+    }
+
+    if (notifications.autoOpenFile && state.chromeDownloadId != null) {
+      chrome.downloads.show(state.chromeDownloadId);
+    }
+  } catch (err) {
+    logger.warn("handlePostDownloadActions failed:", err);
   }
 }
 
@@ -718,6 +795,25 @@ async function cancelChromeDownloads(download: DownloadState): Promise<void> {
   });
 }
 
+function resolveFilename(
+  url: string,
+  metadata: VideoMetadata,
+  filename?: string,
+  tabTitle?: string,
+  website?: string,
+): string {
+  if (filename) return filename;
+  const extension =
+    metadata.format === VideoFormat.HLS ||
+    metadata.format === VideoFormat.M3U8 ||
+    metadata.format === VideoFormat.DASH
+      ? "mp4"
+      : metadata.fileExtension || "mp4";
+  return tabTitle || website
+    ? generateFilenameFromTabInfo(tabTitle, website, extension)
+    : generateFilenameWithExtension(url, extension);
+}
+
 /**
  * Execute download using download manager
  * Sends completion or failure notifications to popup
@@ -738,27 +834,7 @@ async function startDownload(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   try {
-    // Generate filename if not provided
-    let finalFilename = filename;
-    if (!finalFilename) {
-      // HLS/M3U8/DASH formats always produce MP4 after FFmpeg processing
-      const extension =
-        metadata.format === VideoFormat.HLS ||
-        metadata.format === VideoFormat.M3U8 ||
-        metadata.format === VideoFormat.DASH
-          ? "mp4"
-          : metadata.fileExtension || "mp4";
-      // Use tab info if available, otherwise fall back to URL-based generation
-      if (tabTitle || website) {
-        finalFilename = generateFilenameFromTabInfo(
-          tabTitle,
-          website,
-          extension,
-        );
-      } else {
-        finalFilename = generateFilenameWithExtension(url, extension);
-      }
-    }
+    const finalFilename = resolveFilename(url, metadata, filename, tabTitle, website);
 
     const downloadState = await downloadManager.download(
       url,
@@ -798,7 +874,10 @@ async function handleStopAndSaveMessage(payload: {
     const normalizedUrl = normalizeUrl(payload.url);
     const controller = downloadAbortControllers.get(normalizedUrl);
     if (!controller) {
-      return { success: false, error: "No active download found for this URL." };
+      return {
+        success: false,
+        error: "No active download found for this URL.",
+      };
     }
     savePartialDownloads.add(normalizedUrl);
     controller.abort();
@@ -889,125 +968,176 @@ async function handleStartRecordingMessage(payload: {
   selectedBandwidth?: number;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    const { url, metadata, filename, tabTitle, website } = payload;
-    const normalizedUrl = normalizeUrl(url);
-
-    if (activeDownloads.has(normalizedUrl)) {
-      return { success: false, error: "Recording already in progress for this URL." };
-    }
-
-    const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
-    const maxConcurrent =
-      (await ChromeStorage.get<number>(MAX_CONCURRENT_KEY)) || DEFAULT_MAX_CONCURRENT;
-    const ffmpegTimeout = config?.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
-
-    // Build initial download state
-    const stateId = generateDownloadId(normalizedUrl);
-    const initialState: DownloadState = {
-      id: stateId,
-      url,
-      metadata,
-      progress: {
-        url,
-        stage: DownloadStage.RECORDING,
-        segmentsCollected: 0,
-        message: "Recording...",
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    await storeDownload(initialState);
-
-    const abortController = new AbortController();
-    downloadAbortControllers.set(normalizedUrl, abortController);
-
-    const onProgress = async (state: DownloadState) => {
-      const controller = downloadAbortControllers.get(normalizeUrl(state.url));
-      // Allow progress updates through when in post-recording stages (MERGING, SAVING, COMPLETED)
-      // since the abort signal is used to stop the recording loop, not to cancel the merge
-      const isPostRecording =
-        state.progress.stage === DownloadStage.MERGING ||
-        state.progress.stage === DownloadStage.SAVING ||
-        state.progress.stage === DownloadStage.COMPLETED;
-      if (!isPostRecording && (!controller || controller.signal.aborted)) return;
-      await storeDownload(state);
-      try {
-        chrome.runtime.sendMessage(
-          {
-            type: MessageType.DOWNLOAD_PROGRESS,
-            payload: { id: state.id, progress: state.progress },
-          },
-          () => { if (chrome.runtime.lastError) {} },
-        );
-      } catch (_) {}
-    };
-
-    const handler =
-      metadata.format === VideoFormat.DASH
-        ? new DashRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout, selectedBandwidth: payload.selectedBandwidth })
-        : new HlsRecordingHandler({ onProgress, maxConcurrent, ffmpegTimeout });
-
-    // Resolve filename
-    let finalFilename = filename;
-    if (!finalFilename) {
-      // HLS/M3U8/DASH formats always produce MP4 after FFmpeg processing
-      const extension =
-        metadata.format === VideoFormat.HLS ||
-        metadata.format === VideoFormat.M3U8 ||
-        metadata.format === VideoFormat.DASH
-          ? "mp4"
-          : metadata.fileExtension || "mp4";
-      if (tabTitle || website) {
-        finalFilename = generateFilenameFromTabInfo(tabTitle, website, extension);
-      } else {
-        finalFilename = generateFilenameWithExtension(url, extension);
-      }
-    }
-
-    const recordingPromise = handler
-      .record(url, finalFilename, stateId, abortController.signal, metadata.pageUrl)
-      .then(async () => {
-        await cleanupDownloadResources(normalizedUrl);
-        sendDownloadComplete(stateId);
-      })
-      .catch(async (error: unknown) => {
-        // Persist FAILED state to IndexedDB so the downloads tab reflects the real status
-        const failedState = await getDownload(stateId);
-        if (failedState && failedState.progress.stage !== DownloadStage.COMPLETED) {
-          failedState.progress.stage = DownloadStage.FAILED;
-          failedState.progress.message =
-            error instanceof Error ? error.message : String(error);
-          failedState.updatedAt = Date.now();
-          await storeDownload(failedState);
-        }
-        if (!(error instanceof CancellationError)) {
-          logger.error(`Recording failed for ${url}:`, error);
-          sendDownloadFailed(url, error instanceof Error ? error.message : String(error));
-        }
-        await cleanupDownloadResources(normalizedUrl);
-      })
-      .finally(() => {
-        activeDownloads.delete(normalizedUrl);
-        if (activeDownloads.size === 0) keepAlive(false);
-      });
-
-    activeDownloads.set(normalizedUrl, recordingPromise);
-    if (activeDownloads.size === 1) {
-      keepAlive(true);
-      // Pre-warm FFmpeg — recordings always need FFmpeg for the merge phase
-      createOffscreenDocument()
-        .then(() => chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }))
-        .catch((err) => logger.error("FFmpeg pre-warm failed for recording:", err));
-    }
-
-    return { success: true };
+    return await handleStartRecording(payload);
   } catch (error) {
     logger.error("Start recording error:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Start live HLS/DASH recording (core logic)
+ */
+async function handleStartRecording(payload: {
+  url: string;
+  metadata: VideoMetadata;
+  filename?: string;
+  tabTitle?: string;
+  website?: string;
+  selectedBandwidth?: number;
+}): Promise<{ success: boolean; error?: string }> {
+  const { url, metadata, filename, tabTitle, website } = payload;
+  const normalizedUrl = normalizeUrl(url);
+
+  // Clean up finished entry so re-recording starts fresh
+  const existing = await getDownloadByUrl(normalizedUrl);
+  if (
+    existing &&
+    (existing.progress.stage === DownloadStage.COMPLETED ||
+      existing.progress.stage === DownloadStage.FAILED ||
+      existing.progress.stage === DownloadStage.CANCELLED)
+  ) {
+    await deleteDownload(existing.id);
+  }
+
+  if (activeDownloads.has(normalizedUrl)) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: "Recording already in progress for this URL.",
     };
   }
+
+  const config = await loadSettings();
+  const recordingHandlerOptions = {
+    maxConcurrent: config.maxConcurrent,
+    ffmpegTimeout: config.ffmpegTimeout,
+    maxRetries: config.advanced.maxRetries,
+    retryDelayMs: config.advanced.retryDelayMs,
+    retryBackoffFactor: config.advanced.retryBackoffFactor,
+    fragmentFailureRate: config.advanced.fragmentFailureRate,
+    dbSyncIntervalMs: config.advanced.dbSyncIntervalMs,
+    minPollIntervalMs: config.recording.minPollIntervalMs,
+    maxPollIntervalMs: config.recording.maxPollIntervalMs,
+    pollFraction: config.recording.pollFraction,
+  };
+
+  // Build initial download state
+  const stateId = generateDownloadId(normalizedUrl);
+  const initialState: DownloadState = {
+    id: stateId,
+    url,
+    metadata,
+    progress: {
+      url,
+      stage: DownloadStage.RECORDING,
+      segmentsCollected: 0,
+      message: "Recording...",
+    },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  await storeDownload(initialState);
+
+  const abortController = new AbortController();
+  downloadAbortControllers.set(normalizedUrl, abortController);
+
+  const onProgress = async (state: DownloadState) => {
+    const controller = downloadAbortControllers.get(normalizeUrl(state.url));
+    // Allow progress updates through when in post-recording stages (MERGING, SAVING, COMPLETED)
+    // since the abort signal is used to stop the recording loop, not to cancel the merge
+    const isPostRecording =
+      state.progress.stage === DownloadStage.MERGING ||
+      state.progress.stage === DownloadStage.SAVING ||
+      state.progress.stage === DownloadStage.COMPLETED;
+    if (!isPostRecording && (!controller || controller.signal.aborted)) return;
+    await storeDownload(state);
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.DOWNLOAD_PROGRESS,
+          payload: { id: state.id, progress: state.progress },
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+          }
+        },
+      );
+    } catch (_) {}
+  };
+
+  const handler =
+    metadata.format === VideoFormat.DASH
+      ? new DashRecordingHandler({
+          onProgress,
+          selectedBandwidth: payload.selectedBandwidth,
+          ...recordingHandlerOptions,
+        })
+      : new HlsRecordingHandler({ onProgress, ...recordingHandlerOptions });
+
+  const finalFilename = resolveFilename(url, metadata, filename, tabTitle, website);
+
+  const recordingPromise = handler
+    .record(
+      url,
+      finalFilename,
+      stateId,
+      abortController.signal,
+      metadata.pageUrl,
+    )
+    .then(async () => {
+      await cleanupDownloadResources(normalizedUrl);
+      sendDownloadComplete(stateId);
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) await deleteDownload(stateId);
+    })
+    .catch(async (error: unknown) => {
+      // Persist FAILED state to IndexedDB so the downloads tab reflects the real status
+      const failedState = await getDownload(stateId);
+      if (
+        failedState &&
+        failedState.progress.stage !== DownloadStage.COMPLETED
+      ) {
+        failedState.progress.stage = DownloadStage.FAILED;
+        failedState.progress.message =
+          error instanceof Error ? error.message : String(error);
+        failedState.updatedAt = Date.now();
+        await storeDownload(failedState);
+      }
+      if (!(error instanceof CancellationError)) {
+        logger.error(`Recording failed for ${url}:`, error);
+        sendDownloadFailed(
+          url,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      await cleanupDownloadResources(normalizedUrl);
+      const cfg = await loadSettings();
+      if (!cfg.historyEnabled) await deleteDownload(stateId);
+    })
+    .finally(() => {
+      activeDownloads.delete(normalizedUrl);
+      if (activeDownloads.size === 0) {
+        keepAlive(false);
+        closeOffscreenDocument().catch((err) =>
+          logger.error("Failed to close offscreen document:", err),
+        );
+      }
+    });
+
+  activeDownloads.set(normalizedUrl, recordingPromise);
+  if (activeDownloads.size === 1) {
+    keepAlive(true);
+    // Pre-warm FFmpeg — recordings always need FFmpeg for the merge phase
+    createOffscreenDocument()
+      .then(() =>
+        chrome.runtime.sendMessage({ type: MessageType.WARMUP_FFMPEG }),
+      )
+      .catch((err) =>
+        logger.error("FFmpeg pre-warm failed for recording:", err),
+      );
+  }
+
+  return { success: true };
 }
 
 /**
@@ -1020,7 +1150,10 @@ async function handleStopRecordingMessage(payload: {
     const normalizedUrl = normalizeUrl(payload.url);
     const abortController = downloadAbortControllers.get(normalizedUrl);
     if (!abortController) {
-      return { success: false, error: "No active recording found for this URL." };
+      return {
+        success: false,
+        error: "No active recording found for this URL.",
+      };
     }
     abortController.abort();
     logger.info(`Stopped recording for ${normalizedUrl}`);

@@ -66,6 +66,9 @@ export enum MessageType {
 
   // FFmpeg pre-warm
   WARMUP_FFMPEG = "WARMUP_FFMPEG",
+
+  // URL health check (options page manifest check feature)
+  CHECK_URL = "CHECK_URL",
 }
 
 export interface BaseMessage {

@@ -37,6 +37,30 @@ export interface DownloadManagerOptions {
 
   /** When cancelled, save partial progress instead of discarding */
   shouldSaveOnCancel?: () => boolean;
+
+  /** Max segment/manifest fetch retries (default: 3) */
+  maxRetries?: number;
+
+  /** Initial retry backoff delay in ms (default: 100) */
+  retryDelayMs?: number;
+
+  /** Exponential backoff multiplier (default: 1.15) */
+  retryBackoffFactor?: number;
+
+  /** Max tolerated fragment failure rate 0–1 (default: 0.1) */
+  fragmentFailureRate?: number;
+
+  /** IDB write throttle during segment downloads in ms (default: 500) */
+  dbSyncIntervalMs?: number;
+
+  /** Minimum HLS live recording poll interval in ms (default: 1000) */
+  minPollIntervalMs?: number;
+
+  /** Maximum HLS live recording poll interval in ms (default: 10000) */
+  maxPollIntervalMs?: number;
+
+  /** Fraction of #EXT-X-TARGETDURATION used to compute HLS poll cadence (default: 0.5) */
+  pollFraction?: number;
 }
 
 /**
@@ -62,34 +86,34 @@ export class DownloadManager {
     this.uploadToDrive = options.uploadToDrive || false;
     const ffmpegTimeout = options.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
 
+    const sharedOptions = {
+      onProgress: this.onProgress,
+      maxConcurrent: this.maxConcurrent,
+      ffmpegTimeout,
+      shouldSaveOnCancel: options.shouldSaveOnCancel,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
+      retryBackoffFactor: options.retryBackoffFactor,
+      fragmentFailureRate: options.fragmentFailureRate,
+      dbSyncIntervalMs: options.dbSyncIntervalMs,
+      minPollIntervalMs: options.minPollIntervalMs,
+      maxPollIntervalMs: options.maxPollIntervalMs,
+      pollFraction: options.pollFraction,
+    };
+
     // Initialize direct download handler
     this.directDownloadHandler = new DirectDownloadHandler({
       onProgress: this.onProgress,
     });
 
     // Initialize HLS download handler
-    this.hlsDownloadHandler = new HlsDownloadHandler({
-      onProgress: this.onProgress,
-      maxConcurrent: this.maxConcurrent,
-      ffmpegTimeout,
-      shouldSaveOnCancel: options.shouldSaveOnCancel,
-    });
+    this.hlsDownloadHandler = new HlsDownloadHandler(sharedOptions);
 
     // Initialize M3U8 download handler
-    this.m3u8DownloadHandler = new M3u8DownloadHandler({
-      onProgress: this.onProgress,
-      maxConcurrent: this.maxConcurrent,
-      ffmpegTimeout,
-      shouldSaveOnCancel: options.shouldSaveOnCancel,
-    });
+    this.m3u8DownloadHandler = new M3u8DownloadHandler(sharedOptions);
 
     // Initialize DASH download handler
-    this.dashDownloadHandler = new DashDownloadHandler({
-      onProgress: this.onProgress,
-      maxConcurrent: this.maxConcurrent,
-      ffmpegTimeout,
-      shouldSaveOnCancel: options.shouldSaveOnCancel,
-    });
+    this.dashDownloadHandler = new DashDownloadHandler(sharedOptions);
   }
 
   /**

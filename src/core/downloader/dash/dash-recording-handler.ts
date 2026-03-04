@@ -43,7 +43,7 @@ export class DashRecordingHandler extends BaseRecordingHandler {
     url: string,
     abortSignal: AbortSignal,
   ): Promise<{ mediaUrl: string; finalUrl: string }> {
-    const { finalUrl } = await fetchTextWithFinalUrl(url, 1, abortSignal, false);
+    const { finalUrl } = await fetchTextWithFinalUrl(url, 1, abortSignal, false, this.retryDelayMs, this.retryBackoffFactor);
     return { mediaUrl: url, finalUrl };
   }
 
@@ -55,7 +55,7 @@ export class DashRecordingHandler extends BaseRecordingHandler {
     abortSignal: AbortSignal,
     seenUris: Set<string>,
   ): Promise<{ fragments: Fragment[]; audioFragments?: Fragment[]; pollIntervalMs: number; ended: boolean }> {
-    const mpdText = await fetchText(mpdUrl, 3, abortSignal, true);
+    const mpdText = await fetchText(mpdUrl, this.maxRetries, abortSignal, true, undefined, this.retryDelayMs, this.retryBackoffFactor);
 
     const manifest = parseManifest(mpdText, mpdUrl);
 

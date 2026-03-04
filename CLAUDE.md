@@ -39,7 +39,7 @@ Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution c
 
 4. **Popup** (`src/popup/` → `dist/popup/`): Extension action UI — Videos tab (detected videos), Downloads tab (progress), Manifest tab (manual URL input with quality selector).
 
-5. **Options Page** (`src/options/` → `dist/options/`): FFmpeg timeout and max concurrent downloads configuration.
+5. **Options Page** (`src/options/` → `dist/options/`): Full settings UI with sidebar navigation. Sections: Download (FFmpeg timeout, max concurrent), History (completed/failed/cancelled download log with infinite scroll), Google Drive, S3, Recording (HLS poll interval tuning), Notifications, and Advanced (retries, backoff, cache sizes, fragment failure rate, IDB sync interval). All settings changes notify via bottom toast. History button in the popup header opens the options page directly on the `#history` anchor.
 
 ### Download Flow
 
@@ -62,7 +62,7 @@ Download state is persisted in **IndexedDB** (not `chrome.storage`), in the `med
 - `downloads`: Full `DownloadState` objects keyed by `id`
 - `chunks`: Raw `Uint8Array` segments keyed by `[downloadId, index]`
 
-Configuration (FFmpeg timeout, max concurrent) lives in `chrome.storage.local` via `ChromeStorage` (`core/storage/chrome-storage.ts`).
+Configuration lives in `chrome.storage.local` under the `storage_config` key (`StorageConfig` type). Always access config through `loadSettings()` (`core/storage/settings.ts`) which returns a fully-typed `AppSettings` object with all defaults applied — never read `StorageConfig` directly. `AppSettings` covers: `ffmpegTimeout`, `maxConcurrent`, `historyEnabled`, `googleDrive`, `s3`, `recording`, `notifications`, and `advanced`.
 
 IndexedDB is used as the shared state store because the five execution contexts don't share memory. The service worker writes state via `storeDownload()` (`core/database/downloads.ts`), which is a single IDB `put` upsert keyed by `id`. The popup reads the full list via `getAllDownloads()` on open. The offscreen document reads raw chunks from the `chunks` store during FFmpeg processing. `chrome.storage` is only used for config because it has a 10 MB quota and can't store `ArrayBuffer`.
 
@@ -86,7 +86,7 @@ Progress updates use two complementary channels:
 
 ### Message Protocol
 
-All inter-component communication uses the `MessageType` enum in `src/shared/messages.ts`. When adding new message types, add them to this enum and handle them in the service worker's `onMessage` listener switch statement.
+All inter-component communication uses the `MessageType` enum in `src/shared/messages.ts`. When adding new message types, add them to this enum and handle them in the service worker's `onMessage` listener switch statement. `CHECK_URL` is used by the options page manifest-check feature to probe a URL's content-type via the service worker (bypassing CORS).
 
 ### Build System
 
@@ -122,6 +122,31 @@ The fix uses `chrome.declarativeNetRequest` dynamic rules (`src/core/downloader/
 ### Stop & Save (Partial Downloads)
 
 HLS, M3U8, and DASH handlers support saving partial downloads when cancelled. If `shouldSaveOnCancel()` returns true, the handler transitions to the `MERGING` stage with whatever chunks were collected, runs FFmpeg, and saves a partial MP4. The abort signal is cleared before FFmpeg processing to prevent immediate rejection.
+
+### Constants Ownership
+
+- `src/shared/constants.ts` — only constants used across **multiple** modules (runtime defaults, pipeline values, storage keys)
+- `src/options/constants.ts` — constants used exclusively within the options UI (toast duration, UI bounds for all settings inputs in seconds, validation clamp values)
+
+**Time representation**: All runtime/storage values use **milliseconds** (`StorageConfig`, `AppSettings`, all handlers). The options UI uses **seconds** exclusively. Conversion happens only in `options.ts`: divide by 1000 on load, multiply by 1000 on save.
+
+### Options Page Field Validation
+
+All numeric inputs are validated **before** saving via three helpers in `options.ts`:
+
+- `validateField(input, min, max, isInteger?)` — parses the value, returns the number on success or `null` on failure. Calls `markInvalid` automatically.
+- `markInvalid(input, message)` — adds `.invalid` class (red border) and inserts a `.form-error` div after the input. Registers a one-time `input` listener to auto-clear when the user edits.
+- `clearInvalid(input)` — removes `.invalid` and the `.form-error` div.
+
+Each save handler validates all fields upfront and returns early if any are invalid — the button is never disabled and no write is attempted. Cross-field constraints (e.g. `pollMin < pollMax`) call `markInvalid` on the relevant field directly rather than relying on the toast. The toast is reserved for storage/network errors.
+
+### History
+
+Completed, failed, and cancelled downloads are persisted in IndexedDB when `historyEnabled` (default `true`) is set. The options page History section renders all finished downloads with infinite scroll (`IntersectionObserver`). From history, users can re-download (reuses stored metadata for filename), copy the original URL, or delete entries. `bulkDeleteDownloads()` (`core/database/downloads.ts`) handles batch removal. The popup "History" button navigates to `options.html#history`.
+
+### Post-Download Actions
+
+After a download completes, `handlePostDownloadActions()` in the service worker reads `AppSettings.notifications` and optionally fires an OS notification (`notifyOnCompletion`) or opens the file in Finder/Explorer (`autoOpenFile`).
 
 ### DASH-Specific Notes
 
@@ -177,7 +202,8 @@ src/
 │   │   ├── downloads.ts                 # storeDownload(), getDownload(), etc.
 │   │   └── chunks.ts                    # storeChunk(), deleteChunks(), getChunkCount()
 │   ├── storage/
-│   │   └── chrome-storage.ts
+│   │   ├── chrome-storage.ts
+│   │   └── settings.ts          # AppSettings interface + loadSettings() — always use this
 │   ├── cloud/                           # ⚠️ Planned — not wired up yet
 │   │   ├── google-auth.ts
 │   │   ├── google-drive.ts
@@ -207,6 +233,7 @@ src/
 │   └── utils.ts
 ├── options/
 │   ├── options.ts / options.html
+│   └── constants.ts             # Options-page-only constants (UI bounds, toast duration)
 ├── offscreen/
 │   ├── offscreen.ts / offscreen.html
 └── types/
