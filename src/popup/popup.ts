@@ -7,6 +7,8 @@ import { getAllDownloads, deleteDownload } from "../core/database/downloads";
 import { MessageType } from "../shared/messages";
 import { normalizeUrl } from "../core/utils/url-utils";
 import { ChromeStorage } from "../core/storage/chrome-storage";
+import { loadSettings } from "../core/storage/settings";
+import { CloudProvider } from "../shared/messages";
 import {
   dom,
   detectedVideos,
@@ -378,7 +380,99 @@ function setupDownloadsEventDelegation(): void {
     if (uploadBtn) {
       e.stopPropagation();
       const downloadId = uploadBtn.dataset.downloadId;
-      if (downloadId) await handleUploadDownload(downloadId);
+      if (!downloadId) return;
+
+      const settings = await loadSettings();
+      const driveEnabled = settings.googleDrive?.enabled === true;
+      const s3Enabled = settings.s3?.enabled === true;
+
+      if (!driveEnabled && !s3Enabled) {
+        alert('No cloud provider configured. Go to Settings → Google Drive or S3.');
+        return;
+      }
+
+      if (driveEnabled && !s3Enabled) {
+        await handleUploadDownload(downloadId, 'googleDrive');
+        return;
+      }
+
+      if (s3Enabled && !driveEnabled) {
+        await handleUploadDownload(downloadId, 's3');
+        return;
+      }
+
+      // Both configured — show inline picker
+      const existing = document.querySelector<HTMLElement>('.provider-picker');
+      if (existing) existing.remove();
+
+      const picker = document.createElement('div');
+      picker.className = 'provider-picker';
+
+      const rect = uploadBtn.getBoundingClientRect();
+      picker.style.cssText = `
+        position: fixed;
+        top: ${rect.bottom + 4}px;
+        left: ${rect.left}px;
+        background: var(--bg-secondary, #1e1e2e);
+        border: 1px solid var(--border-color, #3a3a5c);
+        border-radius: 6px;
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        z-index: 9999;
+        min-width: 140px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      `;
+
+      const btnStyle = `
+        background: none;
+        border: none;
+        color: var(--text-primary, #cdd6f4);
+        padding: 6px 10px;
+        text-align: left;
+        cursor: pointer;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+      `;
+
+      const driveBtn = document.createElement('button');
+      driveBtn.textContent = '↑ Google Drive';
+      driveBtn.style.cssText = btnStyle;
+      driveBtn.addEventListener('mouseenter', () => { driveBtn.style.background = 'var(--hover-bg, #313244)'; });
+      driveBtn.addEventListener('mouseleave', () => { driveBtn.style.background = 'none'; });
+
+      const s3Btn = document.createElement('button');
+      s3Btn.textContent = '↑ S3';
+      s3Btn.style.cssText = btnStyle;
+      s3Btn.addEventListener('mouseenter', () => { s3Btn.style.background = 'var(--hover-bg, #313244)'; });
+      s3Btn.addEventListener('mouseleave', () => { s3Btn.style.background = 'none'; });
+
+      const selectProvider = async (provider: CloudProvider) => {
+        picker.remove();
+        outsideClickHandler();
+        await handleUploadDownload(downloadId, provider);
+      };
+
+      driveBtn.addEventListener('click', (ev) => { ev.stopPropagation(); selectProvider('googleDrive'); });
+      s3Btn.addEventListener('click', (ev) => { ev.stopPropagation(); selectProvider('s3'); });
+
+      picker.appendChild(driveBtn);
+      picker.appendChild(s3Btn);
+      document.body.appendChild(picker);
+
+      const outsideClickHandler = () => {
+        document.removeEventListener('click', outsideClick);
+      };
+      const outsideClick = (ev: MouseEvent) => {
+        if (!picker.contains(ev.target as Node)) {
+          picker.remove();
+          outsideClickHandler();
+        }
+      };
+      setTimeout(() => document.addEventListener('click', outsideClick), 0);
+
       return;
     }
 

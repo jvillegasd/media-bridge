@@ -4,7 +4,7 @@
 
 import { VideoMetadata, DownloadStage } from "../core/types";
 import { getDownload, deleteDownload } from "../core/database/downloads";
-import { MessageType } from "../shared/messages";
+import { MessageType, CloudProvider } from "../shared/messages";
 import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "../core/utils/download-utils";
 import { loadDownloadStates } from "./state";
 import { renderDownloads } from "./render-downloads";
@@ -164,7 +164,7 @@ export async function handleRetryDownload(downloadId: string): Promise<void> {
  * Chrome extensions cannot read local file paths directly; the user
  * must confirm by selecting the file (one click if still in Downloads).
  */
-export async function handleUploadDownload(downloadId: string): Promise<void> {
+export async function handleUploadDownload(downloadId: string, provider: CloudProvider): Promise<void> {
   try {
     const download = await getDownload(downloadId);
     if (!download) {
@@ -183,13 +183,19 @@ export async function handleUploadDownload(downloadId: string): Promise<void> {
     });
 
     const file: File = await fileHandle.getFile();
+
+    if (!file.type.startsWith('video/')) {
+      alert(`Invalid file type "${file.type}". Please select a video file.`);
+      return;
+    }
+
     const fileBytes: ArrayBuffer = await file.arrayBuffer();
 
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
           type: MessageType.UPLOAD_REQUEST,
-          payload: { downloadId, fileBytes },
+          payload: { downloadId, fileBytes, provider },
         },
         (res) => {
           if (chrome.runtime.lastError) {

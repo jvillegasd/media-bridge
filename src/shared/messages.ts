@@ -4,6 +4,8 @@
 
 import { VideoMetadata, DownloadStage } from "../core/types";
 
+export type CloudProvider = 'googleDrive' | 's3';
+
 export enum MessageType {
   // Download messages
   DOWNLOAD_REQUEST = "DOWNLOAD_REQUEST",

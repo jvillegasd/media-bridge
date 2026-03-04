@@ -7,6 +7,7 @@ import { S3Client } from "./s3-client";
 import { DownloadState, DownloadStage, StorageConfig } from "../types";
 import { UploadError } from "../utils/errors";
 import { logger } from "../utils/logger";
+import { CloudProvider } from "../../shared/messages";
 
 export interface CloudLinks {
   googleDrive?: string; // webViewLink
@@ -67,6 +68,7 @@ export class UploadManager {
     blobUrl: string,
     filename: string,
     downloadState: DownloadState,
+    provider: CloudProvider,
   ): Promise<CloudLinks> {
     if (!this.isConfigured()) {
       return {};
@@ -79,18 +81,17 @@ export class UploadManager {
     }
     const blob = await response.blob();
 
-    return this.uploadBlob(blob, filename, downloadState);
+    return this.uploadBlob(blob, filename, downloadState, provider);
   }
 
   /**
-   * Upload an already-fetched blob to all configured providers.
-   * Both Drive and S3 are attempted independently — one failing does not
-   * prevent the other.
+   * Upload an already-fetched blob to a single chosen provider.
    */
   async uploadBlob(
     blob: Blob,
     filename: string,
     downloadState: DownloadState,
+    provider: CloudProvider,
   ): Promise<CloudLinks> {
     const links: CloudLinks = {};
 
@@ -100,43 +101,28 @@ export class UploadManager {
     downloadState.progress.percentage = 0;
     await this.onStateUpdate?.(downloadState);
 
-    const totalBytes = blob.size;
-    // Track combined progress from both providers (simple: use whichever fires)
     const onProgress = (uploaded: number, total: number) => {
       this.onProgress?.(uploaded, total);
     };
 
-    // Run both providers concurrently; failures are independent
-    const [driveResult, s3Result] = await Promise.allSettled([
-      this.googleDrive
-        ? this.uploadToDrive(blob, filename, onProgress)
-        : Promise.resolve(null),
-      this.s3
-        ? this.s3.uploadBlob(blob, filename, onProgress)
-        : Promise.resolve(null),
-    ]);
-
-    if (driveResult.status === "fulfilled" && driveResult.value) {
-      links.googleDrive = driveResult.value.webViewLink ?? driveResult.value.fileId;
-      logger.info(`Drive upload complete: ${links.googleDrive}`);
-    } else if (driveResult.status === "rejected") {
-      logger.error("Drive upload failed:", driveResult.reason);
-    }
-
-    if (s3Result.status === "fulfilled" && s3Result.value) {
-      links.s3 = s3Result.value.url;
-      logger.info(`S3 upload complete: ${links.s3}`);
-    } else if (s3Result.status === "rejected") {
-      logger.error("S3 upload failed:", s3Result.reason);
-    }
-
-    const bothFailed =
-      driveResult.status === "rejected" && s3Result.status === "rejected";
-    if (bothFailed) {
-      const driveErr =
-        driveResult.status === "rejected" ? String(driveResult.reason) : "";
-      const s3Err = s3Result.status === "rejected" ? String(s3Result.reason) : "";
-      throw new UploadError(`All uploads failed. Drive: ${driveErr} S3: ${s3Err}`);
+    if (provider === 'googleDrive') {
+      if (!this.googleDrive) {
+        throw new UploadError('Google Drive is not configured');
+      }
+      const result = await this.uploadToDrive(blob, filename, onProgress);
+      if (result) {
+        links.googleDrive = result.webViewLink ?? result.fileId;
+        logger.info(`Drive upload complete: ${links.googleDrive}`);
+      }
+    } else {
+      if (!this.s3) {
+        throw new UploadError('S3 is not configured');
+      }
+      const result = await this.s3.uploadBlob(blob, filename, onProgress);
+      if (result) {
+        links.s3 = result.url;
+        logger.info(`S3 upload complete: ${links.s3}`);
+      }
     }
 
     return links;

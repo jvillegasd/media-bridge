@@ -17,7 +17,7 @@ import { UploadManager } from "./core/cloud/upload-manager";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { loadSettings } from "./core/storage/settings";
 import { SecureStorage } from "./core/storage/secure-storage";
-import { MessageType } from "./shared/messages";
+import { MessageType, CloudProvider } from "./shared/messages";
 import {
   DownloadState,
   StorageConfig,
@@ -709,9 +709,10 @@ async function handleDownloadRequest(payload: {
 async function handleUploadRequestMessage(payload: {
   downloadId: string;
   fileBytes?: ArrayBuffer;
+  provider: CloudProvider;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    const { downloadId, fileBytes } = payload;
+    const { downloadId, fileBytes, provider } = payload;
     const state = await getDownload(downloadId);
     if (!state) return { success: false, error: "Download not found" };
     if (state.metadata.hasDrm) return { success: false, error: "DRM-protected content cannot be uploaded" };
@@ -749,7 +750,7 @@ async function handleUploadRequestMessage(payload: {
       return { success: false, error: "No cloud provider configured" };
     }
 
-    const links = await uploadManager.uploadBlob(blob, filename, state);
+    const links = await uploadManager.uploadBlob(blob, filename, state, provider);
     const freshState = await getDownload(downloadId);
     if (freshState) {
       freshState.cloudLinks = { ...freshState.cloudLinks, ...links };
