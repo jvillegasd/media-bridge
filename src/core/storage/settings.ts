@@ -32,6 +32,7 @@ export interface AppSettings {
 
   googleDrive: {
     enabled: boolean;
+    autoUpload: boolean;
     targetFolderId?: string;
     createFolderIfNotExists: boolean;
     folderName: string;
@@ -39,6 +40,7 @@ export interface AppSettings {
 
   s3: {
     enabled: boolean;
+    autoUpload: boolean;
     bucket?: string;
     region?: string;
     endpoint?: string;
@@ -79,6 +81,7 @@ export async function loadSettings(): Promise<AppSettings> {
 
     googleDrive: {
       enabled: raw?.googleDrive?.enabled ?? false,
+      autoUpload: raw?.googleDrive?.autoUpload ?? false,
       targetFolderId: raw?.googleDrive?.targetFolderId,
       createFolderIfNotExists: raw?.googleDrive?.createFolderIfNotExists ?? false,
       folderName: raw?.googleDrive?.folderName ?? DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
@@ -86,6 +89,7 @@ export async function loadSettings(): Promise<AppSettings> {
 
     s3: {
       enabled: raw?.s3?.enabled ?? false,
+      autoUpload: raw?.s3?.autoUpload ?? false,
       bucket: raw?.s3?.bucket,
       region: raw?.s3?.region,
       endpoint: raw?.s3?.endpoint,

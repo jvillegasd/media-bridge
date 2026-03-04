@@ -1,5 +1,5 @@
 /**
- * Download action handlers (open, remove, retry, start download).
+ * Download action handlers (open, remove, retry, start download, upload).
  */
 
 import { VideoMetadata, DownloadStage } from "../core/types";
@@ -154,6 +154,70 @@ export async function handleRetryDownload(downloadId: string): Promise<void> {
   } catch (error: any) {
     console.error("Failed to retry download:", error);
     alert("Failed to retry download: " + (error?.message || "Unknown error"));
+  }
+}
+
+/**
+ * Deferred upload: user selects the local file via the file picker,
+ * then we send its bytes to the service worker for cloud upload.
+ *
+ * Chrome extensions cannot read local file paths directly; the user
+ * must confirm by selecting the file (one click if still in Downloads).
+ */
+export async function handleUploadDownload(downloadId: string): Promise<void> {
+  try {
+    const download = await getDownload(downloadId);
+    if (!download) {
+      alert("Download record not found.");
+      return;
+    }
+    if (download.metadata.hasDrm) {
+      alert("DRM-protected content cannot be uploaded.");
+      return;
+    }
+
+    const filename = download.localPath?.split(/[/\\]/).pop();
+    const hint = filename
+      ? `Select the file "${filename}" to upload it to cloud storage.`
+      : "Select the downloaded file to upload it to cloud storage.";
+    alert(hint);
+
+    // @ts-ignore — showOpenFilePicker is available in Chrome extension popups
+    const [fileHandle] = await (window as any).showOpenFilePicker({
+      multiple: false,
+      types: [{ description: "Video files", accept: { "video/*": [".mp4", ".webm", ".mkv", ".mov"] } }],
+    });
+
+    const file: File = await fileHandle.getFile();
+    const buffer = await file.arrayBuffer();
+    const fileBytes = Array.from(new Uint8Array(buffer));
+
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.UPLOAD_REQUEST,
+          payload: { downloadId, fileBytes },
+        },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(res);
+        },
+      );
+    });
+
+    if (response?.success) {
+      await loadDownloadStates();
+      renderDownloads();
+    } else {
+      alert("Upload failed: " + (response?.error || "Unknown error"));
+    }
+  } catch (err: any) {
+    if (err?.name === "AbortError") return; // user cancelled file picker
+    console.error("Upload failed:", err);
+    alert("Upload failed: " + (err?.message || "Unknown error"));
   }
 }
 

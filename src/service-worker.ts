@@ -13,6 +13,7 @@ import {
   storeDownload,
   deleteDownload,
 } from "./core/database/downloads";
+import { UploadManager } from "./core/cloud/upload-manager";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { loadSettings } from "./core/storage/settings";
 import { MessageType } from "./shared/messages";
@@ -397,6 +398,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleStopAndSaveMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.UPLOAD_REQUEST:
+        handleUploadRequestMessage(message.payload).then(sendResponse);
+        return true;
+
       case MessageType.CHECK_URL: {
         const checkUrl = async () => {
           try {
@@ -470,6 +475,100 @@ async function cleanupOrphanedChunks(existing: DownloadState) {
       error,
     );
     // Don't throw - continue with download even if cleanup verification fails
+  }
+}
+
+/**
+ * Upload a completed download to cloud storage.
+ * Called inside saveBlobUrlToFile's onBlobReady hook — the blob URL is still live.
+ */
+async function performCloudUpload(
+  blobUrl: string,
+  stateId: string,
+  config: ReturnType<typeof loadSettings> extends Promise<infer T> ? T : never,
+): Promise<void> {
+  const state = await getDownload(stateId);
+  if (!state) return;
+  // Skip DRM content
+  if (state.metadata.hasDrm) return;
+
+  const storageConfig = {
+    googleDrive: {
+      enabled: config.googleDrive.enabled,
+      autoUpload: config.googleDrive.autoUpload,
+      targetFolderId: config.googleDrive.targetFolderId,
+      createFolderIfNotExists: config.googleDrive.createFolderIfNotExists,
+      folderName: config.googleDrive.folderName,
+    },
+    s3: {
+      enabled: config.s3.enabled,
+      autoUpload: config.s3.autoUpload,
+      bucket: config.s3.bucket,
+      region: config.s3.region,
+      endpoint: config.s3.endpoint,
+      accessKeyId: config.s3.accessKeyId,
+      secretAccessKey: config.s3.secretAccessKey,
+      prefix: config.s3.prefix,
+    },
+  };
+
+  const uploadManager = new UploadManager({
+    config: storageConfig,
+    onProgress: (uploaded, total) => {
+      const pct = total > 0 ? Math.round((uploaded / total) * 100) : 0;
+      state.progress.percentage = pct;
+      state.progress.message = `Uploading... ${pct}%`;
+      try {
+        chrome.runtime.sendMessage(
+          { type: MessageType.UPLOAD_PROGRESS, payload: { id: stateId, progress: state.progress } },
+          () => { if (chrome.runtime.lastError) {} },
+        );
+      } catch (_) {}
+    },
+    onStateUpdate: async (updatedState) => {
+      await storeDownload(updatedState);
+      try {
+        chrome.runtime.sendMessage(
+          { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: updatedState.id, progress: updatedState.progress } },
+          () => { if (chrome.runtime.lastError) {} },
+        );
+      } catch (_) {}
+    },
+  });
+
+  if (!uploadManager.isConfigured()) return;
+
+  try {
+    // Set UPLOADING stage immediately so the popup can show it
+    state.progress.stage = DownloadStage.UPLOADING;
+    state.progress.message = "Uploading to cloud...";
+    state.progress.percentage = 0;
+    await storeDownload(state);
+    try {
+      chrome.runtime.sendMessage(
+        { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: stateId, progress: state.progress } },
+        () => { if (chrome.runtime.lastError) {} },
+      );
+    } catch (_) {}
+
+    const filename = state.localPath?.split(/[/\\]/).pop() ?? "video.mp4";
+    const links = await uploadManager.uploadFromBlobUrl(blobUrl, filename, state);
+
+    // Persist cloud links (markCompleted will run after this and set COMPLETED)
+    const freshState = await getDownload(stateId);
+    if (freshState) {
+      freshState.cloudLinks = links;
+      freshState.uploadError = undefined;
+      await storeDownload(freshState);
+    }
+    logger.info(`Cloud upload complete for ${stateId}:`, links);
+  } catch (err) {
+    logger.error("Cloud upload failed:", err);
+    const freshState = await getDownload(stateId);
+    if (freshState) {
+      freshState.uploadError = err instanceof Error ? err.message : String(err);
+      await storeDownload(freshState);
+    }
   }
 }
 
@@ -594,6 +693,10 @@ async function handleDownloadRequest(payload: {
       }
     },
     uploadToDrive: uploadToDrive || config?.googleDrive?.enabled || false,
+    onBlobReady: (config.googleDrive.autoUpload && config.googleDrive.enabled) ||
+                 (config.s3.autoUpload && config.s3.enabled)
+      ? (blobUrl: string, stateId: string) => performCloudUpload(blobUrl, stateId, config)
+      : undefined,
   });
 
   // Create AbortController for this download to enable real-time cancellation
@@ -670,6 +773,75 @@ async function handleDownloadRequest(payload: {
         );
       }
     });
+}
+
+/**
+ * Handle deferred upload request (triggered from popup or history after download completes).
+ * Since the blob URL is long gone, this re-downloads the segments and re-processes — OR
+ * if the localPath file is accessible (DIRECT downloads), it re-downloads from the source URL.
+ *
+ * For segmented downloads (HLS/DASH/M3U8), re-downloading is expensive and URLs may have
+ * expired. The popup should prompt the user to select the local file via showOpenFilePicker().
+ * This handler receives the file bytes forwarded from the popup after file picker selection.
+ */
+async function handleUploadRequestMessage(payload: {
+  downloadId: string;
+  fileBytes?: number[]; // ArrayBuffer serialized as number[] from popup
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { downloadId, fileBytes } = payload;
+    const state = await getDownload(downloadId);
+    if (!state) return { success: false, error: "Download not found" };
+    if (state.metadata.hasDrm) return { success: false, error: "DRM-protected content cannot be uploaded" };
+    if (!fileBytes?.length) return { success: false, error: "No file data provided" };
+
+    const config = await loadSettings();
+    const blob = new Blob([new Uint8Array(fileBytes)], { type: "video/mp4" });
+    const filename = state.localPath?.split(/[/\\]/).pop() ?? "video.mp4";
+
+    const storageConfig = {
+      googleDrive: { ...config.googleDrive },
+      s3: { ...config.s3 },
+    };
+
+    const uploadManager = new UploadManager({
+      config: storageConfig,
+      onStateUpdate: async (updatedState) => {
+        await storeDownload(updatedState);
+        try {
+          chrome.runtime.sendMessage(
+            { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: updatedState.id, progress: updatedState.progress } },
+            () => { if (chrome.runtime.lastError) {} },
+          );
+        } catch (_) {}
+      },
+    });
+
+    if (!uploadManager.isConfigured()) {
+      return { success: false, error: "No cloud provider configured" };
+    }
+
+    const links = await uploadManager.uploadBlob(blob, filename, state);
+    const freshState = await getDownload(downloadId);
+    if (freshState) {
+      freshState.cloudLinks = { ...freshState.cloudLinks, ...links };
+      freshState.uploadError = undefined;
+      freshState.progress.stage = DownloadStage.COMPLETED;
+      freshState.progress.message = "Upload complete";
+      await storeDownload(freshState);
+      try {
+        chrome.runtime.sendMessage(
+          { type: MessageType.UPLOAD_COMPLETE, payload: { id: downloadId, cloudLinks: links } },
+          () => { if (chrome.runtime.lastError) {} },
+        );
+      } catch (_) {}
+    }
+
+    return { success: true };
+  } catch (err) {
+    logger.error("Upload request failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /**

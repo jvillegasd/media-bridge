@@ -6,6 +6,7 @@
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { loadSettings } from "../core/storage/settings";
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "../core/cloud/google-auth";
+import { S3Client } from "../core/cloud/s3-client";
 import { StorageConfig, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
 import { MessageType } from "../shared/messages";
 import {
@@ -248,16 +249,38 @@ function setupCloudProviderTabs(): void {
   });
 }
 
+let advancedTabsInitialized = false;
+
+function setupAdvancedTabs(): void {
+  if (advancedTabsInitialized) return;
+  advancedTabsInitialized = true;
+
+  document.querySelectorAll<HTMLButtonElement>(".advanced-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const tabId = tab.dataset.tab;
+      if (!tabId) return;
+
+      document.querySelectorAll(".advanced-tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".advanced-panel").forEach((p) => p.classList.remove("active"));
+
+      tab.classList.add("active");
+      document.getElementById(`advanced-${tabId}`)?.classList.add("active");
+    });
+  });
+}
+
 // -- Google Drive --
 
 async function loadDriveSettings(): Promise<void> {
   const config = await loadSettings();
 
   const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
+  const autoUploadCb = document.getElementById("drive-auto-upload") as HTMLInputElement;
   const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
   const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
 
   enabledCb.checked = config.googleDrive.enabled;
+  autoUploadCb.checked = config.googleDrive.autoUpload;
   folderNameIn.value = config.googleDrive.folderName;
   folderIdIn.value = config.googleDrive.targetFolderId ?? "";
 
@@ -331,12 +354,14 @@ async function saveDriveSettings(): Promise<void> {
 
   try {
     const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
+    const autoUploadCb = document.getElementById("drive-auto-upload") as HTMLInputElement;
     const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
     const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
 
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.googleDrive = {
       enabled: enabledCb.checked,
+      autoUpload: autoUploadCb.checked,
       folderName: folderNameIn.value || DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
       targetFolderId: folderIdIn.value || undefined,
       createFolderIfNotExists: true,
@@ -353,20 +378,116 @@ async function saveDriveSettings(): Promise<void> {
 
 // -- S3 --
 
+const S3_ENDPOINT_PRESETS: Record<string, { endpoint: string; region: string }> = {
+  r2: { endpoint: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com", region: "auto" },
+  b2: { endpoint: "https://s3.<REGION>.backblazeb2.com", region: "us-west-004" },
+  wasabi: { endpoint: "https://s3.<REGION>.wasabisys.com", region: "us-east-1" },
+  do: { endpoint: "https://<REGION>.digitaloceanspaces.com", region: "nyc3" },
+  minio: { endpoint: "https://your-minio-server.example.com", region: "us-east-1" },
+};
+
 async function loadS3Settings(): Promise<void> {
   const { s3 } = await loadSettings();
 
-  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+  const inp = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-  get("s3-enabled").checked = s3.enabled;
-  get("s3-bucket").value = s3.bucket ?? "";
-  get("s3-region").value = s3.region ?? "";
-  get("s3-endpoint").value = s3.endpoint ?? "";
-  get("s3-access-key").value = s3.accessKeyId ?? "";
-  get("s3-secret-key").value = s3.secretAccessKey ?? "";
-  get("s3-prefix").value = s3.prefix ?? "";
+  const enabledCb = inp("s3-enabled");
+  enabledCb.checked = s3.enabled;
 
+  const s3SettingsEl = document.getElementById("s3-settings");
+  if (s3SettingsEl)
+    s3SettingsEl.style.display = enabledCb.checked ? "block" : "none";
+
+  enabledCb.addEventListener("change", () => {
+    if (s3SettingsEl) s3SettingsEl.style.display = enabledCb.checked ? "block" : "none";
+  });
+
+  inp("s3-auto-upload").checked = s3.autoUpload;
+  inp("s3-bucket").value = s3.bucket ?? "";
+  inp("s3-region").value = s3.region ?? "";
+  inp("s3-endpoint").value = s3.endpoint ?? "";
+  inp("s3-access-key").value = s3.accessKeyId ?? "";
+  inp("s3-secret-key").value = s3.secretAccessKey ?? "";
+  inp("s3-prefix").value = s3.prefix ?? "";
+
+  // Provider preset selector
+  const presetSel = document.getElementById("s3-provider-preset") as HTMLSelectElement;
+  if (presetSel) {
+    presetSel.addEventListener("change", () => {
+      const preset = S3_ENDPOINT_PRESETS[presetSel.value];
+      if (preset) {
+        inp("s3-endpoint").value = preset.endpoint;
+        inp("s3-region").value = preset.region;
+      }
+    });
+  }
+
+  // Render CORS config helper
+  const corsEl = document.getElementById("s3-cors-json");
+  if (corsEl) {
+    const extId = chrome.runtime.id;
+    const corsConfig = JSON.stringify([{
+      AllowedHeaders: ["*"],
+      AllowedMethods: ["PUT", "POST", "HEAD"],
+      AllowedOrigins: [`chrome-extension://${extId}`],
+      ExposeHeaders: ["ETag"],
+    }], null, 2);
+    corsEl.textContent = corsConfig;
+  }
+
+  document.getElementById("s3-copy-cors")?.addEventListener("click", async () => {
+    const text = document.getElementById("s3-cors-json")?.textContent ?? "";
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("s3-copy-cors") as HTMLButtonElement;
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = "Copy CORS Config"; }, 2000);
+  });
+
+  document.getElementById("s3-test-connection")?.addEventListener("click", testS3Connection);
   document.getElementById("save-s3-settings")?.addEventListener("click", saveS3Settings);
+}
+
+async function testS3Connection(): Promise<void> {
+  const btn = document.getElementById("s3-test-connection") as HTMLButtonElement;
+  const resultEl = document.getElementById("s3-test-result") as HTMLSpanElement;
+  btn.disabled = true;
+  btn.textContent = "Testing…";
+  resultEl.textContent = "";
+  resultEl.style.color = "";
+
+  try {
+    const inp = (id: string) =>
+      (document.getElementById(id) as HTMLInputElement).value.trim();
+
+    const bucket = inp("s3-bucket");
+    const region = inp("s3-region");
+    const accessKeyId = inp("s3-access-key");
+    const secretAccessKey = inp("s3-secret-key");
+    const endpoint = inp("s3-endpoint") || undefined;
+
+    if (!bucket || !region || !accessKeyId || !secretAccessKey) {
+      resultEl.textContent = "Fill in bucket, region, and credentials first.";
+      resultEl.style.color = "var(--error)";
+      return;
+    }
+
+    const client = new S3Client({ bucket, region, accessKeyId, secretAccessKey, endpoint });
+    const { ok, error } = await client.testConnection();
+
+    if (ok) {
+      resultEl.textContent = "✓ Connection successful";
+      resultEl.style.color = "var(--success, #22c55e)";
+    } else {
+      resultEl.textContent = `✗ ${error}`;
+      resultEl.style.color = "var(--error)";
+    }
+  } catch (err) {
+    resultEl.textContent = `✗ ${errorMsg(err)}`;
+    resultEl.style.color = "var(--error)";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Test Connection";
+  }
 }
 
 async function saveS3Settings(): Promise<void> {
@@ -383,6 +504,7 @@ async function saveS3Settings(): Promise<void> {
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.s3 = {
       enabled: checked("s3-enabled"),
+      autoUpload: checked("s3-auto-upload"),
       bucket: get("s3-bucket") || undefined,
       region: get("s3-region") || undefined,
       endpoint: get("s3-endpoint") || undefined,
@@ -1154,16 +1276,19 @@ async function loadAdvancedSettings(): Promise<void> {
   get("master-playlist-cache-size").value = advanced.masterPlaylistCacheSize.toString();
   get("db-sync-interval").value = (advanced.dbSyncIntervalMs / 1000).toString();
 
-  document
-    .getElementById("save-advanced-settings")
-    ?.addEventListener("click", saveAdvancedSettings);
-  document
-    .getElementById("reset-advanced-settings")
-    ?.addEventListener("click", resetAdvancedSettings);
+  for (const id of ["save-advanced-settings", "save-advanced-settings-caches", "save-advanced-settings-perf"]) {
+    document.getElementById(id)?.addEventListener("click", saveAdvancedSettings);
+  }
+  for (const id of ["reset-advanced-settings", "reset-advanced-settings-caches", "reset-advanced-settings-perf"]) {
+    document.getElementById(id)?.addEventListener("click", resetAdvancedSettings);
+  }
+
+  setupAdvancedTabs();
 }
 
-async function saveAdvancedSettings(): Promise<void> {
-  const btn = document.getElementById("save-advanced-settings") as HTMLButtonElement;
+async function saveAdvancedSettings(event?: Event): Promise<void> {
+  const btn = ((event?.currentTarget as HTMLButtonElement | null)
+    ?? document.getElementById("save-advanced-settings")) as HTMLButtonElement;
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
   const maxRetries       = validateField(get("max-retries"),               MIN_MAX_RETRIES,               MAX_MAX_RETRIES,               true);
@@ -1203,8 +1328,9 @@ async function saveAdvancedSettings(): Promise<void> {
   }
 }
 
-async function resetAdvancedSettings(): Promise<void> {
-  const btn = document.getElementById("reset-advanced-settings") as HTMLButtonElement;
+async function resetAdvancedSettings(event?: Event): Promise<void> {
+  const btn = ((event?.currentTarget as HTMLButtonElement | null)
+    ?? document.getElementById("reset-advanced-settings")) as HTMLButtonElement;
   btn.disabled = true;
 
   try {

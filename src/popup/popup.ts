@@ -15,7 +15,7 @@ import {
 } from "./state";
 import { renderDownloads } from "./render-downloads";
 import { renderDetectedVideos, setupDetectedVideosEventDelegation } from "./render-videos";
-import { handleOpenDownload, handleRemoveDownload, handleRetryDownload } from "./download-actions";
+import { handleOpenDownload, handleRemoveDownload, handleRetryDownload, handleUploadDownload } from "./download-actions";
 import {
   updateManualManifestFormState,
   updateDownloadButtonState,
@@ -370,6 +370,26 @@ function setupDownloadsEventDelegation(): void {
           type: MessageType.STOP_AND_SAVE_DOWNLOAD,
           payload: { url },
         });
+      }
+      return;
+    }
+
+    const uploadBtn = target.closest<HTMLElement>(".btn-upload-deferred");
+    if (uploadBtn) {
+      e.stopPropagation();
+      const downloadId = uploadBtn.dataset.downloadId;
+      if (downloadId) await handleUploadDownload(downloadId);
+      return;
+    }
+
+    const copyS3Btn = target.closest<HTMLElement>(".btn-copy-s3");
+    if (copyS3Btn) {
+      e.stopPropagation();
+      const s3Url = copyS3Btn.dataset.s3Url;
+      if (s3Url) {
+        await navigator.clipboard.writeText(s3Url);
+        copyS3Btn.textContent = "Copied!";
+        setTimeout(() => { copyS3Btn.textContent = "⧉ S3 URL"; }, 2000);
       }
       return;
     }

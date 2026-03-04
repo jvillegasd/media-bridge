@@ -32,6 +32,9 @@ export async function saveBlobUrlToFile(
   blobUrl: string,
   filename: string,
   stateId: string,
+  /** Called after Chrome saves the file to disk but BEFORE the blob URL is revoked.
+   *  Use this hook to upload the blob to cloud storage while it's still live. */
+  onBlobReady?: (blobUrl: string) => Promise<void>,
 ): Promise<string> {
   try {
     return await new Promise<string>((resolve, reject) => {
@@ -74,12 +77,24 @@ export async function saveBlobUrlToFile(
             if (delta.state.current === "complete") {
               clearTimeout(timeoutId);
               chrome.downloads.onChanged.removeListener(onChange);
-              revokeBlobUrl(blobUrl);
-              // Retrieve filename from the completed download
-              chrome.downloads.search({ id: downloadId }, (results) => {
-                const item = results?.[0];
-                resolve(item?.filename || filename);
-              });
+
+              // Upload to cloud (if configured) before revoking the blob URL
+              const finish = async () => {
+                if (onBlobReady) {
+                  try {
+                    await onBlobReady(blobUrl);
+                  } catch (uploadErr) {
+                    // Upload failure is non-fatal — the local file was saved successfully
+                    logger.warn("onBlobReady callback failed:", uploadErr);
+                  }
+                }
+                revokeBlobUrl(blobUrl);
+                chrome.downloads.search({ id: downloadId }, (results) => {
+                  const item = results?.[0];
+                  resolve(item?.filename || filename);
+                });
+              };
+              finish();
             } else if (delta.state.current === "interrupted") {
               clearTimeout(timeoutId);
               chrome.downloads.onChanged.removeListener(onChange);

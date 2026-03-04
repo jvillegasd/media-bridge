@@ -29,7 +29,10 @@ let lastDownloadSnapshotJson = "";
  * Build a snapshot key for a download to detect structural changes.
  */
 function downloadStructureKey(d: DownloadState): string {
-  return `${d.id}:${d.progress.stage}:${d.metadata.thumbnail ?? ""}:${d.localPath ?? ""}`;
+  const cloudKey = d.cloudLinks
+    ? `gd:${d.cloudLinks.googleDrive ?? ""},s3:${d.cloudLinks.s3 ?? ""}`
+    : "";
+  return `${d.id}:${d.progress.stage}:${d.metadata.thumbnail ?? ""}:${d.localPath ?? ""}:${cloudKey}:${d.uploadError ?? ""}`;
 }
 
 /**
@@ -42,6 +45,16 @@ function updateDownloadCardProgress(card: HTMLElement, download: DownloadState):
     stage === DownloadStage.FAILED ||
     stage === DownloadStage.CANCELLED
   ) {
+    return true;
+  }
+
+  if (stage === DownloadStage.UPLOADING) {
+    const bar = card.querySelector<HTMLElement>(".manifest-progress-bar");
+    const sizeEl = card.querySelector(".manifest-progress-size");
+    if (!bar || !sizeEl) return false;
+    const pct = download.progress.percentage || 0;
+    bar.style.width = `${Math.min(pct, 100)}%`;
+    sizeEl.textContent = download.progress.message || "Uploading...";
     return true;
   }
 
@@ -170,13 +183,27 @@ function renderDownloadItem(download: DownloadState): string {
 
   let progressBar = "";
   const isRecording = stage === DownloadStage.RECORDING;
+  const isUploading = stage === DownloadStage.UPLOADING;
   const isManifestDownload =
     (download.metadata.format === VideoFormat.HLS ||
       download.metadata.format === VideoFormat.M3U8 ||
       download.metadata.format === VideoFormat.DASH) &&
     (stage === DownloadStage.DOWNLOADING || stage === DownloadStage.MERGING);
 
-  if (isRecording) {
+  if (isUploading) {
+    const pct = download.progress.percentage || 0;
+    progressBar = `
+      <div class="manifest-progress-container">
+        <div class="manifest-progress-bar-wrapper">
+          <div class="manifest-progress-bar" style="width: ${Math.min(pct, 100)}%"></div>
+        </div>
+        <div class="manifest-progress-info">
+          <span class="manifest-progress-size">${download.progress.message || "Uploading..."}</span>
+          <span class="manifest-progress-speed">${pct > 0 ? `${Math.round(pct)}%` : ""}</span>
+        </div>
+      </div>
+    `;
+  } else if (isRecording) {
     const segmentsCollected = download.progress.segmentsCollected || 0;
     const downloaded = download.progress.downloaded || 0;
 
@@ -256,6 +283,33 @@ function renderDownloadItem(download: DownloadState): string {
   const date = new Date(download.updatedAt);
   const dateText = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+  // Cloud link buttons for completed downloads
+  let cloudActions = "";
+  if (stage === DownloadStage.COMPLETED) {
+    const driveLink = download.cloudLinks?.googleDrive;
+    const s3Link = download.cloudLinks?.s3;
+    const uploadError = download.uploadError;
+    const parts: string[] = [];
+
+    if (driveLink) {
+      parts.push(`<a class="btn-cloud-link" href="${escapeHtml(driveLink)}" target="_blank" rel="noopener" title="View in Google Drive">&#x2197; Drive</a>`);
+    }
+    if (s3Link) {
+      parts.push(`<button class="btn-cloud-link btn-copy-s3" data-s3-url="${escapeHtml(s3Link)}" title="Copy S3 URL">&#x29C9; S3 URL</button>`);
+    }
+    if (!driveLink && !s3Link && uploadError) {
+      parts.push(`<span class="upload-error-hint" title="${escapeHtml(uploadError)}">&#x26A0; Upload failed</span>`);
+    }
+    // Deferred upload button (shown when no cloud links yet and no ongoing upload)
+    if (!driveLink && !s3Link && !uploadError) {
+      parts.push(`<button class="btn-upload-deferred" data-download-id="${escapeHtml(download.id)}" title="Upload to cloud storage">&#x2B06; Upload</button>`);
+    }
+
+    if (parts.length > 0) {
+      cloudActions = `<div class="card-cloud-actions">${parts.join("")}</div>`;
+    }
+  }
+
   let actionButtons = "";
   if (isRecording) {
     actionButtons = `
@@ -263,6 +317,9 @@ function renderDownloadItem(download: DownloadState): string {
         <button class="btn-stop-rec download-stop-rec-btn" data-url="${escapeHtml(download.url)}">Stop</button>
       </div>
     `;
+  } else if (isUploading) {
+    // No cancel button for uploads currently — just show progress
+    actionButtons = "";
   } else if (isInProgress) {
     if (!canCancelDownload(download.progress.stage)) {
       actionButtons = `
@@ -310,6 +367,7 @@ function renderDownloadItem(download: DownloadState): string {
           ${dateText}
         </div>
         ${progressBar}
+        ${cloudActions}
         ${actionButtons}
       </div>
     </div>
