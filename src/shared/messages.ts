@@ -81,7 +81,6 @@ export interface DownloadRequestMessage extends BaseMessage {
   payload: {
     url: string;
     filename?: string;
-    uploadToDrive?: boolean;
     metadata: VideoMetadata;
     tabTitle?: string;
     website?: string;

@@ -86,7 +86,6 @@ export abstract class BaseRecordingHandler extends BasePlaylistHandler {
         blobUrl,
         `${baseFileName}.mp4`,
         stateId,
-        this.onBlobReady ? (url) => this.onBlobReady!(url, stateId) : undefined,
       );
 
       const completionMessage = warning

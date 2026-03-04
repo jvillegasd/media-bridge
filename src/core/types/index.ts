@@ -78,8 +78,6 @@ export interface DownloadState {
     googleDrive?: string; // webViewLink
     s3?: string;          // public URL or s3:// URI
   };
-  uploadToDrive?: boolean;  // per-download override (defaults to AppSettings.googleDrive.autoUpload)
-  uploadToS3?: boolean;     // per-download override (defaults to AppSettings.s3.autoUpload)
   uploadError?: string;     // last upload failure message
   isManual?: boolean; // Indicates if download was started from manual/manifest tab
   chromeDownloadId?: number; // Chrome downloads API ID for reliable cancellation (only set when Chrome API is used)
@@ -96,7 +94,6 @@ export interface EncryptedBlob {
 export interface StorageConfig {
   googleDrive?: {
     enabled: boolean;
-    autoUpload?: boolean; // Auto-upload every completed download to Google Drive
     targetFolderId?: string;
     createFolderIfNotExists?: boolean;
     folderName?: string;
@@ -106,7 +103,6 @@ export interface StorageConfig {
   historyEnabled?: boolean; // Whether to persist completed/failed/cancelled downloads (default: true)
   s3?: {
     enabled: boolean;
-    autoUpload?: boolean; // Auto-upload every completed download to S3
     bucket?: string;
     region?: string;
     endpoint?: string; // For S3-compatible providers (Cloudflare R2, Backblaze, etc.)

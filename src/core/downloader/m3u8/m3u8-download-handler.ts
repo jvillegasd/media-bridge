@@ -99,7 +99,6 @@ export class M3u8DownloadHandler extends BasePlaylistHandler {
         blobUrl,
         `${baseFileName}.mp4`,
         stateId,
-        this.onBlobReady ? (url) => this.onBlobReady!(url, stateId) : undefined,
       );
 
       const completionMessage = warning

@@ -139,7 +139,6 @@ function handleInstallation(details: chrome.runtime.InstalledDetails) {
 async function handleDownloadRequestMessage(payload: {
   url: string;
   filename?: string;
-  uploadToDrive?: boolean;
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
@@ -503,107 +502,12 @@ async function resolveS3Secret(
 }
 
 /**
- * Upload a completed download to cloud storage.
- * Called inside saveBlobUrlToFile's onBlobReady hook — the blob URL is still live.
- */
-async function performCloudUpload(
-  blobUrl: string,
-  stateId: string,
-  config: ReturnType<typeof loadSettings> extends Promise<infer T> ? T : never,
-): Promise<void> {
-  const state = await getDownload(stateId);
-  if (!state) return;
-  // Skip DRM content
-  if (state.metadata.hasDrm) return;
-
-  const storageConfig = {
-    googleDrive: {
-      enabled: config.googleDrive.enabled,
-      autoUpload: config.googleDrive.autoUpload,
-      targetFolderId: config.googleDrive.targetFolderId,
-      createFolderIfNotExists: config.googleDrive.createFolderIfNotExists,
-      folderName: config.googleDrive.folderName,
-    },
-    s3: {
-      enabled: config.s3.enabled,
-      autoUpload: config.s3.autoUpload,
-      bucket: config.s3.bucket,
-      region: config.s3.region,
-      endpoint: config.s3.endpoint,
-      accessKeyId: config.s3.accessKeyId,
-      secretAccessKey: await resolveS3Secret(config.s3),
-      prefix: config.s3.prefix,
-    },
-  };
-
-  const uploadManager = new UploadManager({
-    config: storageConfig,
-    onProgress: (uploaded, total) => {
-      const pct = total > 0 ? Math.round((uploaded / total) * 100) : 0;
-      state.progress.percentage = pct;
-      state.progress.message = `Uploading... ${pct}%`;
-      try {
-        chrome.runtime.sendMessage(
-          { type: MessageType.UPLOAD_PROGRESS, payload: { id: stateId, progress: state.progress } },
-          () => { if (chrome.runtime.lastError) {} },
-        );
-      } catch (_) {}
-    },
-    onStateUpdate: async (updatedState) => {
-      await storeDownload(updatedState);
-      try {
-        chrome.runtime.sendMessage(
-          { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: updatedState.id, progress: updatedState.progress } },
-          () => { if (chrome.runtime.lastError) {} },
-        );
-      } catch (_) {}
-    },
-  });
-
-  if (!uploadManager.isConfigured()) return;
-
-  try {
-    // Set UPLOADING stage immediately so the popup can show it
-    state.progress.stage = DownloadStage.UPLOADING;
-    state.progress.message = "Uploading to cloud...";
-    state.progress.percentage = 0;
-    await storeDownload(state);
-    try {
-      chrome.runtime.sendMessage(
-        { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: stateId, progress: state.progress } },
-        () => { if (chrome.runtime.lastError) {} },
-      );
-    } catch (_) {}
-
-    const filename = state.localPath?.split(/[/\\]/).pop() ?? "video.mp4";
-    const links = await uploadManager.uploadFromBlobUrl(blobUrl, filename, state);
-
-    // Persist cloud links (markCompleted will run after this and set COMPLETED)
-    const freshState = await getDownload(stateId);
-    if (freshState) {
-      freshState.cloudLinks = links;
-      freshState.uploadError = undefined;
-      await storeDownload(freshState);
-    }
-    logger.info(`Cloud upload complete for ${stateId}:`, links);
-  } catch (err) {
-    logger.error("Cloud upload failed:", err);
-    const freshState = await getDownload(stateId);
-    if (freshState) {
-      freshState.uploadError = err instanceof Error ? err.message : String(err);
-      await storeDownload(freshState);
-    }
-  }
-}
-
-/**
  * Process download request
  * Validates request, checks for duplicates, creates download manager, and starts download
  */
 async function handleDownloadRequest(payload: {
   url: string;
   filename?: string;
-  uploadToDrive?: boolean;
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
@@ -617,7 +521,6 @@ async function handleDownloadRequest(payload: {
   const {
     url,
     filename,
-    uploadToDrive,
     metadata,
     tabTitle,
     website,
@@ -716,11 +619,6 @@ async function handleDownloadRequest(payload: {
         // Ignore errors - popup/content script might not be listening
       }
     },
-    uploadToDrive: uploadToDrive || config?.googleDrive?.enabled || false,
-    onBlobReady: (config.googleDrive.autoUpload && config.googleDrive.enabled) ||
-                 (config.s3.autoUpload && config.s3.enabled)
-      ? (blobUrl: string, stateId: string) => performCloudUpload(blobUrl, stateId, config)
-      : undefined,
   });
 
   // Create AbortController for this download to enable real-time cancellation
@@ -810,17 +708,23 @@ async function handleDownloadRequest(payload: {
  */
 async function handleUploadRequestMessage(payload: {
   downloadId: string;
-  fileBytes?: number[]; // ArrayBuffer serialized as number[] from popup
+  fileBytes?: ArrayBuffer;
 }): Promise<{ success: boolean; error?: string }> {
   try {
     const { downloadId, fileBytes } = payload;
     const state = await getDownload(downloadId);
     if (!state) return { success: false, error: "Download not found" };
     if (state.metadata.hasDrm) return { success: false, error: "DRM-protected content cannot be uploaded" };
-    if (!fileBytes?.length) return { success: false, error: "No file data provided" };
+    if (!fileBytes?.byteLength) return { success: false, error: "No file data provided" };
+
+    // Clear any previous upload error so the UI reflects the retry in progress
+    if (state.uploadError) {
+      state.uploadError = undefined;
+      await storeDownload(state);
+    }
 
     const config = await loadSettings();
-    const blob = new Blob([new Uint8Array(fileBytes)], { type: "video/mp4" });
+    const blob = new Blob([fileBytes], { type: "video/mp4" });
     const filename = state.localPath?.split(/[/\\]/).pop() ?? "video.mp4";
 
     const storageConfig = {
@@ -864,7 +768,15 @@ async function handleUploadRequestMessage(payload: {
     return { success: true };
   } catch (err) {
     logger.error("Upload request failed:", err);
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    const errMsg = err instanceof Error ? err.message : String(err);
+    // Persist the error so the popup can show a retry button
+    const failedState = await getDownload(payload.downloadId);
+    if (failedState) {
+      failedState.uploadError = errMsg;
+      failedState.progress.stage = DownloadStage.COMPLETED;
+      await storeDownload(failedState);
+    }
+    return { success: false, error: errMsg };
   }
 }
 

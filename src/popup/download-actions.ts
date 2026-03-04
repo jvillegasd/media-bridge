@@ -176,12 +176,6 @@ export async function handleUploadDownload(downloadId: string): Promise<void> {
       return;
     }
 
-    const filename = download.localPath?.split(/[/\\]/).pop();
-    const hint = filename
-      ? `Select the file "${filename}" to upload it to cloud storage.`
-      : "Select the downloaded file to upload it to cloud storage.";
-    alert(hint);
-
     // @ts-ignore — showOpenFilePicker is available in Chrome extension popups
     const [fileHandle] = await (window as any).showOpenFilePicker({
       multiple: false,
@@ -189,8 +183,7 @@ export async function handleUploadDownload(downloadId: string): Promise<void> {
     });
 
     const file: File = await fileHandle.getFile();
-    const buffer = await file.arrayBuffer();
-    const fileBytes = Array.from(new Uint8Array(buffer));
+    const fileBytes: ArrayBuffer = await file.arrayBuffer();
 
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage(

@@ -297,12 +297,13 @@ function renderDownloadItem(download: DownloadState): string {
     if (s3Link) {
       parts.push(`<button class="btn-cloud-link btn-copy-s3" data-s3-url="${escapeHtml(s3Link)}" title="Copy S3 URL">&#x29C9; S3 URL</button>`);
     }
-    if (!driveLink && !s3Link && uploadError) {
-      parts.push(`<span class="upload-error-hint" title="${escapeHtml(uploadError)}">&#x26A0; Upload failed</span>`);
-    }
-    // Deferred upload button (shown when no cloud links yet and no ongoing upload)
-    if (!driveLink && !s3Link && !uploadError) {
-      parts.push(`<button class="btn-upload-deferred" data-download-id="${escapeHtml(download.id)}" title="Upload to cloud storage">&#x2B06; Upload</button>`);
+    // Deferred upload / retry button (shown when no cloud links yet)
+    if (!driveLink && !s3Link) {
+      const label = uploadError ? "&#x21BA; Retry upload" : "&#x2B06; Upload";
+      const title = uploadError
+        ? `Upload failed: ${escapeHtml(uploadError)} — click to retry`
+        : "Upload to cloud storage";
+      parts.push(`<button class="btn-upload-deferred" data-download-id="${escapeHtml(download.id)}" title="${title}">${label}</button>`);
     }
 
     if (parts.length > 0) {

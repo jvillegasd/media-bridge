@@ -230,7 +230,6 @@ export class HlsDownloadHandler extends BasePlaylistHandler {
         blobUrl,
         finalFilename,
         stateId,
-        this.onBlobReady ? (url) => this.onBlobReady!(url, stateId) : undefined,
       );
 
       const completionMessage = warning

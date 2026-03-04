@@ -29,9 +29,6 @@ export interface DownloadManagerOptions {
   /** Optional callback for download progress updates */
   onProgress?: DownloadProgressCallback;
 
-  /** Whether to upload completed downloads to Google Drive @default false */
-  uploadToDrive?: boolean;
-
   /** FFmpeg processing timeout in milliseconds @default 900000 (15 minutes) */
   ffmpegTimeout?: number;
 
@@ -61,10 +58,6 @@ export interface DownloadManagerOptions {
 
   /** Fraction of #EXT-X-TARGETDURATION used to compute HLS poll cadence (default: 0.5) */
   pollFraction?: number;
-
-  /** Called after Chrome saves the file but BEFORE the blob URL is revoked.
-   *  Use to upload the blob to cloud storage while it's still alive. */
-  onBlobReady?: (blobUrl: string, stateId: string) => Promise<void>;
 }
 
 /**
@@ -74,7 +67,6 @@ export interface DownloadManagerOptions {
 export class DownloadManager {
   private readonly maxConcurrent: number;
   private readonly onProgress?: DownloadProgressCallback;
-  private readonly uploadToDrive: boolean;
   private readonly directDownloadHandler: DirectDownloadHandler;
   private readonly hlsDownloadHandler: HlsDownloadHandler;
   private readonly m3u8DownloadHandler: M3u8DownloadHandler;
@@ -87,7 +79,6 @@ export class DownloadManager {
   constructor(options: DownloadManagerOptions = {}) {
     this.maxConcurrent = options.maxConcurrent || DEFAULT_MAX_CONCURRENT;
     this.onProgress = options.onProgress;
-    this.uploadToDrive = options.uploadToDrive || false;
     const ffmpegTimeout = options.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
 
     const sharedOptions = {
@@ -103,7 +94,6 @@ export class DownloadManager {
       minPollIntervalMs: options.minPollIntervalMs,
       maxPollIntervalMs: options.maxPollIntervalMs,
       pollFraction: options.pollFraction,
-      onBlobReady: options.onBlobReady,
     };
 
     // Initialize direct download handler

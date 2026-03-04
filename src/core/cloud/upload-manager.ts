@@ -1,8 +1,5 @@
 /**
  * Cloud upload orchestration — Google Drive + S3.
- *
- * Designed to be called from the service worker BEFORE blob URL revocation
- * (i.e. inside the onBlobReady callback passed to saveBlobUrlToFile).
  */
 
 import { GoogleDriveClient } from "./google-drive";

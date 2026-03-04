@@ -48,9 +48,6 @@ export interface BasePlaylistHandlerOptions {
   minPollIntervalMs?: number;
   maxPollIntervalMs?: number;
   pollFraction?: number;
-  /** Called after Chrome saves the file to disk but BEFORE the blob URL is revoked.
-   *  Receives the live blob URL and the download state ID. */
-  onBlobReady?: (blobUrl: string, stateId: string) => Promise<void>;
 }
 
 export abstract class BasePlaylistHandler {
@@ -66,7 +63,7 @@ export abstract class BasePlaylistHandler {
   protected readonly minPollIntervalMs: number;
   protected readonly maxPollIntervalMs: number;
   protected readonly pollFraction: number;
-  protected readonly onBlobReady?: (blobUrl: string, stateId: string) => Promise<void>;
+
 
   protected downloadId: string = "";
   protected bytesDownloaded: number = 0;
@@ -94,7 +91,6 @@ export abstract class BasePlaylistHandler {
     this.minPollIntervalMs = options.minPollIntervalMs ?? DEFAULT_MIN_POLL_MS;
     this.maxPollIntervalMs = options.maxPollIntervalMs ?? DEFAULT_MAX_POLL_MS;
     this.pollFraction = options.pollFraction ?? DEFAULT_POLL_FRACTION;
-    this.onBlobReady = options.onBlobReady;
   }
 
   // ---- Shared utility methods ----
@@ -509,7 +505,6 @@ export abstract class BasePlaylistHandler {
       blobUrl,
       `${baseFileName}.mp4`,
       stateId,
-      this.onBlobReady ? (url) => this.onBlobReady!(url, stateId) : undefined,
     );
 
     const completionMessage = warning

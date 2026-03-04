@@ -276,12 +276,10 @@ async function loadDriveSettings(): Promise<void> {
   const config = await loadSettings();
 
   const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
-  const autoUploadCb = document.getElementById("drive-auto-upload") as HTMLInputElement;
   const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
   const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
 
   enabledCb.checked = config.googleDrive.enabled;
-  autoUploadCb.checked = config.googleDrive.autoUpload;
   folderNameIn.value = config.googleDrive.folderName;
   folderIdIn.value = config.googleDrive.targetFolderId ?? "";
 
@@ -355,14 +353,12 @@ async function saveDriveSettings(): Promise<void> {
 
   try {
     const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
-    const autoUploadCb = document.getElementById("drive-auto-upload") as HTMLInputElement;
     const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
     const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
 
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.googleDrive = {
       enabled: enabledCb.checked,
-      autoUpload: autoUploadCb.checked,
       folderName: folderNameIn.value || DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
       targetFolderId: folderIdIn.value || undefined,
       createFolderIfNotExists: true,
@@ -403,7 +399,6 @@ async function loadS3Settings(): Promise<void> {
     if (s3SettingsEl) s3SettingsEl.style.display = enabledCb.checked ? "block" : "none";
   });
 
-  inp("s3-auto-upload").checked = s3.autoUpload;
   inp("s3-bucket").value = s3.bucket ?? "";
   inp("s3-region").value = s3.region ?? "";
   inp("s3-endpoint").value = s3.endpoint ?? "";
@@ -581,7 +576,6 @@ async function saveS3Settings(): Promise<void> {
 
     config.s3 = {
       enabled: checked("s3-enabled"),
-      autoUpload: checked("s3-auto-upload"),
       bucket: get("s3-bucket") || undefined,
       region: get("s3-region") || undefined,
       endpoint: get("s3-endpoint") || undefined,
