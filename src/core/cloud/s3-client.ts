@@ -26,10 +26,11 @@ export interface S3UploadResult {
   key: string;
 }
 
-// Multipart threshold: 100 MB
-const MULTIPART_THRESHOLD = 100 * 1024 * 1024;
-// Part size for multipart: 10 MB
+// S3 requires each part to be >= 5 MB (except the last). Use 10 MB parts.
+// Threshold matches part size so every file >= 10 MB gets chunked progress.
+// Files < 10 MB are uploaded as a single PUT (S3 rejects multipart parts < 5 MB).
 const PART_SIZE = 10 * 1024 * 1024;
+const MULTIPART_THRESHOLD = PART_SIZE;
 
 export class S3Client {
   private readonly config: S3Config;
