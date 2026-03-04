@@ -33,6 +33,10 @@ export interface DetectionManagerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
   /** Optional callback for removed videos */
   onVideoRemoved?: (url: string) => void;
+  /** Max distinct URL path keys tracked per page (default: 500) */
+  detectionCacheSize?: number;
+  /** Max master playlists held in memory by HLS handler (default: 50) */
+  masterPlaylistCacheSize?: number;
 }
 
 /**
@@ -59,9 +63,12 @@ export class DetectionManager {
     this.hlsHandler = new HlsDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
       onVideoRemoved: (url) => this.handleVideoRemoved(url),
+      detectionCacheSize: options.detectionCacheSize,
+      masterPlaylistCacheSize: options.masterPlaylistCacheSize,
     });
     this.dashHandler = new DashDetectionHandler({
       onVideoDetected: (video) => this.handleVideoDetected(video),
+      detectionCacheSize: options.detectionCacheSize,
     });
   }
 

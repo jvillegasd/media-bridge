@@ -763,6 +763,11 @@
       color: var(--warning);
     }
 
+    .badge-live {
+      background: rgba(248, 113, 113, 0.15);
+      color: #f87171;
+    }
+
     .history-actions {
       display: flex;
       align-items: center;
@@ -1018,6 +1023,30 @@
           <span>History</span>
         </button>
 
+        <button class="nav-item" data-view="recording" title="Recording">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"></circle>
+          </svg>
+          <span>Recording</span>
+        </button>
+
+        <button class="nav-item" data-view="notifications" title="Notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+          <span>Notifications</span>
+        </button>
+
+        <button class="nav-item" data-view="advanced" title="Advanced">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+          <span>Advanced</span>
+        </button>
+
       </nav>
 
       <div class="sidebar-footer">
@@ -1260,6 +1289,219 @@
           </svg>
           <span>History is disabled. Enable "Save history" above to start tracking downloads.</span>
         </div>
+      </div>
+
+      <!-- ===== Recording View ===== -->
+      <div id="view-recording" class="view">
+        <div class="view-header">
+          <h1>Recording</h1>
+          <p>Configure live stream recording poll intervals and behaviour.</p>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">HLS Poll Interval</h2>
+          <div class="form-group">
+            <label class="form-label" for="poll-min">Minimum poll interval (ms)</label>
+            <input
+              type="number"
+              id="poll-min"
+              class="form-input"
+              min="500"
+              max="5000"
+              step="100"
+              value="1000"
+              style="max-width: 140px;"
+            />
+            <div class="form-help">Floor for computed poll cadence (500–5 000 ms).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="poll-max">Maximum poll interval (ms)</label>
+            <input
+              type="number"
+              id="poll-max"
+              class="form-input"
+              min="2000"
+              max="30000"
+              step="500"
+              value="10000"
+              style="max-width: 140px;"
+            />
+            <div class="form-help">Ceiling for computed poll cadence (2 000–30 000 ms).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="poll-fraction">Poll fraction</label>
+            <input
+              type="number"
+              id="poll-fraction"
+              class="form-input"
+              min="0.25"
+              max="1.0"
+              step="0.05"
+              value="0.5"
+              style="max-width: 140px;"
+            />
+            <div class="form-help">Fraction of <code>#EXT-X-TARGETDURATION</code> used to compute poll cadence (0.25–1.0).</div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="save-recording-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+        <div id="recording-status" class="status-msg"></div>
+      </div>
+
+      <!-- ===== Notifications View ===== -->
+      <div id="view-notifications" class="view">
+        <div class="view-header">
+          <h1>Notifications</h1>
+          <p>Control OS notifications and post-download actions.</p>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Post-Download</h2>
+          <div class="form-group">
+            <label class="toggle-row" style="margin-top:0;">
+              <input type="checkbox" id="notify-on-completion">
+              <span>Notify on completion</span>
+            </label>
+            <div class="form-help" style="margin-top:6px;">Show an OS notification when a download finishes.</div>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row" style="margin-top:0;">
+              <input type="checkbox" id="auto-open-file">
+              <span>Auto-open file when done</span>
+            </label>
+            <div class="form-help" style="margin-top:6px;">Reveal the saved file in Finder / Explorer after download completes.</div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="save-notification-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+        <div id="notification-status" class="status-msg"></div>
+      </div>
+
+      <!-- ===== Advanced View ===== -->
+      <div id="view-advanced" class="view">
+        <div class="view-header">
+          <h1>Advanced</h1>
+          <p>Fine-tune retry behaviour, detection caches, and internal write frequency.</p>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Retry &amp; Reliability</h2>
+          <div class="form-group">
+            <label class="form-label" for="max-retries">Max segment retries</label>
+            <input
+              type="number"
+              id="max-retries"
+              class="form-input"
+              min="1"
+              max="10"
+              value="3"
+              style="max-width: 120px;"
+            />
+            <div class="form-help">Number of times to retry a failed segment or manifest fetch (1–10).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="retry-delay">Retry initial delay (ms)</label>
+            <input
+              type="number"
+              id="retry-delay"
+              class="form-input"
+              min="50"
+              max="1000"
+              step="10"
+              value="100"
+              style="max-width: 120px;"
+            />
+            <div class="form-help">First backoff wait after a fetch failure (50–1 000 ms).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="retry-backoff">Retry backoff multiplier</label>
+            <input
+              type="number"
+              id="retry-backoff"
+              class="form-input"
+              min="1.0"
+              max="3.0"
+              step="0.05"
+              value="1.15"
+              style="max-width: 120px;"
+            />
+            <div class="form-help">Exponential growth factor applied after each retry (1.0–3.0).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="failure-rate">Fragment failure tolerance (%)</label>
+            <input
+              type="number"
+              id="failure-rate"
+              class="form-input"
+              min="5"
+              max="50"
+              step="1"
+              value="10"
+              style="max-width: 120px;"
+            />
+            <div class="form-help">Download is aborted when more than this percentage of segments fail (5–50%).</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Detection Caches</h2>
+          <div class="form-group">
+            <label class="form-label" for="detection-cache-size">URL deduplication cache size</label>
+            <input
+              type="number"
+              id="detection-cache-size"
+              class="form-input"
+              min="100"
+              max="2000"
+              step="50"
+              value="500"
+              style="max-width: 140px;"
+            />
+            <div class="form-help">Max distinct URL path keys tracked per page by HLS and DASH handlers (100–2 000).</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="master-playlist-cache-size">Master playlist cache size</label>
+            <input
+              type="number"
+              id="master-playlist-cache-size"
+              class="form-input"
+              min="10"
+              max="200"
+              step="5"
+              value="50"
+              style="max-width: 140px;"
+            />
+            <div class="form-help">Max HLS master playlists held in memory per page (10–200).</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Performance</h2>
+          <div class="form-group">
+            <label class="form-label" for="db-sync-interval">IndexedDB sync interval (ms)</label>
+            <input
+              type="number"
+              id="db-sync-interval"
+              class="form-input"
+              min="100"
+              max="2000"
+              step="50"
+              value="500"
+              style="max-width: 140px;"
+            />
+            <div class="form-help">How often download state is written to IndexedDB during segment downloads. Lower values increase write frequency.</div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="save-advanced-settings" class="btn btn-primary">Save Settings</button>
+          <button id="reset-advanced-settings" class="btn btn-danger">Reset to defaults</button>
+        </div>
+        <div id="advanced-status" class="status-msg"></div>
       </div>
 
     </main>

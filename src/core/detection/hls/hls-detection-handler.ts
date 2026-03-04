@@ -36,6 +36,7 @@ import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
 import { extractThumbnail } from "../thumbnail-utils";
 import { hasDrm, canDecrypt } from "../../utils/drm-utils";
+import { DEFAULT_DETECTION_CACHE_SIZE, DEFAULT_MASTER_PLAYLIST_CACHE_SIZE } from "../../../shared/constants";
 
 /** Configuration options for HlsDetectionHandler */
 export interface HlsDetectionHandlerOptions {
@@ -43,6 +44,10 @@ export interface HlsDetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
   /** Optional callback for removed videos */
   onVideoRemoved?: (url: string) => void;
+  /** Max distinct URL path keys tracked per page (default: 500) */
+  detectionCacheSize?: number;
+  /** Max master playlists held in memory (default: 50) */
+  masterPlaylistCacheSize?: number;
 }
 
 /** Internal structure for tracking master playlist information */
@@ -51,9 +56,6 @@ interface MasterPlaylistInfo {
   variantUrls: Set<string>;
   variantPathKeys: Set<string>;
 }
-
-const MAX_SEEN_PATH_KEYS = 500;
-const MAX_MASTER_PLAYLISTS = 50;
 
 /**
  * HLS detection handler
@@ -66,6 +68,8 @@ export class HlsDetectionHandler {
   private masterPlaylists: Map<string, MasterPlaylistInfo> = new Map();
   // Deduplicate HLS URLs by origin+pathname (ignoring query params like tokens/timestamps)
   private seenPathKeys: Set<string> = new Set();
+  private readonly maxSeenPathKeys: number;
+  private readonly maxMasterPlaylists: number;
 
   /**
    * Create a new HlsDetectionHandler instance
@@ -74,6 +78,8 @@ export class HlsDetectionHandler {
   constructor(options: HlsDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
     this.onVideoRemoved = options.onVideoRemoved;
+    this.maxSeenPathKeys = options.detectionCacheSize ?? DEFAULT_DETECTION_CACHE_SIZE;
+    this.maxMasterPlaylists = options.masterPlaylistCacheSize ?? DEFAULT_MASTER_PLAYLIST_CACHE_SIZE;
   }
 
   /**
@@ -101,7 +107,7 @@ export class HlsDetectionHandler {
       return null;
     }
     // Evict oldest entries if over limit
-    if (this.seenPathKeys.size >= MAX_SEEN_PATH_KEYS) {
+    if (this.seenPathKeys.size >= this.maxSeenPathKeys) {
       const first = this.seenPathKeys.values().next().value;
       if (first) this.seenPathKeys.delete(first);
     }
@@ -238,7 +244,7 @@ export class HlsDetectionHandler {
     });
 
     // Evict oldest master playlists if over limit
-    if (this.masterPlaylists.size >= MAX_MASTER_PLAYLISTS) {
+    if (this.masterPlaylists.size >= this.maxMasterPlaylists) {
       const firstKey = this.masterPlaylists.keys().next().value;
       if (firstKey) this.masterPlaylists.delete(firstKey);
     }

@@ -23,6 +23,13 @@ import { addHeaderRules, removeHeaderRules } from "./header-rules";
 import {
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_FFMPEG_TIMEOUT_MS,
+  DEFAULT_MAX_RETRIES,
+  INITIAL_RETRY_DELAY_MS,
+  RETRY_BACKOFF_FACTOR,
+  DEFAULT_DB_SYNC_INTERVAL_MS,
+  DEFAULT_MIN_POLL_MS,
+  DEFAULT_MAX_POLL_MS,
+  DEFAULT_POLL_FRACTION,
   MAX_FRAGMENT_FAILURE_RATE,
   SAVING_STAGE_PERCENTAGE,
 } from "../../shared/constants";
@@ -33,6 +40,14 @@ export interface BasePlaylistHandlerOptions {
   ffmpegTimeout?: number;
   shouldSaveOnCancel?: () => boolean;
   selectedBandwidth?: number;
+  maxRetries?: number;
+  retryDelayMs?: number;
+  retryBackoffFactor?: number;
+  fragmentFailureRate?: number;
+  dbSyncIntervalMs?: number;
+  minPollIntervalMs?: number;
+  maxPollIntervalMs?: number;
+  pollFraction?: number;
 }
 
 export abstract class BasePlaylistHandler {
@@ -41,6 +56,13 @@ export abstract class BasePlaylistHandler {
   protected readonly ffmpegTimeout: number;
   protected readonly shouldSaveOnCancel?: () => boolean;
   protected readonly selectedBandwidth?: number;
+  protected readonly maxRetries: number;
+  protected readonly retryDelayMs: number;
+  protected readonly retryBackoffFactor: number;
+  protected readonly fragmentFailureRate: number;
+  protected readonly minPollIntervalMs: number;
+  protected readonly maxPollIntervalMs: number;
+  protected readonly pollFraction: number;
 
   protected downloadId: string = "";
   protected bytesDownloaded: number = 0;
@@ -52,7 +74,7 @@ export abstract class BasePlaylistHandler {
   private cachedState: DownloadState | null = null;
   private lastDbSyncTime: number = 0;
   private static readonly SPEED_EMA_ALPHA = 0.3;
-  private static readonly DB_SYNC_INTERVAL_MS = 500;
+  private readonly dbSyncIntervalMs: number;
 
   constructor(options: BasePlaylistHandlerOptions = {}) {
     this.onProgress = options.onProgress;
@@ -60,6 +82,14 @@ export abstract class BasePlaylistHandler {
     this.ffmpegTimeout = options.ffmpegTimeout || DEFAULT_FFMPEG_TIMEOUT_MS;
     this.shouldSaveOnCancel = options.shouldSaveOnCancel;
     this.selectedBandwidth = options.selectedBandwidth;
+    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.retryDelayMs = options.retryDelayMs ?? INITIAL_RETRY_DELAY_MS;
+    this.retryBackoffFactor = options.retryBackoffFactor ?? RETRY_BACKOFF_FACTOR;
+    this.fragmentFailureRate = options.fragmentFailureRate ?? MAX_FRAGMENT_FAILURE_RATE;
+    this.dbSyncIntervalMs = options.dbSyncIntervalMs ?? DEFAULT_DB_SYNC_INTERVAL_MS;
+    this.minPollIntervalMs = options.minPollIntervalMs ?? DEFAULT_MIN_POLL_MS;
+    this.maxPollIntervalMs = options.maxPollIntervalMs ?? DEFAULT_MAX_POLL_MS;
+    this.pollFraction = options.pollFraction ?? DEFAULT_POLL_FRACTION;
   }
 
   // ---- Shared utility methods ----
@@ -133,7 +163,7 @@ export abstract class BasePlaylistHandler {
     state.progress.lastDownloaded = downloadedBytes;
 
     // Throttle DB writes to reduce I/O during fragment downloads
-    if (now - this.lastDbSyncTime >= BasePlaylistHandler.DB_SYNC_INTERVAL_MS) {
+    if (now - this.lastDbSyncTime >= this.dbSyncIntervalMs) {
       this.lastDbSyncTime = now;
       await storeDownload(state);
     }
@@ -220,13 +250,13 @@ export abstract class BasePlaylistHandler {
 
   protected async fetchTextCancellable(
     url: string,
-    retries: number = 3,
+    retries?: number,
   ): Promise<string> {
     if (!this.abortSignal) {
       throw new Error("AbortSignal is required for cancellable fetch");
     }
     return cancelIfAborted(
-      fetchText(url, retries, this.abortSignal),
+      fetchText(url, retries ?? this.maxRetries, this.abortSignal, undefined, undefined, this.retryDelayMs, this.retryBackoffFactor),
       this.abortSignal,
     );
   }
@@ -234,19 +264,20 @@ export abstract class BasePlaylistHandler {
   protected async downloadFragment(
     fragment: Fragment,
     downloadId: string,
-    fetchAttempts: number = 3,
+    fetchAttempts?: number,
   ): Promise<number> {
     if (!this.abortSignal) {
       throw new Error("AbortSignal is required for fragment download");
     }
 
+    const attempts = fetchAttempts ?? this.maxRetries;
     const data = await cancelIfAborted(
-      fetchArrayBuffer(fragment.uri, fetchAttempts, this.abortSignal),
+      fetchArrayBuffer(fragment.uri, attempts, this.abortSignal, undefined, this.retryDelayMs, this.retryBackoffFactor),
       this.abortSignal,
     );
 
     const decryptedData = await cancelIfAborted(
-      decryptFragment(fragment.key, data, fetchAttempts, this.abortSignal),
+      decryptFragment(fragment.key, data, attempts, this.abortSignal, undefined, this.retryDelayMs, this.retryBackoffFactor),
       this.abortSignal,
     );
 
@@ -418,8 +449,8 @@ export abstract class BasePlaylistHandler {
       logger.warn(
         `Downloaded ${downloadedFragments}/${totalFragments} fragments (${failedCount} failed).`,
       );
-      // Abort if more than 10% of fragments failed — output would be too corrupted
-      if (failureRate > MAX_FRAGMENT_FAILURE_RATE) {
+      // Abort if too many fragments failed — output would be too corrupted
+      if (failureRate > this.fragmentFailureRate) {
         throw new Error(
           `Too many fragment failures: ${failedCount}/${totalFragments} failed (${Math.round(failureRate * 100)}%). Aborting to avoid corrupted output.`,
         );

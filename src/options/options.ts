@@ -23,6 +23,16 @@ import {
   DEFAULT_MAX_CONCURRENT,
   STORAGE_CONFIG_KEY,
   MAX_CONCURRENT_KEY,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_MIN_POLL_MS,
+  DEFAULT_MAX_POLL_MS,
+  DEFAULT_POLL_FRACTION,
+  DEFAULT_DETECTION_CACHE_SIZE,
+  DEFAULT_MASTER_PLAYLIST_CACHE_SIZE,
+  DEFAULT_DB_SYNC_INTERVAL_MS,
+  INITIAL_RETRY_DELAY_MS,
+  RETRY_BACKOFF_FACTOR,
+  MAX_FRAGMENT_FAILURE_RATE,
 } from "../shared/constants";
 
 const STATUS_MESSAGE_DURATION_MS = 4000;
@@ -43,7 +53,8 @@ function init(): void {
 
   // Check URL hash to navigate directly to a view (e.g. opened via history button)
   const hash = location.hash.slice(1);
-  switchView(hash === "history" || hash === "cloud-providers" ? hash : "download-settings");
+  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced"]);
+  switchView(validViews.has(hash) ? hash : "download-settings");
 }
 
 function setupNavigation(): void {
@@ -83,6 +94,9 @@ function switchView(viewId: string): void {
     loadS3Settings();
     setupCloudProviderTabs();
   }
+  if (viewId === "recording") loadRecordingSettings();
+  if (viewId === "notifications") loadNotificationSettings();
+  if (viewId === "advanced") loadAdvancedSettings();
 }
 
 // ─────────────────────────────────────────────
@@ -668,6 +682,7 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   const badges = document.createElement("div");
   badges.className = "history-badges";
   badges.appendChild(makeBadge(state.metadata.format, "badge-format"));
+  if (state.metadata.isLive) badges.appendChild(makeBadge("live", "badge-live"));
   if (state.metadata.resolution || state.metadata.quality) {
     badges.appendChild(
       makeBadge((state.metadata.resolution || state.metadata.quality)!, "badge-resolution"),
@@ -838,29 +853,22 @@ function syncBulkBar(): void {
 }
 
 async function redownload(url: string, metadata?: VideoMetadata): Promise<void> {
+  const resolvedMetadata: VideoMetadata = metadata ?? { url, format: "unknown" as any, pageUrl: url };
+  const isLive = resolvedMetadata.isLive === true;
+
   let website: string | undefined;
   try {
-    const urlObj = new URL(metadata?.pageUrl ?? url);
-    website = urlObj.hostname.replace(/^www\./, "");
+    website = new URL(resolvedMetadata.pageUrl ?? url).hostname.replace(/^www\./, "");
   } catch {}
-  const tabTitle = metadata?.title;
 
   try {
     const response = await chrome.runtime.sendMessage({
-      type: MessageType.DOWNLOAD_REQUEST,
-      payload: {
-        url,
-        metadata: metadata ?? { url, format: "unknown" as any, pageUrl: url },
-        tabTitle,
-        website,
-      },
+      type: isLive ? MessageType.START_RECORDING : MessageType.DOWNLOAD_REQUEST,
+      payload: { url, metadata: resolvedMetadata, tabTitle: metadata?.title, website },
     });
-    if (response?.error) {
-      showToast(response.error, "error");
-    } else {
-      showToast("Download queued", "success");
-      await fetchAndRenderHistory();
-    }
+    if (response?.error) return showToast(response.error, "error");
+    showToast(isLive ? "Recording started" : "Download queued", "success");
+    await fetchAndRenderHistory();
   } catch {
     showToast("Failed to start download", "error");
   }
@@ -984,6 +992,186 @@ function iconQuestion(): string {
 function iconSpinner(): string {
   // A simple arc that spins via CSS animation
   return `<circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10"></circle>`;
+}
+
+// ─────────────────────────────────────────────
+// Section: Recording View
+// ─────────────────────────────────────────────
+
+async function loadRecordingSettings(): Promise<void> {
+  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+  const rec = config?.recording;
+
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  get("poll-min").value = (rec?.minPollIntervalMs ?? DEFAULT_MIN_POLL_MS).toString();
+  get("poll-max").value = (rec?.maxPollIntervalMs ?? DEFAULT_MAX_POLL_MS).toString();
+  get("poll-fraction").value = (rec?.pollFraction ?? DEFAULT_POLL_FRACTION).toString();
+
+  document
+    .getElementById("save-recording-settings")
+    ?.addEventListener("click", saveRecordingSettings);
+}
+
+async function saveRecordingSettings(): Promise<void> {
+  const btn = document.getElementById("save-recording-settings") as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+    const minPollIntervalMs = Math.max(500, Math.min(5000, parseInt(get("poll-min").value) || DEFAULT_MIN_POLL_MS));
+    const maxPollIntervalMs = Math.max(2000, Math.min(30000, parseInt(get("poll-max").value) || DEFAULT_MAX_POLL_MS));
+    const pollFraction = Math.max(0.25, Math.min(1.0, parseFloat(get("poll-fraction").value) || DEFAULT_POLL_FRACTION));
+
+    if (minPollIntervalMs >= maxPollIntervalMs) {
+      showStatus("recording-status", "Minimum poll interval must be less than maximum.", "error");
+      return;
+    }
+
+    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    config.recording = { minPollIntervalMs, maxPollIntervalMs, pollFraction };
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    showStatus("recording-status", "Settings saved.", "success");
+  } catch (err) {
+    showStatus("recording-status", `Save failed: ${errorMsg(err)}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save Settings";
+  }
+}
+
+// ─────────────────────────────────────────────
+// Section: Notifications View
+// ─────────────────────────────────────────────
+
+async function loadNotificationSettings(): Promise<void> {
+  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+  const notif = config?.notifications;
+
+  const notifyCb = document.getElementById("notify-on-completion") as HTMLInputElement;
+  const autoOpenCb = document.getElementById("auto-open-file") as HTMLInputElement;
+
+  notifyCb.checked = notif?.notifyOnCompletion ?? false;
+  autoOpenCb.checked = notif?.autoOpenFile ?? false;
+
+  document
+    .getElementById("save-notification-settings")
+    ?.addEventListener("click", saveNotificationSettings);
+}
+
+async function saveNotificationSettings(): Promise<void> {
+  const btn = document.getElementById("save-notification-settings") as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    const notifyCb = document.getElementById("notify-on-completion") as HTMLInputElement;
+    const autoOpenCb = document.getElementById("auto-open-file") as HTMLInputElement;
+
+    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    config.notifications = {
+      notifyOnCompletion: notifyCb.checked,
+      autoOpenFile: autoOpenCb.checked,
+    };
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    showStatus("notification-status", "Settings saved.", "success");
+  } catch (err) {
+    showStatus("notification-status", `Save failed: ${errorMsg(err)}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save Settings";
+  }
+}
+
+// ─────────────────────────────────────────────
+// Section: Advanced View
+// ─────────────────────────────────────────────
+
+async function loadAdvancedSettings(): Promise<void> {
+  const config = await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY);
+  const adv = config?.advanced;
+
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  get("max-retries").value = (adv?.maxRetries ?? DEFAULT_MAX_RETRIES).toString();
+  get("retry-delay").value = (adv?.retryDelayMs ?? INITIAL_RETRY_DELAY_MS).toString();
+  get("retry-backoff").value = (adv?.retryBackoffFactor ?? RETRY_BACKOFF_FACTOR).toString();
+  get("failure-rate").value = Math.round((adv?.fragmentFailureRate ?? MAX_FRAGMENT_FAILURE_RATE) * 100).toString();
+  get("detection-cache-size").value = (adv?.detectionCacheSize ?? DEFAULT_DETECTION_CACHE_SIZE).toString();
+  get("master-playlist-cache-size").value = (adv?.masterPlaylistCacheSize ?? DEFAULT_MASTER_PLAYLIST_CACHE_SIZE).toString();
+  get("db-sync-interval").value = (adv?.dbSyncIntervalMs ?? DEFAULT_DB_SYNC_INTERVAL_MS).toString();
+
+  document
+    .getElementById("save-advanced-settings")
+    ?.addEventListener("click", saveAdvancedSettings);
+  document
+    .getElementById("reset-advanced-settings")
+    ?.addEventListener("click", resetAdvancedSettings);
+}
+
+async function saveAdvancedSettings(): Promise<void> {
+  const btn = document.getElementById("save-advanced-settings") as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+    const maxRetries = Math.max(1, Math.min(10, parseInt(get("max-retries").value) || DEFAULT_MAX_RETRIES));
+    const retryDelayMs = Math.max(50, Math.min(1000, parseInt(get("retry-delay").value) || INITIAL_RETRY_DELAY_MS));
+    const retryBackoffFactor = Math.max(1.0, Math.min(3.0, parseFloat(get("retry-backoff").value) || RETRY_BACKOFF_FACTOR));
+    const fragmentFailureRate = Math.max(0.05, Math.min(0.5, (parseInt(get("failure-rate").value) || Math.round(MAX_FRAGMENT_FAILURE_RATE * 100)) / 100));
+    const detectionCacheSize = Math.max(100, Math.min(2000, parseInt(get("detection-cache-size").value) || DEFAULT_DETECTION_CACHE_SIZE));
+    const masterPlaylistCacheSize = Math.max(10, Math.min(200, parseInt(get("master-playlist-cache-size").value) || DEFAULT_MASTER_PLAYLIST_CACHE_SIZE));
+    const dbSyncIntervalMs = Math.max(100, Math.min(2000, parseInt(get("db-sync-interval").value) || DEFAULT_DB_SYNC_INTERVAL_MS));
+
+    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    config.advanced = {
+      maxRetries,
+      retryDelayMs,
+      retryBackoffFactor,
+      fragmentFailureRate,
+      detectionCacheSize,
+      masterPlaylistCacheSize,
+      dbSyncIntervalMs,
+    };
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    showStatus("advanced-status", "Settings saved.", "success");
+  } catch (err) {
+    showStatus("advanced-status", `Save failed: ${errorMsg(err)}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save Settings";
+  }
+}
+
+async function resetAdvancedSettings(): Promise<void> {
+  const btn = document.getElementById("reset-advanced-settings") as HTMLButtonElement;
+  btn.disabled = true;
+
+  try {
+    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    delete config.advanced;
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+
+    // Re-render inputs with defaults
+    const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+    get("max-retries").value = DEFAULT_MAX_RETRIES.toString();
+    get("retry-delay").value = INITIAL_RETRY_DELAY_MS.toString();
+    get("retry-backoff").value = RETRY_BACKOFF_FACTOR.toString();
+    get("failure-rate").value = Math.round(MAX_FRAGMENT_FAILURE_RATE * 100).toString();
+    get("detection-cache-size").value = DEFAULT_DETECTION_CACHE_SIZE.toString();
+    get("master-playlist-cache-size").value = DEFAULT_MASTER_PLAYLIST_CACHE_SIZE.toString();
+    get("db-sync-interval").value = DEFAULT_DB_SYNC_INTERVAL_MS.toString();
+
+    showStatus("advanced-status", "Reset to defaults.", "success");
+  } catch (err) {
+    showStatus("advanced-status", `Reset failed: ${errorMsg(err)}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ─────────────────────────────────────────────

@@ -21,23 +21,7 @@ import {
 import { logger } from "../../utils/logger";
 import { MessageType } from "../../../shared/messages";
 import { BaseRecordingHandler } from "../base-recording-handler";
-
-const DEFAULT_POLL_INTERVAL_MS = 3000;
-const MIN_POLL_INTERVAL_MS = 1000;
-const MAX_POLL_INTERVAL_MS = 10000;
-const POLL_INTERVAL_FRACTION = 0.5;
-
-/**
- * Extract #EXT-X-TARGETDURATION from playlist text and compute a poll interval.
- * Polls at half the target duration to avoid missing segments.
- */
-function computePollInterval(playlistText: string): number {
-  const match = playlistText.match(/#EXT-X-TARGETDURATION:\s*(\d+(?:\.\d+)?)/);
-  if (!match) return DEFAULT_POLL_INTERVAL_MS;
-  const targetDuration = parseFloat(match[1]!) * 1000;
-  const interval = Math.round(targetDuration * POLL_INTERVAL_FRACTION);
-  return Math.max(MIN_POLL_INTERVAL_MS, Math.min(interval, MAX_POLL_INTERVAL_MS));
-}
+import { DEFAULT_HLS_POLL_INTERVAL_MS } from "../../../shared/constants";
 
 export class HlsRecordingHandler extends BaseRecordingHandler {
   /**
@@ -49,7 +33,7 @@ export class HlsRecordingHandler extends BaseRecordingHandler {
     url: string,
     abortSignal: AbortSignal,
   ): Promise<{ mediaUrl: string; finalUrl: string }> {
-    const { text, finalUrl: masterFinalUrl } = await fetchTextWithFinalUrl(url, 3, abortSignal);
+    const { text, finalUrl: masterFinalUrl } = await fetchTextWithFinalUrl(url, this.maxRetries, abortSignal, undefined, this.retryDelayMs, this.retryBackoffFactor);
 
     if (!text.includes("#EXT-X-STREAM-INF")) {
       logger.info(
@@ -85,15 +69,26 @@ export class HlsRecordingHandler extends BaseRecordingHandler {
     abortSignal: AbortSignal,
     seenUris: Set<string>,
   ): Promise<{ fragments: Fragment[]; pollIntervalMs: number; ended: boolean }> {
-    const playlistText = await fetchText(url, 3, abortSignal, true);
+    const playlistText = await fetchText(url, this.maxRetries, abortSignal, true, undefined, this.retryDelayMs, this.retryBackoffFactor);
 
     const allFragments = parseLevelsPlaylist(parseMediaPlaylist(playlistText, url));
     const newFragments = allFragments.filter((f) => !seenUris.has(f.uri));
 
     const ended = playlistText.includes("#EXT-X-ENDLIST");
-    const pollIntervalMs = computePollInterval(playlistText);
+    const pollIntervalMs = this.computePollInterval(playlistText);
 
     return { fragments: newFragments, pollIntervalMs, ended };
+  }
+
+  /**
+   * Compute HLS poll interval from #EXT-X-TARGETDURATION using configured fraction and clamps.
+   */
+  private computePollInterval(playlistText: string): number {
+    const match = playlistText.match(/#EXT-X-TARGETDURATION:\s*(\d+(?:\.\d+)?)/);
+    if (!match) return DEFAULT_HLS_POLL_INTERVAL_MS;
+    const targetDuration = parseFloat(match[1]!) * 1000;
+    const interval = Math.round(targetDuration * this.pollFraction);
+    return Math.max(this.minPollIntervalMs, Math.min(interval, this.maxPollIntervalMs));
   }
 
   /**

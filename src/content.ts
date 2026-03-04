@@ -4,10 +4,11 @@
  */
 
 import { MessageType } from "./shared/messages";
-import { VideoMetadata, VideoFormat } from "./core/types";
+import { VideoMetadata, VideoFormat, StorageConfig } from "./core/types";
 import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
 import { logger } from "./core/utils/logger";
+import { STORAGE_CONFIG_KEY } from "./shared/constants";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
@@ -158,13 +159,16 @@ function addDetectedVideo(video: VideoMetadata) {
  * Initialize content script
  * Sets up detection manager, performs initial scan, and monitors DOM changes
  */
-function init() {
+async function init() {
   // Reset icon to gray on page load (only from top frame)
   if (!inIframe) {
     safeSendMessage({
       type: MessageType.SET_ICON_GRAY,
     });
   }
+
+  const stored = await chrome.storage.local.get(STORAGE_CONFIG_KEY);
+  const config: StorageConfig | undefined = stored[STORAGE_CONFIG_KEY];
 
   detectionManager = new DetectionManager({
     onVideoDetected: (video) => {
@@ -173,6 +177,8 @@ function init() {
     onVideoRemoved: (url) => {
       removeDetectedVideo(url);
     },
+    detectionCacheSize: config?.advanced?.detectionCacheSize,
+    masterPlaylistCacheSize: config?.advanced?.masterPlaylistCacheSize,
   });
 
   // Initialize all detection mechanisms

@@ -14,12 +14,13 @@ import { normalizeUrl } from "../../utils/url-utils";
 import { logger } from "../../utils/logger";
 import { extractThumbnail } from "../thumbnail-utils";
 import { isLive, hasDrm } from "../../parsers/mpd-parser";
+import { DEFAULT_DETECTION_CACHE_SIZE } from "../../../shared/constants";
 
 export interface DashDetectionHandlerOptions {
   onVideoDetected?: (video: VideoMetadata) => void;
+  /** Max distinct URL path keys tracked per page (default: 500) */
+  detectionCacheSize?: number;
 }
-
-const MAX_SEEN_PATH_KEYS = 500;
 
 /**
  * DASH detection handler — detects .mpd manifest URLs
@@ -27,9 +28,11 @@ const MAX_SEEN_PATH_KEYS = 500;
 export class DashDetectionHandler {
   private onVideoDetected?: (video: VideoMetadata) => void;
   private seenPathKeys: Set<string> = new Set();
+  private readonly maxSeenPathKeys: number;
 
   constructor(options: DashDetectionHandlerOptions = {}) {
     this.onVideoDetected = options.onVideoDetected;
+    this.maxSeenPathKeys = options.detectionCacheSize ?? DEFAULT_DETECTION_CACHE_SIZE;
   }
 
   destroy(): void {
@@ -48,7 +51,7 @@ export class DashDetectionHandler {
     // Deduplicate by origin+pathname — ignores auth tokens in query params
     const pathKey = this.getPathKey(url);
     if (this.seenPathKeys.has(pathKey)) return null;
-    if (this.seenPathKeys.size >= MAX_SEEN_PATH_KEYS) {
+    if (this.seenPathKeys.size >= this.maxSeenPathKeys) {
       const first = this.seenPathKeys.values().next().value;
       if (first) this.seenPathKeys.delete(first);
     }
