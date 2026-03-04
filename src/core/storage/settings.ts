@@ -22,6 +22,7 @@ import {
   DEFAULT_MASTER_PLAYLIST_CACHE_SIZE,
   DEFAULT_DB_SYNC_INTERVAL_MS,
   STORAGE_CONFIG_KEY,
+  DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
 } from "../../shared/constants";
 
 export interface AppSettings {
@@ -80,7 +81,7 @@ export async function loadSettings(): Promise<AppSettings> {
       enabled: raw?.googleDrive?.enabled ?? false,
       targetFolderId: raw?.googleDrive?.targetFolderId,
       createFolderIfNotExists: raw?.googleDrive?.createFolderIfNotExists ?? false,
-      folderName: raw?.googleDrive?.folderName ?? "MediaBridge Uploads",
+      folderName: raw?.googleDrive?.folderName ?? DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
     },
 
     s3: {

@@ -79,3 +79,6 @@ export const DEFAULT_DB_SYNC_INTERVAL_MS = 500;
 // ---- Chrome storage keys ----
 
 export const STORAGE_CONFIG_KEY = "storage_config";
+
+/** Default Google Drive upload folder name */
+export const DEFAULT_GOOGLE_DRIVE_FOLDER_NAME = "MediaBridge Uploads";

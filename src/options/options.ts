@@ -33,9 +33,34 @@ import {
   INITIAL_RETRY_DELAY_MS,
   RETRY_BACKOFF_FACTOR,
   MAX_FRAGMENT_FAILURE_RATE,
+  DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
 } from "../shared/constants";
 
-const STATUS_MESSAGE_DURATION_MS = 4000;
+import {
+  TOAST_DURATION_MS,
+  MS_PER_DAY,
+  MIN_POLL_MIN_MS,
+  MAX_POLL_MIN_MS,
+  MIN_POLL_MAX_MS,
+  MAX_POLL_MAX_MS,
+  MIN_POLL_FRACTION,
+  MAX_POLL_FRACTION,
+  MIN_MAX_RETRIES,
+  MAX_MAX_RETRIES,
+  MIN_RETRY_DELAY_MS,
+  MAX_RETRY_DELAY_MS,
+  MIN_RETRY_BACKOFF_FACTOR,
+  MAX_RETRY_BACKOFF_FACTOR,
+  MIN_FAILURE_RATE,
+  MAX_FAILURE_RATE,
+  MIN_DETECTION_CACHE_SIZE,
+  MAX_DETECTION_CACHE_SIZE,
+  MIN_MASTER_PLAYLIST_CACHE_SIZE,
+  MAX_MASTER_PLAYLIST_CACHE_SIZE,
+  MIN_DB_SYNC_INTERVAL_MS,
+  MAX_DB_SYNC_INTERVAL_MS,
+} from "./constants";
+
 const FINISHED_STAGES = new Set([
   DownloadStage.COMPLETED,
   DownloadStage.FAILED,
@@ -183,9 +208,9 @@ async function saveDownloadSettings(): Promise<void> {
     config.maxConcurrent = parseInt(maxInput.value) || DEFAULT_MAX_CONCURRENT;
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
 
-    showStatus("settings-status", "Settings saved.", "success");
+    showStatus("Settings saved.", "success");
   } catch (err) {
-    showStatus("settings-status", `Save failed: ${errorMsg(err)}`, "error");
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Save Settings";
@@ -276,10 +301,10 @@ async function handleAuth(): Promise<void> {
   btn.textContent = "Authenticating…";
   try {
     await GoogleAuth.authenticate(GOOGLE_DRIVE_SCOPES);
-    showStatus("drive-status", "Authenticated with Google.", "success");
+    showStatus("Authenticated with Google.", "success");
     await checkAuthStatus();
   } catch (err) {
-    showStatus("drive-status", `Authentication failed: ${errorMsg(err)}`, "error");
+    showStatus(`Authentication failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Sign in with Google";
@@ -289,10 +314,10 @@ async function handleAuth(): Promise<void> {
 async function handleSignOut(): Promise<void> {
   try {
     await GoogleAuth.signOut();
-    showStatus("drive-status", "Signed out.", "success");
+    showStatus("Signed out.", "success");
     await checkAuthStatus();
   } catch (err) {
-    showStatus("drive-status", `Sign out failed: ${errorMsg(err)}`, "error");
+    showStatus(`Sign out failed: ${errorMsg(err)}`, "error");
   }
 }
 
@@ -309,14 +334,14 @@ async function saveDriveSettings(): Promise<void> {
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.googleDrive = {
       enabled: enabledCb.checked,
-      folderName: folderNameIn.value || "MediaBridge Uploads",
+      folderName: folderNameIn.value || DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
       targetFolderId: folderIdIn.value || undefined,
       createFolderIfNotExists: true,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
-    showStatus("drive-status", "Settings saved.", "success");
+    showStatus("Settings saved.", "success");
   } catch (err) {
-    showStatus("drive-status", `Save failed: ${errorMsg(err)}`, "error");
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Save Settings";
@@ -363,9 +388,9 @@ async function saveS3Settings(): Promise<void> {
       prefix: get("s3-prefix") || undefined,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
-    showStatus("s3-status", "Settings saved.", "success");
+    showStatus("Settings saved.", "success");
   } catch (err) {
-    showStatus("s3-status", `Save failed: ${errorMsg(err)}`, "error");
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Save Settings";
@@ -560,10 +585,9 @@ function applyFilters(all: DownloadState[]): DownloadState[] {
 function dateInRange(ts: number, range: string): boolean {
   if (range === "all") return true;
   const now = Date.now();
-  const day = 86400_000;
-  if (range === "today") return ts >= now - day;
-  if (range === "week") return ts >= now - 7 * day;
-  if (range === "month") return ts >= now - 30 * day;
+  if (range === "today") return ts >= now - MS_PER_DAY;
+  if (range === "week") return ts >= now - 7 * MS_PER_DAY;
+  if (range === "month") return ts >= now - 30 * MS_PER_DAY;
   return true;
 }
 
@@ -882,7 +906,7 @@ function showToast(message: string, type: "success" | "error" | "warning"): void
   toast.classList.remove("show");
   void toast.offsetWidth;
   toast.classList.add("show");
-  toastTimer = setTimeout(() => toast.classList.remove("show"), 3000);
+  toastTimer = setTimeout(() => toast.classList.remove("show"), TOAST_DURATION_MS);
 }
 
 async function checkManifest(url: string): Promise<void> {
@@ -906,17 +930,8 @@ async function checkManifest(url: string): Promise<void> {
 // Section: Utilities
 // ─────────────────────────────────────────────
 
-function showStatus(
-  elementId: string,
-  message: string,
-  type: "success" | "error" | "info",
-): void {
-  const el = document.getElementById(elementId);
-  if (!el) return;
-  el.className = `status-msg ${type}`;
-  el.textContent = message;
-  el.style.display = "block";
-  setTimeout(() => (el.style.display = "none"), STATUS_MESSAGE_DURATION_MS);
+function showStatus(message: string, type: "success" | "error" | "warning" | "info"): void {
+  showToast(message, type === "info" ? "warning" : type);
 }
 
 function errorMsg(err: unknown): string {
@@ -937,8 +952,8 @@ function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
   if (diff < 60_000) return "just now";
   if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
-  return `${Math.floor(diff / 86400_000)}d ago`;
+  if (diff < MS_PER_DAY) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / MS_PER_DAY)}d ago`;
 }
 
 // ─────────────────────────────────────────────
@@ -1008,21 +1023,21 @@ async function saveRecordingSettings(): Promise<void> {
   try {
     const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-    const minPollIntervalMs = Math.max(500, Math.min(5000, parseInt(get("poll-min").value) || DEFAULT_MIN_POLL_MS));
-    const maxPollIntervalMs = Math.max(2000, Math.min(30000, parseInt(get("poll-max").value) || DEFAULT_MAX_POLL_MS));
-    const pollFraction = Math.max(0.25, Math.min(1.0, parseFloat(get("poll-fraction").value) || DEFAULT_POLL_FRACTION));
+    const minPollIntervalMs = Math.max(MIN_POLL_MIN_MS, Math.min(MAX_POLL_MIN_MS, parseInt(get("poll-min").value) || DEFAULT_MIN_POLL_MS));
+    const maxPollIntervalMs = Math.max(MIN_POLL_MAX_MS, Math.min(MAX_POLL_MAX_MS, parseInt(get("poll-max").value) || DEFAULT_MAX_POLL_MS));
+    const pollFraction = Math.max(MIN_POLL_FRACTION, Math.min(MAX_POLL_FRACTION, parseFloat(get("poll-fraction").value) || DEFAULT_POLL_FRACTION));
 
     if (minPollIntervalMs >= maxPollIntervalMs) {
-      showStatus("recording-status", "Minimum poll interval must be less than maximum.", "error");
+      showStatus("Minimum poll interval must be less than maximum.", "error");
       return;
     }
 
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.recording = { minPollIntervalMs, maxPollIntervalMs, pollFraction };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
-    showStatus("recording-status", "Settings saved.", "success");
+    showStatus("Settings saved.", "success");
   } catch (err) {
-    showStatus("recording-status", `Save failed: ${errorMsg(err)}`, "error");
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Save Settings";
@@ -1062,9 +1077,9 @@ async function saveNotificationSettings(): Promise<void> {
       autoOpenFile: autoOpenCb.checked,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
-    showStatus("notification-status", "Settings saved.", "success");
+    showStatus("Settings saved.", "success");
   } catch (err) {
-    showStatus("notification-status", `Save failed: ${errorMsg(err)}`, "error");
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Save Settings";
@@ -1104,13 +1119,13 @@ async function saveAdvancedSettings(): Promise<void> {
   try {
     const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-    const maxRetries = Math.max(1, Math.min(10, parseInt(get("max-retries").value) || DEFAULT_MAX_RETRIES));
-    const retryDelayMs = Math.max(50, Math.min(1000, parseInt(get("retry-delay").value) || INITIAL_RETRY_DELAY_MS));
-    const retryBackoffFactor = Math.max(1.0, Math.min(3.0, parseFloat(get("retry-backoff").value) || RETRY_BACKOFF_FACTOR));
-    const fragmentFailureRate = Math.max(0.05, Math.min(0.5, (parseInt(get("failure-rate").value) || Math.round(MAX_FRAGMENT_FAILURE_RATE * 100)) / 100));
-    const detectionCacheSize = Math.max(100, Math.min(2000, parseInt(get("detection-cache-size").value) || DEFAULT_DETECTION_CACHE_SIZE));
-    const masterPlaylistCacheSize = Math.max(10, Math.min(200, parseInt(get("master-playlist-cache-size").value) || DEFAULT_MASTER_PLAYLIST_CACHE_SIZE));
-    const dbSyncIntervalMs = Math.max(100, Math.min(2000, parseInt(get("db-sync-interval").value) || DEFAULT_DB_SYNC_INTERVAL_MS));
+    const maxRetries = Math.max(MIN_MAX_RETRIES, Math.min(MAX_MAX_RETRIES, parseInt(get("max-retries").value) || DEFAULT_MAX_RETRIES));
+    const retryDelayMs = Math.max(MIN_RETRY_DELAY_MS, Math.min(MAX_RETRY_DELAY_MS, parseInt(get("retry-delay").value) || INITIAL_RETRY_DELAY_MS));
+    const retryBackoffFactor = Math.max(MIN_RETRY_BACKOFF_FACTOR, Math.min(MAX_RETRY_BACKOFF_FACTOR, parseFloat(get("retry-backoff").value) || RETRY_BACKOFF_FACTOR));
+    const fragmentFailureRate = Math.max(MIN_FAILURE_RATE, Math.min(MAX_FAILURE_RATE, (parseInt(get("failure-rate").value) || Math.round(MAX_FRAGMENT_FAILURE_RATE * 100)) / 100));
+    const detectionCacheSize = Math.max(MIN_DETECTION_CACHE_SIZE, Math.min(MAX_DETECTION_CACHE_SIZE, parseInt(get("detection-cache-size").value) || DEFAULT_DETECTION_CACHE_SIZE));
+    const masterPlaylistCacheSize = Math.max(MIN_MASTER_PLAYLIST_CACHE_SIZE, Math.min(MAX_MASTER_PLAYLIST_CACHE_SIZE, parseInt(get("master-playlist-cache-size").value) || DEFAULT_MASTER_PLAYLIST_CACHE_SIZE));
+    const dbSyncIntervalMs = Math.max(MIN_DB_SYNC_INTERVAL_MS, Math.min(MAX_DB_SYNC_INTERVAL_MS, parseInt(get("db-sync-interval").value) || DEFAULT_DB_SYNC_INTERVAL_MS));
 
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.advanced = {
@@ -1123,9 +1138,9 @@ async function saveAdvancedSettings(): Promise<void> {
       dbSyncIntervalMs,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
-    showStatus("advanced-status", "Settings saved.", "success");
+    showStatus("Settings saved.", "success");
   } catch (err) {
-    showStatus("advanced-status", `Save failed: ${errorMsg(err)}`, "error");
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Save Settings";
@@ -1151,9 +1166,9 @@ async function resetAdvancedSettings(): Promise<void> {
     get("master-playlist-cache-size").value = DEFAULT_MASTER_PLAYLIST_CACHE_SIZE.toString();
     get("db-sync-interval").value = DEFAULT_DB_SYNC_INTERVAL_MS.toString();
 
-    showStatus("advanced-status", "Reset to defaults.", "success");
+    showStatus("Reset to defaults.", "success");
   } catch (err) {
-    showStatus("advanced-status", `Reset failed: ${errorMsg(err)}`, "error");
+    showStatus(`Reset failed: ${errorMsg(err)}`, "error");
   } finally {
     btn.disabled = false;
   }

@@ -460,33 +460,6 @@
       color: #dc2626;
     }
 
-    /* ---- Status Messages ---- */
-    .status-msg {
-      padding: 11px 14px;
-      border-radius: var(--radius-sm);
-      margin-top: 12px;
-      font-size: 13px;
-      border-left: 3px solid transparent;
-      display: none;
-    }
-
-    .status-msg.success {
-      background: var(--surface-1);
-      border-left-color: var(--success);
-      color: var(--success);
-    }
-
-    .status-msg.error {
-      background: var(--surface-1);
-      border-left-color: var(--error);
-      color: var(--error);
-    }
-
-    .status-msg.info {
-      background: var(--surface-1);
-      border-left-color: var(--info);
-      color: var(--info);
-    }
 
     /* ---- Provider Tabs ---- */
     .provider-tabs {
@@ -1113,7 +1086,6 @@
         <div class="btn-row">
           <button id="save-download-settings" class="btn btn-primary">Save Settings</button>
         </div>
-        <div id="settings-status" class="status-msg"></div>
       </div>
 
       <!-- ===== Cloud Providers View ===== -->
@@ -1168,7 +1140,6 @@
           <div class="btn-row">
             <button id="save-drive-settings" class="btn btn-primary">Save Settings</button>
           </div>
-          <div id="drive-status" class="status-msg"></div>
         </div>
 
         <!-- S3 Panel -->
@@ -1226,7 +1197,6 @@
           <div class="btn-row">
             <button id="save-s3-settings" class="btn btn-primary">Save Settings</button>
           </div>
-          <div id="s3-status" class="status-msg"></div>
         </div>
       </div>
 
@@ -1347,7 +1317,6 @@
         <div class="btn-row">
           <button id="save-recording-settings" class="btn btn-primary">Save Settings</button>
         </div>
-        <div id="recording-status" class="status-msg"></div>
       </div>
 
       <!-- ===== Notifications View ===== -->
@@ -1378,7 +1347,6 @@
         <div class="btn-row">
           <button id="save-notification-settings" class="btn btn-primary">Save Settings</button>
         </div>
-        <div id="notification-status" class="status-msg"></div>
       </div>
 
       <!-- ===== Advanced View ===== -->
@@ -1501,7 +1469,6 @@
           <button id="save-advanced-settings" class="btn btn-primary">Save Settings</button>
           <button id="reset-advanced-settings" class="btn btn-danger">Reset to defaults</button>
         </div>
-        <div id="advanced-status" class="status-msg"></div>
       </div>
 
     </main>
