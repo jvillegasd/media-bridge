@@ -6,7 +6,7 @@
  * need null-checks or scattered `?? DEFAULT_X` fallbacks.
  */
 
-import { StorageConfig } from "../types";
+import { StorageConfig, EncryptedBlob } from "../types";
 import { ChromeStorage } from "./chrome-storage";
 import {
   DEFAULT_MAX_CONCURRENT,
@@ -46,6 +46,7 @@ export interface AppSettings {
     endpoint?: string;
     accessKeyId?: string;
     secretAccessKey?: string;
+    secretKeyEncrypted?: EncryptedBlob;
     prefix?: string;
   };
 
@@ -95,6 +96,7 @@ export async function loadSettings(): Promise<AppSettings> {
       endpoint: raw?.s3?.endpoint,
       accessKeyId: raw?.s3?.accessKeyId,
       secretAccessKey: raw?.s3?.secretAccessKey,
+      secretKeyEncrypted: raw?.s3?.secretKeyEncrypted,
       prefix: raw?.s3?.prefix,
     },
 

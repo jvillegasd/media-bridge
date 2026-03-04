@@ -5,9 +5,10 @@
 
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { loadSettings } from "../core/storage/settings";
+import { SecureStorage } from "../core/storage/secure-storage";
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "../core/cloud/google-auth";
 import { S3Client } from "../core/cloud/s3-client";
-import { StorageConfig, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
+import { StorageConfig, EncryptedBlob, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
 import { MessageType } from "../shared/messages";
 import {
   getAllDownloads,
@@ -407,8 +408,18 @@ async function loadS3Settings(): Promise<void> {
   inp("s3-region").value = s3.region ?? "";
   inp("s3-endpoint").value = s3.endpoint ?? "";
   inp("s3-access-key").value = s3.accessKeyId ?? "";
-  inp("s3-secret-key").value = s3.secretAccessKey ?? "";
+
+  // Show placeholder when secret key is stored encrypted
+  if (s3.secretKeyEncrypted) {
+    inp("s3-secret-key").value = "";
+    inp("s3-secret-key").placeholder = "••••••••  (encrypted — leave blank to keep)";
+  } else {
+    inp("s3-secret-key").value = s3.secretAccessKey ?? "";
+  }
+
   inp("s3-prefix").value = s3.prefix ?? "";
+  inp("s3-passphrase").value = "";
+  inp("s3-passphrase-confirm").value = "";
 
   // Provider preset selector
   const presetSel = document.getElementById("s3-provider-preset") as HTMLSelectElement;
@@ -462,8 +473,32 @@ async function testS3Connection(): Promise<void> {
     const bucket = inp("s3-bucket");
     const region = inp("s3-region");
     const accessKeyId = inp("s3-access-key");
-    const secretAccessKey = inp("s3-secret-key");
     const endpoint = inp("s3-endpoint") || undefined;
+
+    // Resolve secret key: prefer the text field; fall back to decrypting stored blob
+    let secretAccessKey = inp("s3-secret-key");
+    if (!secretAccessKey) {
+      const { s3 } = await loadSettings();
+      if (s3.secretKeyEncrypted) {
+        let passphrase = await SecureStorage.getPassphrase();
+        if (!passphrase) {
+          passphrase = window.prompt("Enter your S3 encryption passphrase to test the connection:") ?? "";
+          if (!passphrase) {
+            resultEl.textContent = "Passphrase required to decrypt the stored secret key.";
+            resultEl.style.color = "var(--error)";
+            return;
+          }
+        }
+        try {
+          secretAccessKey = await SecureStorage.decrypt(s3.secretKeyEncrypted, passphrase);
+          await SecureStorage.setPassphrase(passphrase);
+        } catch {
+          resultEl.textContent = "✗ Wrong passphrase — could not decrypt secret key.";
+          resultEl.style.color = "var(--error)";
+          return;
+        }
+      }
+    }
 
     if (!bucket || !region || !accessKeyId || !secretAccessKey) {
       resultEl.textContent = "Fill in bucket, region, and credentials first.";
@@ -501,7 +536,44 @@ async function saveS3Settings(): Promise<void> {
     const checked = (id: string) =>
       (document.getElementById(id) as HTMLInputElement).checked;
 
+    const passphrase = get("s3-passphrase");
+    const passphraseConfirm = get("s3-passphrase-confirm");
+    const secretKeyRaw = get("s3-secret-key");
+
+    if (passphrase && passphrase !== passphraseConfirm) {
+      showStatus("Passphrases do not match.", "error");
+      return;
+    }
+
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    const existing = config.s3;
+
+    // Determine the secret key to store
+    let secretAccessKey: string | undefined;
+    let secretKeyEncrypted: EncryptedBlob | undefined;
+
+    if (secretKeyRaw) {
+      // User typed a (new) secret key
+      if (passphrase) {
+        secretKeyEncrypted = await SecureStorage.encrypt(secretKeyRaw, passphrase);
+        await SecureStorage.setPassphrase(passphrase);
+        secretAccessKey = undefined;
+      } else {
+        secretAccessKey = secretKeyRaw;
+        secretKeyEncrypted = undefined;
+      }
+    } else {
+      // Secret key field left blank — keep existing stored value
+      secretAccessKey = existing?.secretAccessKey;
+      secretKeyEncrypted = existing?.secretKeyEncrypted;
+      // If new passphrase provided, re-encrypt the existing plaintext key (migration)
+      if (passphrase && secretAccessKey) {
+        secretKeyEncrypted = await SecureStorage.encrypt(secretAccessKey, passphrase);
+        await SecureStorage.setPassphrase(passphrase);
+        secretAccessKey = undefined;
+      }
+    }
+
     config.s3 = {
       enabled: checked("s3-enabled"),
       autoUpload: checked("s3-auto-upload"),
@@ -509,10 +581,14 @@ async function saveS3Settings(): Promise<void> {
       region: get("s3-region") || undefined,
       endpoint: get("s3-endpoint") || undefined,
       accessKeyId: get("s3-access-key") || undefined,
-      secretAccessKey: get("s3-secret-key") || undefined,
+      secretAccessKey,
+      secretKeyEncrypted,
       prefix: get("s3-prefix") || undefined,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+
+    // Reload fields so encrypted placeholder appears
+    await loadS3Settings();
     showStatus("Settings saved.", "success");
   } catch (err) {
     showStatus(`Save failed: ${errorMsg(err)}`, "error");

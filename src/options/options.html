@@ -1085,7 +1085,18 @@
             <div class="form-group">
               <label class="form-label" for="s3-secret-key">Secret Access Key</label>
               <input type="password" id="s3-secret-key" class="form-input" placeholder="••••••••••••••••••••••••••••••••" autocomplete="off" />
-              <div class="form-help">Credentials are stored locally in Chrome storage (unencrypted).</div>
+              <div class="form-help">Leave blank to keep the currently stored key.</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="s3-passphrase">Encryption Passphrase <span style="font-weight:400;color:var(--text-2)">(optional)</span></label>
+              <input type="password" id="s3-passphrase" class="form-input" placeholder="Leave blank to store key unencrypted" autocomplete="new-password" />
+              <div class="form-help">When set, your secret key is encrypted with AES-GCM before being written to disk. You will re-enter this passphrase once per browser session.</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="s3-passphrase-confirm">Confirm Passphrase</label>
+              <input type="password" id="s3-passphrase-confirm" class="form-input" placeholder="Repeat passphrase" autocomplete="new-password" />
             </div>
 
             <div class="form-group">

@@ -16,6 +16,7 @@ import {
 import { UploadManager } from "./core/cloud/upload-manager";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { loadSettings } from "./core/storage/settings";
+import { SecureStorage } from "./core/storage/secure-storage";
 import { MessageType } from "./shared/messages";
 import {
   DownloadState,
@@ -479,6 +480,29 @@ async function cleanupOrphanedChunks(existing: DownloadState) {
 }
 
 /**
+ * Resolve the S3 secret access key, decrypting it if stored as an EncryptedBlob.
+ * Returns undefined and logs a warning if the passphrase is missing from session storage.
+ */
+async function resolveS3Secret(
+  s3: { secretAccessKey?: string; secretKeyEncrypted?: import("./core/types").EncryptedBlob },
+): Promise<string | undefined> {
+  if (s3.secretKeyEncrypted) {
+    const passphrase = await SecureStorage.getPassphrase();
+    if (!passphrase) {
+      logger.warn("S3 upload skipped: passphrase not in session. Open Options → S3 and re-enter your passphrase.");
+      return undefined;
+    }
+    try {
+      return await SecureStorage.decrypt(s3.secretKeyEncrypted, passphrase);
+    } catch {
+      logger.error("S3 upload skipped: failed to decrypt secret key — wrong passphrase?");
+      return undefined;
+    }
+  }
+  return s3.secretAccessKey;
+}
+
+/**
  * Upload a completed download to cloud storage.
  * Called inside saveBlobUrlToFile's onBlobReady hook — the blob URL is still live.
  */
@@ -507,7 +531,7 @@ async function performCloudUpload(
       region: config.s3.region,
       endpoint: config.s3.endpoint,
       accessKeyId: config.s3.accessKeyId,
-      secretAccessKey: config.s3.secretAccessKey,
+      secretAccessKey: await resolveS3Secret(config.s3),
       prefix: config.s3.prefix,
     },
   };
@@ -801,7 +825,7 @@ async function handleUploadRequestMessage(payload: {
 
     const storageConfig = {
       googleDrive: { ...config.googleDrive },
-      s3: { ...config.s3 },
+      s3: { ...config.s3, secretAccessKey: await resolveS3Secret(config.s3) },
     };
 
     const uploadManager = new UploadManager({

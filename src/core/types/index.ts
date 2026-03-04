@@ -87,6 +87,12 @@ export interface DownloadState {
   updatedAt: number;
 }
 
+export interface EncryptedBlob {
+  encrypted: string; // base64 ciphertext
+  iv: string;        // base64 IV
+  salt: string;      // base64 PBKDF2 salt
+}
+
 export interface StorageConfig {
   googleDrive?: {
     enabled: boolean;
@@ -105,7 +111,8 @@ export interface StorageConfig {
     region?: string;
     endpoint?: string; // For S3-compatible providers (Cloudflare R2, Backblaze, etc.)
     accessKeyId?: string;
-    secretAccessKey?: string;
+    secretAccessKey?: string;      // plaintext fallback (no passphrase set)
+    secretKeyEncrypted?: EncryptedBlob; // AES-GCM encrypted secret key (passphrase mode)
     prefix?: string;
   };
   recording?: {
