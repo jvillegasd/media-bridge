@@ -421,6 +421,11 @@ async function loadS3Settings(): Promise<void> {
   inp("s3-passphrase").value = "";
   inp("s3-passphrase-confirm").value = "";
 
+  const confirmGroup = document.getElementById("s3-passphrase-confirm-group") as HTMLElement;
+  inp("s3-passphrase").addEventListener("input", () => {
+    confirmGroup.style.display = inp("s3-passphrase").value ? "block" : "none";
+  });
+
   // Provider preset selector
   const presetSel = document.getElementById("s3-provider-preset") as HTMLSelectElement;
   if (presetSel) {
