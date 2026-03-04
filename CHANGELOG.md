@@ -7,6 +7,10 @@
 
 * update README and CLAUDE.md with accurate architecture and planned features ([94d5efb](https://github.com/jvillegasd/media-bridge/commit/94d5efb27c4a6c2f7c38d91994af7b9c57caf624))
 
+### 🎉 New Features
+
+* Refactored Options UI / UX, enable configurable fields for power users, download history improved
+
 ## [1.9.0](https://github.com/jvillegasd/media-bridge/compare/v1.8.0...v1.9.0) (2026-03-03)
 
 
