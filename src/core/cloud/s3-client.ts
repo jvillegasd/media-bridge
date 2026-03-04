@@ -44,7 +44,9 @@ export class S3Client {
     filename: string,
     onProgress?: (uploadedBytes: number, totalBytes: number) => void,
   ): Promise<S3UploadResult> {
-    const key = this.config.prefix ? `${this.config.prefix.replace(/\/$/, "")}/${filename}` : filename;
+    const key = this.config.prefix
+      ? `${this.config.prefix.replace(/\/$/, "")}/${filename}`
+      : filename;
 
     if (blob.size >= MULTIPART_THRESHOLD) {
       return this.multipartUpload(blob, key, onProgress);
@@ -71,11 +73,16 @@ export class S3Client {
       "Content-Length": String(blob.size),
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": datetime,
-      "Host": new URL(url).host,
+      Host: new URL(url).host,
     };
 
     const authorization = await this.buildAuthorization(
-      "PUT", new URL(url), headers, payloadHash, datetime, date,
+      "PUT",
+      new URL(url),
+      headers,
+      payloadHash,
+      datetime,
+      date,
     );
     headers["Authorization"] = authorization;
     delete headers["Host"]; // fetch adds it automatically
@@ -88,7 +95,10 @@ export class S3Client {
 
     if (!response.ok) {
       const text = await response.text().catch(() => response.statusText);
-      throw new UploadError(`S3 PUT failed (${response.status}): ${text}`, response.status);
+      throw new UploadError(
+        `S3 PUT failed (${response.status}): ${text}`,
+        response.status,
+      );
     }
 
     onProgress?.(blob.size, blob.size);
@@ -149,17 +159,25 @@ export class S3Client {
       "Content-Type": "video/mp4",
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": datetime,
-      "Host": new URL(url).host,
+      Host: new URL(url).host,
     };
     const authorization = await this.buildAuthorization(
-      "POST", new URL(url), headers, payloadHash, datetime, date,
+      "POST",
+      new URL(url),
+      headers,
+      payloadHash,
+      datetime,
+      date,
     );
     headers["Authorization"] = authorization;
     delete headers["Host"];
 
     const response = await fetch(url, { method: "POST", headers });
     if (!response.ok) {
-      throw new UploadError(`Failed to initiate multipart upload: ${response.statusText}`, response.status);
+      throw new UploadError(
+        `Failed to initiate multipart upload: ${response.statusText}`,
+        response.status,
+      );
     }
 
     const xml = await response.text();
@@ -186,17 +204,25 @@ export class S3Client {
       "Content-Length": String(blob.size),
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": datetime,
-      "Host": new URL(url).host,
+      Host: new URL(url).host,
     };
     const authorization = await this.buildAuthorization(
-      "PUT", new URL(url), headers, payloadHash, datetime, date,
+      "PUT",
+      new URL(url),
+      headers,
+      payloadHash,
+      datetime,
+      date,
     );
     headers["Authorization"] = authorization;
     delete headers["Host"];
 
     const response = await fetch(url, { method: "PUT", headers, body: buffer });
     if (!response.ok) {
-      throw new UploadError(`Part ${partNumber} upload failed: ${response.statusText}`, response.status);
+      throw new UploadError(
+        `Part ${partNumber} upload failed: ${response.statusText}`,
+        response.status,
+      );
     }
 
     const etag = response.headers.get("ETag") ?? "";
@@ -212,7 +238,8 @@ export class S3Client {
     const body = [
       "<CompleteMultipartUpload>",
       ...parts.map(
-        (p) => `<Part><PartNumber>${p.PartNumber}</PartNumber><ETag>${p.ETag}</ETag></Part>`,
+        (p) =>
+          `<Part><PartNumber>${p.PartNumber}</PartNumber><ETag>${p.ETag}</ETag></Part>`,
       ),
       "</CompleteMultipartUpload>",
     ].join("");
@@ -226,10 +253,15 @@ export class S3Client {
       "Content-Type": "application/xml",
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": datetime,
-      "Host": new URL(url).host,
+      Host: new URL(url).host,
     };
     const authorization = await this.buildAuthorization(
-      "POST", new URL(url), headers, payloadHash, datetime, date,
+      "POST",
+      new URL(url),
+      headers,
+      payloadHash,
+      datetime,
+      date,
     );
     headers["Authorization"] = authorization;
     delete headers["Host"];
@@ -237,7 +269,10 @@ export class S3Client {
     const response = await fetch(url, { method: "POST", headers, body });
     if (!response.ok) {
       const text = await response.text().catch(() => response.statusText);
-      throw new UploadError(`Failed to complete multipart upload: ${text}`, response.status);
+      throw new UploadError(
+        `Failed to complete multipart upload: ${text}`,
+        response.status,
+      );
     }
   }
 
@@ -251,10 +286,15 @@ export class S3Client {
     const headers: Record<string, string> = {
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": datetime,
-      "Host": new URL(url).host,
+      Host: new URL(url).host,
     };
     const authorization = await this.buildAuthorization(
-      "DELETE", new URL(url), headers, payloadHash, datetime, date,
+      "DELETE",
+      new URL(url),
+      headers,
+      payloadHash,
+      datetime,
+      date,
     );
     headers["Authorization"] = authorization;
     delete headers["Host"];
@@ -279,12 +319,16 @@ export class S3Client {
       .map((k) => k.toLowerCase())
       .sort();
 
-    const canonicalHeaders = signedHeaderNames
-      .map((name) => {
-        const value = headers[Object.keys(headers).find((k) => k.toLowerCase() === name)!];
-        return `${name}:${value.trim()}`;
-      })
-      .join("\n") + "\n";
+    const canonicalHeaders =
+      signedHeaderNames
+        .map((name) => {
+          const value =
+            headers[
+              Object.keys(headers).find((k) => k.toLowerCase() === name)!
+            ];
+          return `${name}:${value.trim()}`;
+        })
+        .join("\n") + "\n";
 
     const signedHeaders = signedHeaderNames.join(";");
 
@@ -313,7 +357,12 @@ export class S3Client {
       await sha256hex(canonicalRequest),
     ].join("\n");
 
-    const signingKey = await deriveSigningKey(this.config.secretAccessKey, date, region, service);
+    const signingKey = await deriveSigningKey(
+      this.config.secretAccessKey,
+      date,
+      region,
+      service,
+    );
     const signature = buf2hex(await hmacSha256(signingKey, stringToSign));
 
     return (
@@ -346,10 +395,15 @@ export class S3Client {
       const headers: Record<string, string> = {
         "x-amz-content-sha256": payloadHash,
         "x-amz-date": datetime,
-        "Host": new URL(url).host,
+        Host: new URL(url).host,
       };
       const authorization = await this.buildAuthorization(
-        "HEAD", new URL(url), headers, payloadHash, datetime, date,
+        "HEAD",
+        new URL(url),
+        headers,
+        payloadHash,
+        datetime,
+        date,
       );
       headers["Authorization"] = authorization;
       delete headers["Host"];
@@ -359,9 +413,15 @@ export class S3Client {
         // 403 = bucket exists but no ListBucket permission — credentials are valid
         return { ok: true };
       }
-      return { ok: false, error: `HTTP ${response.status}: ${response.statusText}` };
+      return {
+        ok: false,
+        error: `HTTP ${response.status}: ${response.statusText}`,
+      };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
@@ -388,7 +448,10 @@ async function sha256hex(data: string | ArrayBuffer): Promise<string> {
   return buf2hex(await crypto.subtle.digest("SHA-256", buf));
 }
 
-async function hmacSha256(key: BufferSource, data: string): Promise<ArrayBuffer> {
+async function hmacSha256(
+  key: BufferSource,
+  data: string,
+): Promise<ArrayBuffer> {
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
     key,
@@ -405,7 +468,10 @@ async function deriveSigningKey(
   region: string,
   service: string,
 ): Promise<ArrayBuffer> {
-  const kDate = await hmacSha256(new TextEncoder().encode(`AWS4${secretKey}`), date);
+  const kDate = await hmacSha256(
+    new TextEncoder().encode(`AWS4${secretKey}`),
+    date,
+  );
   const kRegion = await hmacSha256(kDate, region);
   const kService = await hmacSha256(kRegion, service);
   return hmacSha256(kService, "aws4_request");
