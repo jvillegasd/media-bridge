@@ -76,7 +76,7 @@ function init(): void {
 
   // Check URL hash to navigate directly to a view (e.g. opened via history button)
   const hash = location.hash.slice(1);
-  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced"]);
+  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced", "about"]);
   switchView(validViews.has(hash) ? hash : "download-settings");
 }
 
@@ -120,6 +120,16 @@ function switchView(viewId: string): void {
   if (viewId === "recording") loadRecordingSettings();
   if (viewId === "notifications") loadNotificationSettings();
   if (viewId === "advanced") loadAdvancedSettings();
+  if (viewId === "about") loadAboutSection();
+}
+
+// ─────────────────────────────────────────────
+// Section: About
+// ─────────────────────────────────────────────
+
+function loadAboutSection(): void {
+  const el = document.getElementById("about-version");
+  if (el) el.textContent = chrome.runtime.getManifest().version;
 }
 
 // ─────────────────────────────────────────────

@@ -909,6 +909,15 @@
           <span>Advanced</span>
         </button>
 
+        <button class="nav-item" data-view="about" title="About">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span>About</span>
+        </button>
+
       </nav>
 
       <div class="sidebar-footer">
@@ -1358,6 +1367,27 @@
         <div class="btn-row">
           <button id="save-advanced-settings" class="btn btn-primary">Save Settings</button>
           <button id="reset-advanced-settings" class="btn btn-danger">Reset to defaults</button>
+        </div>
+      </div>
+
+      <!-- ===== About View ===== -->
+      <div id="view-about" class="view">
+        <div class="view-header">
+          <h2 class="view-title">About</h2>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 48px 24px; gap: 16px; text-align:center;">
+          <img src="/icons/icon-128.png" alt="Media Bridge" width="72" height="72" style="border-radius:16px;">
+          <div>
+            <h3 style="font-size:20px; font-weight:700; margin:0 0 4px;">Media Bridge</h3>
+            <p style="font-size:13px; color:var(--text-secondary); margin:0;">Version <span id="about-version">—</span></p>
+          </div>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0;">
+            Download HLS, DASH, and direct media streams directly from your browser.
+          </p>
+          <p style="font-size:14px; margin:0;">
+            Made with ♥ by
+            <a href="https://github.com/jvillegasd" target="_blank" rel="noopener noreferrer" style="color:var(--accent); text-decoration:none; font-weight:500;">jvillegasd</a>
+          </p>
         </div>
       </div>
 
