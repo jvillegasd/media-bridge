@@ -13,18 +13,6 @@ export const DEFAULT_MAX_CONCURRENT = 3;
 /** Default FFmpeg processing timeout in milliseconds (configurable in settings) */
 export const DEFAULT_FFMPEG_TIMEOUT_MS = 900_000; // 15 minutes
 
-/** Default FFmpeg timeout expressed in minutes (for the settings UI) */
-export const DEFAULT_FFMPEG_TIMEOUT_MINUTES = 15;
-
-/** Minimum FFmpeg timeout in minutes (settings UI clamp) */
-export const MIN_FFMPEG_TIMEOUT_MINUTES = 5;
-
-/** Maximum FFmpeg timeout in minutes (settings UI clamp) */
-export const MAX_FFMPEG_TIMEOUT_MINUTES = 60;
-
-/** Milliseconds per minute — avoids bare 60000 literals */
-export const MS_PER_MINUTE = 60_000;
-
 // ---- Download pipeline ----
 
 /** Fragment failure rate above which the download is aborted */

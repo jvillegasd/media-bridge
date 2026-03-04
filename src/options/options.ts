@@ -16,11 +16,6 @@ import {
   clearAllDownloads,
 } from "../core/database/downloads";
 import {
-  DEFAULT_FFMPEG_TIMEOUT_MS,
-  DEFAULT_FFMPEG_TIMEOUT_MINUTES,
-  MIN_FFMPEG_TIMEOUT_MINUTES,
-  MAX_FFMPEG_TIMEOUT_MINUTES,
-  MS_PER_MINUTE,
   DEFAULT_MAX_CONCURRENT,
   STORAGE_CONFIG_KEY,
   DEFAULT_MAX_RETRIES,
@@ -39,16 +34,19 @@ import {
 import {
   TOAST_DURATION_MS,
   MS_PER_DAY,
-  MIN_POLL_MIN_MS,
-  MAX_POLL_MIN_MS,
-  MIN_POLL_MAX_MS,
-  MAX_POLL_MAX_MS,
+  DEFAULT_FFMPEG_TIMEOUT_S,
+  MIN_FFMPEG_TIMEOUT_S,
+  MAX_FFMPEG_TIMEOUT_S,
+  MIN_POLL_MIN_S,
+  MAX_POLL_MIN_S,
+  MIN_POLL_MAX_S,
+  MAX_POLL_MAX_S,
   MIN_POLL_FRACTION,
   MAX_POLL_FRACTION,
   MIN_MAX_RETRIES,
   MAX_MAX_RETRIES,
-  MIN_RETRY_DELAY_MS,
-  MAX_RETRY_DELAY_MS,
+  MIN_RETRY_DELAY_S,
+  MAX_RETRY_DELAY_S,
   MIN_RETRY_BACKOFF_FACTOR,
   MAX_RETRY_BACKOFF_FACTOR,
   MIN_FAILURE_RATE,
@@ -57,8 +55,8 @@ import {
   MAX_DETECTION_CACHE_SIZE,
   MIN_MASTER_PLAYLIST_CACHE_SIZE,
   MAX_MASTER_PLAYLIST_CACHE_SIZE,
-  MIN_DB_SYNC_INTERVAL_MS,
-  MAX_DB_SYNC_INTERVAL_MS,
+  MIN_DB_SYNC_S,
+  MAX_DB_SYNC_S,
 } from "./constants";
 
 const FINISHED_STAGES = new Set([
@@ -179,7 +177,7 @@ async function loadDownloadSettings(): Promise<void> {
   const timeoutInput = document.getElementById("ffmpeg-timeout") as HTMLInputElement;
 
   maxInput.value = config.maxConcurrent.toString();
-  timeoutInput.value = Math.round(config.ffmpegTimeout / MS_PER_MINUTE).toString();
+  timeoutInput.value = Math.round(config.ffmpegTimeout / 1000).toString();
 
   document
     .getElementById("save-download-settings")
@@ -196,15 +194,9 @@ async function saveDownloadSettings(): Promise<void> {
 
   try {
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
-    const timeoutMinutes =
-      parseInt(timeoutInput.value) || DEFAULT_FFMPEG_TIMEOUT_MINUTES;
-    const clampedMs =
-      Math.max(
-        MIN_FFMPEG_TIMEOUT_MINUTES,
-        Math.min(MAX_FFMPEG_TIMEOUT_MINUTES, timeoutMinutes),
-      ) * MS_PER_MINUTE;
-
-    config.ffmpegTimeout = clampedMs;
+    const timeoutSeconds = parseInt(timeoutInput.value) || DEFAULT_FFMPEG_TIMEOUT_S;
+    config.ffmpegTimeout =
+      Math.max(MIN_FFMPEG_TIMEOUT_S, Math.min(MAX_FFMPEG_TIMEOUT_S, timeoutSeconds)) * 1000;
     config.maxConcurrent = parseInt(maxInput.value) || DEFAULT_MAX_CONCURRENT;
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
 
@@ -1006,8 +998,8 @@ async function loadRecordingSettings(): Promise<void> {
 
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-  get("poll-min").value = recording.minPollIntervalMs.toString();
-  get("poll-max").value = recording.maxPollIntervalMs.toString();
+  get("poll-min").value = (recording.minPollIntervalMs / 1000).toString();
+  get("poll-max").value = (recording.maxPollIntervalMs / 1000).toString();
   get("poll-fraction").value = recording.pollFraction.toString();
 
   document
@@ -1023,8 +1015,8 @@ async function saveRecordingSettings(): Promise<void> {
   try {
     const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-    const minPollIntervalMs = Math.max(MIN_POLL_MIN_MS, Math.min(MAX_POLL_MIN_MS, parseInt(get("poll-min").value) || DEFAULT_MIN_POLL_MS));
-    const maxPollIntervalMs = Math.max(MIN_POLL_MAX_MS, Math.min(MAX_POLL_MAX_MS, parseInt(get("poll-max").value) || DEFAULT_MAX_POLL_MS));
+    const minPollIntervalMs = Math.max(MIN_POLL_MIN_S, Math.min(MAX_POLL_MIN_S, parseFloat(get("poll-min").value) || (DEFAULT_MIN_POLL_MS / 1000))) * 1000;
+    const maxPollIntervalMs = Math.max(MIN_POLL_MAX_S, Math.min(MAX_POLL_MAX_S, parseFloat(get("poll-max").value) || (DEFAULT_MAX_POLL_MS / 1000))) * 1000;
     const pollFraction = Math.max(MIN_POLL_FRACTION, Math.min(MAX_POLL_FRACTION, parseFloat(get("poll-fraction").value) || DEFAULT_POLL_FRACTION));
 
     if (minPollIntervalMs >= maxPollIntervalMs) {
@@ -1096,12 +1088,12 @@ async function loadAdvancedSettings(): Promise<void> {
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
   get("max-retries").value = advanced.maxRetries.toString();
-  get("retry-delay").value = advanced.retryDelayMs.toString();
+  get("retry-delay").value = (advanced.retryDelayMs / 1000).toString();
   get("retry-backoff").value = advanced.retryBackoffFactor.toString();
   get("failure-rate").value = Math.round(advanced.fragmentFailureRate * 100).toString();
   get("detection-cache-size").value = advanced.detectionCacheSize.toString();
   get("master-playlist-cache-size").value = advanced.masterPlaylistCacheSize.toString();
-  get("db-sync-interval").value = advanced.dbSyncIntervalMs.toString();
+  get("db-sync-interval").value = (advanced.dbSyncIntervalMs / 1000).toString();
 
   document
     .getElementById("save-advanced-settings")
@@ -1120,12 +1112,12 @@ async function saveAdvancedSettings(): Promise<void> {
     const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
     const maxRetries = Math.max(MIN_MAX_RETRIES, Math.min(MAX_MAX_RETRIES, parseInt(get("max-retries").value) || DEFAULT_MAX_RETRIES));
-    const retryDelayMs = Math.max(MIN_RETRY_DELAY_MS, Math.min(MAX_RETRY_DELAY_MS, parseInt(get("retry-delay").value) || INITIAL_RETRY_DELAY_MS));
+    const retryDelayMs = Math.max(MIN_RETRY_DELAY_S, Math.min(MAX_RETRY_DELAY_S, parseFloat(get("retry-delay").value) || (INITIAL_RETRY_DELAY_MS / 1000))) * 1000;
     const retryBackoffFactor = Math.max(MIN_RETRY_BACKOFF_FACTOR, Math.min(MAX_RETRY_BACKOFF_FACTOR, parseFloat(get("retry-backoff").value) || RETRY_BACKOFF_FACTOR));
     const fragmentFailureRate = Math.max(MIN_FAILURE_RATE, Math.min(MAX_FAILURE_RATE, (parseInt(get("failure-rate").value) || Math.round(MAX_FRAGMENT_FAILURE_RATE * 100)) / 100));
     const detectionCacheSize = Math.max(MIN_DETECTION_CACHE_SIZE, Math.min(MAX_DETECTION_CACHE_SIZE, parseInt(get("detection-cache-size").value) || DEFAULT_DETECTION_CACHE_SIZE));
     const masterPlaylistCacheSize = Math.max(MIN_MASTER_PLAYLIST_CACHE_SIZE, Math.min(MAX_MASTER_PLAYLIST_CACHE_SIZE, parseInt(get("master-playlist-cache-size").value) || DEFAULT_MASTER_PLAYLIST_CACHE_SIZE));
-    const dbSyncIntervalMs = Math.max(MIN_DB_SYNC_INTERVAL_MS, Math.min(MAX_DB_SYNC_INTERVAL_MS, parseInt(get("db-sync-interval").value) || DEFAULT_DB_SYNC_INTERVAL_MS));
+    const dbSyncIntervalMs = Math.max(MIN_DB_SYNC_S, Math.min(MAX_DB_SYNC_S, parseFloat(get("db-sync-interval").value) || (DEFAULT_DB_SYNC_INTERVAL_MS / 1000))) * 1000;
 
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
     config.advanced = {
@@ -1159,12 +1151,12 @@ async function resetAdvancedSettings(): Promise<void> {
     // Re-render inputs with defaults
     const get = (id: string) => document.getElementById(id) as HTMLInputElement;
     get("max-retries").value = DEFAULT_MAX_RETRIES.toString();
-    get("retry-delay").value = INITIAL_RETRY_DELAY_MS.toString();
+    get("retry-delay").value = (INITIAL_RETRY_DELAY_MS / 1000).toString();
     get("retry-backoff").value = RETRY_BACKOFF_FACTOR.toString();
     get("failure-rate").value = Math.round(MAX_FRAGMENT_FAILURE_RATE * 100).toString();
     get("detection-cache-size").value = DEFAULT_DETECTION_CACHE_SIZE.toString();
     get("master-playlist-cache-size").value = DEFAULT_MASTER_PLAYLIST_CACHE_SIZE.toString();
-    get("db-sync-interval").value = DEFAULT_DB_SYNC_INTERVAL_MS.toString();
+    get("db-sync-interval").value = (DEFAULT_DB_SYNC_INTERVAL_MS / 1000).toString();
 
     showStatus("Reset to defaults.", "success");
   } catch (err) {
