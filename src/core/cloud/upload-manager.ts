@@ -148,9 +148,7 @@ export class UploadManager {
     onProgress: (uploaded: number, total: number) => void,
   ) {
     if (!this.googleDrive) return null;
-    const result = await this.googleDrive.uploadFile(blob, filename);
-    onProgress(blob.size, blob.size);
-    return result;
+    return this.googleDrive.uploadFile(blob, filename, onProgress);
   }
 
   isConfigured(): boolean {
