@@ -828,19 +828,6 @@ function makeStageBadge(stage: DownloadStage): HTMLElement {
   return makeBadge(stage, map[stage] ?? "");
 }
 
-function makeIconBtn(
-  svgContent: string,
-  tooltip: string,
-  onClick?: () => void,
-): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.className = "btn-icon";
-  btn.setAttribute("data-tooltip", tooltip);
-  btn.setAttribute("aria-label", tooltip);
-  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgContent}</svg>`;
-  if (onClick) btn.addEventListener("click", onClick);
-  return btn;
-}
 
 function syncBulkBar(): void {
   const bar = document.getElementById("bulk-bar")!;
@@ -984,10 +971,6 @@ function iconQuestion(): string {
   return `<circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>`;
 }
 
-function iconSpinner(): string {
-  // A simple arc that spins via CSS animation
-  return `<circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10"></circle>`;
-}
 
 // ─────────────────────────────────────────────
 // Section: Recording View
