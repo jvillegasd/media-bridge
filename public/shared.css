@@ -142,6 +142,11 @@ body {
   color: var(--success);
 }
 
+.badge-uploaded {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
 .badge-failed {
   background: rgba(248, 113, 113, 0.12);
   color: var(--error);
@@ -178,6 +183,11 @@ body {
   color: #16a34a;
 }
 
+:root.light-mode .badge-uploaded {
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+}
+
 :root.light-mode .badge-failed {
   background: rgba(220, 38, 38, 0.08);
   color: #dc2626;
@@ -186,4 +196,39 @@ body {
 :root.light-mode .badge-cancelled {
   background: rgba(217, 119, 6, 0.08);
   color: #d97706;
+}
+
+/* ---- Segmented Tabs (shared pill style) ---- */
+.seg-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  margin-bottom: 20px;
+  width: fit-content;
+}
+
+.seg-tab {
+  padding: 7px 14px;
+  border: none;
+  outline: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.seg-tab:hover {
+  color: var(--text-primary);
+}
+
+.seg-tab.active {
+  background: var(--surface-3);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }

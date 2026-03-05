@@ -3,11 +3,14 @@
  */
 
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "./google-auth";
+import { BaseCloudProvider, ProgressCallback } from "./base-cloud-provider";
 import { UploadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
+const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 5 * 1024 * 1024; // 5 MB
+const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB — must be a multiple of 256 KB
 
 export interface GoogleDriveConfig {
   targetFolderId?: string;
@@ -20,17 +23,24 @@ export interface UploadResult {
   webViewLink?: string;
 }
 
-export class GoogleDriveClient {
+export class GoogleDriveClient extends BaseCloudProvider {
+  readonly id = 'googleDrive' as const;
   private config: GoogleDriveConfig;
 
   constructor(config: GoogleDriveConfig = {}) {
+    super();
     this.config = config;
   }
 
   /**
-   * Upload file to Google Drive
+   * Upload file to Google Drive. Returns the webViewLink (or fileId as fallback).
    */
-  async uploadFile(blob: Blob, filename: string): Promise<UploadResult> {
+  async upload(
+    blob: Blob,
+    filename: string,
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<string> {
     try {
       const token = await GoogleAuth.getAccessToken(GOOGLE_DRIVE_SCOPES);
 
@@ -42,18 +52,25 @@ export class GoogleDriveClient {
         );
       }
 
-      // For files larger than 5MB, use resumable upload
+      // For files larger than 5MB, use resumable chunked upload
+      let result: UploadResult;
       if (blob.size > RESUMABLE_UPLOAD_THRESHOLD_BYTES) {
-        return await this.resumableUpload(blob, filename, token, folderId);
+        result = await this.resumableUpload(blob, filename, token, folderId, onProgress, signal);
+      } else {
+        // Simple multipart upload for smaller files
+        result = await this.simpleUpload(blob, filename, token, folderId, signal);
       }
 
-      // Simple upload for smaller files
-      return await this.simpleUpload(blob, filename, token, folderId);
+      return result.webViewLink ?? result.fileId;
     } catch (error) {
+      // Abort is expected on cancel — not an error
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw error;
+      }
       logger.error("Google Drive upload failed:", error);
       throw error instanceof UploadError
         ? error
-        : new UploadError(`Upload failed: ${error}`);
+        : new UploadError(`Upload failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -65,6 +82,7 @@ export class GoogleDriveClient {
     filename: string,
     token: string,
     folderId?: string,
+    signal?: AbortSignal,
   ): Promise<UploadResult> {
     const metadata: any = {
       name: filename,
@@ -82,13 +100,14 @@ export class GoogleDriveClient {
     form.append("file", blob);
 
     const response = await fetch(
-      `${DRIVE_API_BASE}/files?uploadType=multipart`,
+      `${DRIVE_UPLOAD_BASE}/files?uploadType=multipart`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
         },
         body: form,
+        signal,
       },
     );
 
@@ -113,77 +132,130 @@ export class GoogleDriveClient {
   }
 
   /**
-   * Resumable upload (for files > 5MB)
+   * Resumable chunked upload (for files > 5 MB).
+   *
+   * Protocol:
+   *  1. POST to initiate session → get Location (session URI)
+   *  2. PUT chunks in CHUNK_SIZE increments with Content-Range header
+   *     - Intermediate chunks → 308 Resume Incomplete; read Range header for offset
+   *     - Final chunk → 200 OK / 201 Created with file metadata
    */
   private async resumableUpload(
     blob: Blob,
     filename: string,
     token: string,
     folderId?: string,
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<UploadResult> {
-    // Step 1: Initialize resumable upload session
-    const metadata: any = {
-      name: filename,
-    };
+    const totalBytes = blob.size;
+    const mimeType = blob.type || "application/octet-stream";
 
-    if (folderId) {
-      metadata.parents = [folderId];
-    }
+    // Step 1: Initiate resumable session
+    const metadata: Record<string, unknown> = { name: filename };
+    if (folderId) metadata.parents = [folderId];
 
     const initResponse = await fetch(
-      `${DRIVE_API_BASE}/files?uploadType=resumable`,
+      `${DRIVE_UPLOAD_BASE}/files?uploadType=resumable`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+          "Content-Type": "application/json; charset=UTF-8",
+          "X-Upload-Content-Type": mimeType,
+          "X-Upload-Content-Length": totalBytes.toString(),
         },
         body: JSON.stringify(metadata),
       },
     );
 
     if (!initResponse.ok) {
-      const error = await initResponse
+      const err = await initResponse
         .json()
         .catch(() => ({ error: { message: initResponse.statusText } }));
       throw new UploadError(
-        `Failed to initialize upload: ${
-          error.error?.message || initResponse.statusText
-        }`,
+        `Failed to initialize resumable upload: ${err.error?.message || initResponse.statusText}`,
         initResponse.status,
       );
     }
 
-    const uploadUrl = initResponse.headers.get("Location");
-    if (!uploadUrl) {
-      throw new UploadError("No upload URL received");
+    const sessionUri = initResponse.headers.get("Location");
+    if (!sessionUri) {
+      throw new UploadError("Drive did not return a resumable session URI");
     }
 
-    // Step 2: Upload file data
-    const uploadResponse = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: {
-        "Content-Type": blob.type || "application/octet-stream",
-        "Content-Length": blob.size.toString(),
-      },
-      body: blob,
-    });
+    // Step 2: Upload chunks
+    let offset = 0;
 
-    if (!uploadResponse.ok) {
-      throw new UploadError(
-        `Upload failed: ${uploadResponse.statusText}`,
-        uploadResponse.status,
-      );
+    while (offset < totalBytes) {
+      signal?.throwIfAborted();
+      const end = Math.min(offset + CHUNK_SIZE, totalBytes);
+      const chunk = blob.slice(offset, end);
+      const chunkSize = end - offset;
+      const isLast = end === totalBytes;
+
+      const response = await fetch(sessionUri, {
+        method: "PUT",
+        headers: {
+          "Content-Length": chunkSize.toString(),
+          "Content-Range": `bytes ${offset}-${end - 1}/${totalBytes}`,
+          "Content-Type": mimeType,
+        },
+        body: chunk,
+        signal,
+      });
+
+      // Session expired — cannot recover without restarting
+      if (response.status === 404) {
+        throw new UploadError("Resumable upload session expired (404)");
+      }
+
+      // 5xx errors: could query server position and retry, but keep it simple
+      if (response.status >= 500) {
+        throw new UploadError(
+          `Server error during chunk upload: ${response.status} ${response.statusText}`,
+          response.status,
+        );
+      }
+
+      if (isLast) {
+        // Final chunk: expect 200 or 201
+        if (response.status !== 200 && response.status !== 201) {
+          throw new UploadError(
+            `Unexpected status for final chunk: ${response.status}`,
+            response.status,
+          );
+        }
+        const result = await response.json();
+        logger.info(`Drive upload complete (resumable): ${result.id}`);
+        onProgress?.(totalBytes, totalBytes);
+        return { fileId: result.id, webViewLink: result.webViewLink };
+      }
+
+      // Intermediate chunk: expect 308 Resume Incomplete
+      if (response.status !== 308) {
+        throw new UploadError(
+          `Unexpected status for intermediate chunk: ${response.status}`,
+          response.status,
+        );
+      }
+
+      // Advance offset from server-confirmed Range header
+      const rangeHeader = response.headers.get("Range");
+      if (rangeHeader) {
+        // Format: "bytes=0-N"
+        const confirmedEnd = parseInt(rangeHeader.split("-")[1], 10);
+        offset = confirmedEnd + 1;
+      } else {
+        // Server received nothing yet — retry from same offset
+        logger.warn("Drive returned 308 with no Range header; retrying chunk from same offset");
+      }
+
+      onProgress?.(offset, totalBytes);
     }
 
-    const result = await uploadResponse.json();
-
-    logger.info(`File uploaded successfully (resumable): ${result.id}`);
-
-    return {
-      fileId: result.id,
-      webViewLink: result.webViewLink,
-    };
+    // Should be unreachable
+    throw new UploadError("Resumable upload loop exited without completing");
   }
 
   /**

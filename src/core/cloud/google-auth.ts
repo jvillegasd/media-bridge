@@ -1,5 +1,6 @@
 /**
- * Google OAuth using chrome.identity API
+ * Google OAuth using chrome.identity.launchWebAuthFlow.
+ * Users supply their own OAuth client ID via the options page.
  */
 
 import { AuthError } from "../utils/errors";
@@ -8,7 +9,6 @@ import { ChromeStorage } from "../storage/chrome-storage";
 
 const CLIENT_ID_STORAGE_KEY = "google_client_id";
 const TOKEN_STORAGE_KEY = "google_access_token";
-const REFRESH_TOKEN_STORAGE_KEY = "google_refresh_token";
 
 // Google OAuth scopes
 export const GOOGLE_DRIVE_SCOPES = [
@@ -35,7 +35,7 @@ export class GoogleAuth {
   }
 
   /**
-   * Authenticate with Google
+   * Authenticate with Google via launchWebAuthFlow (implicit grant).
    */
   static async authenticate(scopes: string[]): Promise<string> {
     try {
@@ -46,14 +46,17 @@ export class GoogleAuth {
         );
       }
 
-      // Use chrome.identity.getAuthToken for OAuth
-      const token = await new Promise<string>((resolve, reject) => {
-        chrome.identity.getAuthToken(
-          {
-            interactive: true,
-            scopes: scopes,
-          },
-          (token) => {
+      const redirectUrl = chrome.identity.getRedirectURL();
+      const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      authUrl.searchParams.set("client_id", clientId);
+      authUrl.searchParams.set("redirect_uri", redirectUrl);
+      authUrl.searchParams.set("response_type", "token");
+      authUrl.searchParams.set("scope", scopes.join(" "));
+
+      const responseUrl = await new Promise<string>((resolve, reject) => {
+        chrome.identity.launchWebAuthFlow(
+          { url: authUrl.toString(), interactive: true },
+          (callbackUrl) => {
             if (chrome.runtime.lastError) {
               reject(
                 new AuthError(
@@ -62,16 +65,24 @@ export class GoogleAuth {
               );
               return;
             }
-            if (!token) {
-              reject(new AuthError("No token received"));
+            if (!callbackUrl) {
+              reject(new AuthError("No callback URL received"));
               return;
             }
-            resolve(token);
+            resolve(callbackUrl);
           },
         );
       });
 
-      // Store token
+      // Extract access_token from the URL fragment
+      const hashParams = new URLSearchParams(
+        new URL(responseUrl).hash.slice(1),
+      );
+      const token = hashParams.get("access_token");
+      if (!token) {
+        throw new AuthError("No access token in OAuth response");
+      }
+
       await ChromeStorage.set(TOKEN_STORAGE_KEY, token);
       logger.info("Google authentication successful");
 
@@ -103,7 +114,6 @@ export class GoogleAuth {
    */
   private static async isTokenValid(token: string): Promise<boolean> {
     try {
-      // Verify token by making a simple API call
       const response = await fetch(
         "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=" + token,
       );
@@ -121,32 +131,15 @@ export class GoogleAuth {
 
     if (token) {
       try {
-        // Revoke token using Google API
         await fetch(
           `https://accounts.google.com/o/oauth2/revoke?token=${token}`,
         );
-
-        // Remove token from Chrome identity
-        await new Promise<void>((resolve, reject) => {
-          chrome.identity.removeCachedAuthToken({ token }, () => {
-            if (chrome.runtime.lastError) {
-              logger.warn(
-                "Failed to remove cached token:",
-                chrome.runtime.lastError,
-              );
-            }
-            resolve();
-          });
-        });
       } catch (error) {
         logger.warn("Failed to revoke token:", error);
       }
     }
 
-    // Clear stored tokens
     await ChromeStorage.remove(TOKEN_STORAGE_KEY);
-    await ChromeStorage.remove(REFRESH_TOKEN_STORAGE_KEY);
-
     logger.info("Signed out successfully");
   }
 

@@ -399,41 +399,20 @@
     }
 
 
-    /* ---- Provider Tabs ---- */
-    .provider-tabs {
-      display: flex;
-      gap: 4px;
-      padding: 4px;
-      background: var(--surface-2);
-      border-radius: var(--radius-sm);
-      margin-bottom: 20px;
-      width: fit-content;
-    }
-
-    .provider-tab {
-      padding: 6px 14px;
-      border: none;
-      border-radius: calc(var(--radius-sm) - 2px);
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      background: transparent;
-      color: var(--text-secondary);
-      transition: all 0.15s;
-    }
-
-    .provider-tab.active {
-      background: var(--surface-1);
-      color: var(--text-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-    }
-
+    /* ---- Provider / Advanced Panels ---- */
     .provider-panel {
       display: none;
     }
 
     .provider-panel.active {
+      display: block;
+    }
+
+    .advanced-panel {
+      display: none;
+    }
+
+    .advanced-panel.active {
       display: block;
     }
 
@@ -680,6 +659,26 @@
       color: var(--text-primary);
     }
 
+    .history-cancel-upload {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .history-cancel-upload:hover {
+      background: var(--surface-2);
+      color: var(--danger, #f38ba8);
+    }
+
     .history-menu {
       display: none;
       position: absolute;
@@ -909,6 +908,15 @@
           <span>Advanced</span>
         </button>
 
+        <button class="nav-item" data-view="about" title="About">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span>About</span>
+        </button>
+
       </nav>
 
       <div class="sidebar-footer">
@@ -985,9 +993,9 @@
           <p>Connect cloud storage for automatic upload after download.</p>
         </div>
 
-        <div class="provider-tabs">
-          <button class="provider-tab active" data-provider="google-drive">Google Drive</button>
-          <button class="provider-tab" data-provider="s3">S3 / Compatible</button>
+        <div class="seg-tabs">
+          <button class="provider-tab seg-tab active" data-provider="google-drive">Google Drive</button>
+          <button class="provider-tab seg-tab" data-provider="s3">S3 / Compatible</button>
         </div>
 
         <!-- Google Drive Panel -->
@@ -998,10 +1006,27 @@
                 <input type="checkbox" id="drive-enabled" class="form-checkbox">
                 Enable Google Drive uploads
               </label>
-              <div class="form-help">Automatically upload downloaded videos to Google Drive.</div>
+              <div class="form-help">Connect Google Drive to upload downloaded videos.</div>
             </div>
 
             <div id="drive-settings" style="display:none;">
+
+              <div class="form-group">
+                <label class="form-label" for="drive-client-id">OAuth Client ID</label>
+                <input type="text" id="drive-client-id" class="form-input" placeholder="xxxxxxxxx.apps.googleusercontent.com" />
+                <!-- Google Drive requires users to create their own OAuth credentials (free). -->
+                <div class="form-help">
+                  To use Google Drive you need your own OAuth credentials (free):
+                  <ol style="margin:6px 0 0 16px;padding:0;line-height:1.6;">
+                    <li>Go to <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">Google Cloud Console → APIs</a> and enable the <strong>Google Drive API</strong>.</li>
+                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Credentials</a> → <strong>Create Credentials</strong> → <strong>OAuth client ID</strong>.</li>
+                    <li>Set application type to <strong>Web application</strong>.</li>
+                    <li>Under <strong>Authorized redirect URIs</strong>, add: <code id="drive-redirect-uri"></code></li>
+                    <li>Copy the <strong>Client ID</strong> and paste it below.</li>
+                  </ol>
+                </div>
+              </div>
+
               <div class="form-group">
                 <label class="form-label" for="drive-folder-name">Folder Name</label>
                 <input type="text" id="drive-folder-name" class="form-input" placeholder="MediaBridge Uploads" />
@@ -1034,21 +1059,29 @@
 
         <!-- S3 Panel -->
         <div id="provider-s3" class="provider-panel">
-          <div class="coming-soon-note">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px;">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
-            <span>S3 upload functionality is planned. You can save your credentials now, but uploads won't be triggered until a future release.</span>
-          </div>
-
           <div class="section">
             <div class="form-group">
               <label class="form-label">
                 <input type="checkbox" id="s3-enabled" class="form-checkbox">
                 Enable S3 uploads
               </label>
+              <div class="form-help">Upload downloaded videos to any S3-compatible storage (AWS S3, Cloudflare R2, Backblaze B2, etc.).</div>
+            </div>
+
+            <div id="s3-settings" style="display:none;">
+
+
+            <div class="form-group">
+              <label class="form-label" for="s3-provider-preset">Provider Preset</label>
+              <select id="s3-provider-preset" class="form-input">
+                <option value="">Custom / AWS S3</option>
+                <option value="r2">Cloudflare R2</option>
+                <option value="b2">Backblaze B2</option>
+                <option value="wasabi">Wasabi</option>
+                <option value="do">DigitalOcean Spaces</option>
+                <option value="minio">MinIO (self-hosted)</option>
+              </select>
+              <div class="form-help">Select a preset to auto-fill the endpoint template.</div>
             </div>
 
             <div class="form-group">
@@ -1064,7 +1097,7 @@
             <div class="form-group">
               <label class="form-label" for="s3-endpoint">Endpoint (S3-compatible)</label>
               <input type="text" id="s3-endpoint" class="form-input" placeholder="https://s3.example.com (leave empty for AWS)" />
-              <div class="form-help">Custom endpoint for Cloudflare R2, Backblaze B2, MinIO, etc.</div>
+              <div class="form-help">Custom endpoint for Cloudflare R2, Backblaze B2, MinIO, etc. Leave empty for AWS S3.</div>
             </div>
 
             <div class="form-group">
@@ -1075,6 +1108,18 @@
             <div class="form-group">
               <label class="form-label" for="s3-secret-key">Secret Access Key</label>
               <input type="password" id="s3-secret-key" class="form-input" placeholder="••••••••••••••••••••••••••••••••" autocomplete="off" />
+              <div class="form-help">Leave blank to keep the currently stored key.</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="s3-passphrase">Encryption Passphrase <span style="font-weight:400;color:var(--text-2)">(optional)</span></label>
+              <input type="password" id="s3-passphrase" class="form-input" placeholder="Leave blank to store key unencrypted" autocomplete="new-password" />
+              <div class="form-help">When set, your secret key is encrypted with AES-GCM before being written to disk. You will re-enter this passphrase once per browser session.</div>
+            </div>
+
+            <div class="form-group" id="s3-passphrase-confirm-group" style="display:none;">
+              <label class="form-label" for="s3-passphrase-confirm">Confirm Passphrase</label>
+              <input type="password" id="s3-passphrase-confirm" class="form-input" placeholder="Repeat passphrase" autocomplete="new-password" />
             </div>
 
             <div class="form-group">
@@ -1082,6 +1127,25 @@
               <input type="text" id="s3-prefix" class="form-input" placeholder="videos/" />
               <div class="form-help">Prefix added to all uploaded object keys.</div>
             </div>
+
+            <div class="form-group">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <button id="s3-test-connection" class="btn btn-secondary">Test Connection</button>
+                <span id="s3-test-result" style="font-size:12px;"></span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <details>
+                <summary style="cursor:pointer; font-size:13px; font-weight:500; color:var(--text-secondary);">CORS configuration (required for browser uploads)</summary>
+                <div id="s3-cors-helper" style="margin-top:8px;">
+                  <div class="form-help" style="margin-bottom:6px;">Add this CORS policy to your bucket. Replace <code>YOUR_EXTENSION_ID</code> with your extension ID (find it at chrome://extensions).</div>
+                  <pre id="s3-cors-json" style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:10px;font-size:11px;overflow-x:auto;white-space:pre-wrap;"></pre>
+                  <button id="s3-copy-cors" class="btn btn-secondary" style="margin-top:6px; font-size:12px;">Copy CORS Config</button>
+                </div>
+              </details>
+            </div>
+            </div><!-- /#s3-settings -->
           </div>
 
           <div class="btn-row">
@@ -1246,118 +1310,96 @@
           <p>Fine-tune retry behaviour, detection caches, and internal write frequency.</p>
         </div>
 
-        <div class="section">
-          <h2 class="section-title">Retry &amp; Reliability</h2>
-          <div class="form-group">
-            <label class="form-label" for="max-retries">Max segment retries</label>
-            <input
-              type="number"
-              id="max-retries"
-              class="form-input"
-              min="1"
-              max="10"
-              value="3"
-              style="max-width: 120px;"
-            />
-            <div class="form-help">Number of times to retry a failed segment or manifest fetch (1–10).</div>
+        <div class="seg-tabs">
+          <button class="advanced-tab seg-tab active" data-tab="retry">Retry &amp; Reliability</button>
+          <button class="advanced-tab seg-tab" data-tab="caches">Detection Caches</button>
+          <button class="advanced-tab seg-tab" data-tab="performance">Performance</button>
+        </div>
+
+        <!-- Retry & Reliability Panel -->
+        <div id="advanced-retry" class="advanced-panel active">
+          <div class="section">
+            <div class="form-group">
+              <label class="form-label" for="max-retries">Max segment retries</label>
+              <input type="number" id="max-retries" class="form-input" min="1" max="10" value="3" style="max-width: 120px;" />
+              <div class="form-help">Number of times to retry a failed segment or manifest fetch (1–10).</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="retry-delay">Retry initial delay (s)</label>
+              <input type="number" id="retry-delay" class="form-input" min="0.05" max="1" step="0.05" value="0.1" style="max-width: 120px;" />
+              <div class="form-help">First backoff wait after a fetch failure (0.05–1 s).</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="retry-backoff">Retry backoff multiplier</label>
+              <input type="number" id="retry-backoff" class="form-input" min="1.0" max="3.0" step="0.05" value="1.15" style="max-width: 120px;" />
+              <div class="form-help">Exponential growth factor applied after each retry (1.0–3.0).</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="failure-rate">Fragment failure tolerance (%)</label>
+              <input type="number" id="failure-rate" class="form-input" min="5" max="50" step="1" value="10" style="max-width: 120px;" />
+              <div class="form-help">Download is aborted when more than this percentage of segments fail (5–50%).</div>
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="retry-delay">Retry initial delay (s)</label>
-            <input
-              type="number"
-              id="retry-delay"
-              class="form-input"
-              min="0.05"
-              max="1"
-              step="0.05"
-              value="0.1"
-              style="max-width: 120px;"
-            />
-            <div class="form-help">First backoff wait after a fetch failure (0.05–1 s).</div>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="retry-backoff">Retry backoff multiplier</label>
-            <input
-              type="number"
-              id="retry-backoff"
-              class="form-input"
-              min="1.0"
-              max="3.0"
-              step="0.05"
-              value="1.15"
-              style="max-width: 120px;"
-            />
-            <div class="form-help">Exponential growth factor applied after each retry (1.0–3.0).</div>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="failure-rate">Fragment failure tolerance (%)</label>
-            <input
-              type="number"
-              id="failure-rate"
-              class="form-input"
-              min="5"
-              max="50"
-              step="1"
-              value="10"
-              style="max-width: 120px;"
-            />
-            <div class="form-help">Download is aborted when more than this percentage of segments fail (5–50%).</div>
+          <div class="btn-row">
+            <button id="save-advanced-settings" class="btn btn-primary">Save Settings</button>
+            <button id="reset-advanced-settings" class="btn btn-danger">Reset to defaults</button>
           </div>
         </div>
 
-        <div class="section">
-          <h2 class="section-title">Detection Caches</h2>
-          <div class="form-group">
-            <label class="form-label" for="detection-cache-size">URL deduplication cache size</label>
-            <input
-              type="number"
-              id="detection-cache-size"
-              class="form-input"
-              min="100"
-              max="2000"
-              step="50"
-              value="500"
-              style="max-width: 140px;"
-            />
-            <div class="form-help">Max distinct URL path keys tracked per page by HLS and DASH handlers (100–2 000).</div>
+        <!-- Detection Caches Panel -->
+        <div id="advanced-caches" class="advanced-panel">
+          <div class="section">
+            <div class="form-group">
+              <label class="form-label" for="detection-cache-size">URL deduplication cache size</label>
+              <input type="number" id="detection-cache-size" class="form-input" min="100" max="2000" step="50" value="500" style="max-width: 140px;" />
+              <div class="form-help">Max distinct URL path keys tracked per page by HLS and DASH handlers (100–2 000).</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="master-playlist-cache-size">Master playlist cache size</label>
+              <input type="number" id="master-playlist-cache-size" class="form-input" min="10" max="200" step="5" value="50" style="max-width: 140px;" />
+              <div class="form-help">Max HLS master playlists held in memory per page (10–200).</div>
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="master-playlist-cache-size">Master playlist cache size</label>
-            <input
-              type="number"
-              id="master-playlist-cache-size"
-              class="form-input"
-              min="10"
-              max="200"
-              step="5"
-              value="50"
-              style="max-width: 140px;"
-            />
-            <div class="form-help">Max HLS master playlists held in memory per page (10–200).</div>
+          <div class="btn-row">
+            <button id="save-advanced-settings-caches" class="btn btn-primary">Save Settings</button>
+            <button id="reset-advanced-settings-caches" class="btn btn-danger">Reset to defaults</button>
           </div>
         </div>
 
-        <div class="section">
-          <h2 class="section-title">Performance</h2>
-          <div class="form-group">
-            <label class="form-label" for="db-sync-interval">IndexedDB sync interval (s)</label>
-            <input
-              type="number"
-              id="db-sync-interval"
-              class="form-input"
-              min="0.1"
-              max="2"
-              step="0.1"
-              value="0.5"
-              style="max-width: 140px;"
-            />
-            <div class="form-help">How often download state is written to IndexedDB during segment downloads. Lower values increase write frequency.</div>
+        <!-- Performance Panel -->
+        <div id="advanced-performance" class="advanced-panel">
+          <div class="section">
+            <div class="form-group">
+              <label class="form-label" for="db-sync-interval">IndexedDB sync interval (s)</label>
+              <input type="number" id="db-sync-interval" class="form-input" min="0.1" max="2" step="0.1" value="0.5" style="max-width: 140px;" />
+              <div class="form-help">How often download state is written to IndexedDB during segment downloads. Lower values increase write frequency.</div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="save-advanced-settings-perf" class="btn btn-primary">Save Settings</button>
+            <button id="reset-advanced-settings-perf" class="btn btn-danger">Reset to defaults</button>
           </div>
         </div>
+      </div>
 
-        <div class="btn-row">
-          <button id="save-advanced-settings" class="btn btn-primary">Save Settings</button>
-          <button id="reset-advanced-settings" class="btn btn-danger">Reset to defaults</button>
+      <!-- ===== About View ===== -->
+      <div id="view-about" class="view">
+        <div class="view-header">
+          <h2 class="view-title">About</h2>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 48px 24px; gap: 16px; text-align:center;">
+          <img src="/icons/icon-128.png" alt="Media Bridge" width="72" height="72" style="border-radius:16px;">
+          <div>
+            <h3 style="font-size:20px; font-weight:700; margin:0 0 4px;">Media Bridge</h3>
+            <p style="font-size:13px; color:var(--text-secondary); margin:0;">Version <span id="about-version">—</span></p>
+          </div>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0;">
+            Download HLS, DASH, and direct media streams directly from your browser.
+          </p>
+          <p style="font-size:14px; margin:0;">
+            Made with ♥ by
+            <a href="https://github.com/jvillegasd" target="_blank" rel="noopener noreferrer" style="color:var(--accent); text-decoration:none; font-weight:500;">jvillegasd</a>
+          </p>
         </div>
       </div>
 

@@ -74,12 +74,15 @@ export async function saveBlobUrlToFile(
             if (delta.state.current === "complete") {
               clearTimeout(timeoutId);
               chrome.downloads.onChanged.removeListener(onChange);
-              revokeBlobUrl(blobUrl);
-              // Retrieve filename from the completed download
-              chrome.downloads.search({ id: downloadId }, (results) => {
-                const item = results?.[0];
-                resolve(item?.filename || filename);
-              });
+
+              const finish = async () => {
+                revokeBlobUrl(blobUrl);
+                chrome.downloads.search({ id: downloadId }, (results) => {
+                  const item = results?.[0];
+                  resolve(item?.filename || filename);
+                });
+              };
+              finish();
             } else if (delta.state.current === "interrupted") {
               clearTimeout(timeoutId);
               chrome.downloads.onChanged.removeListener(onChange);

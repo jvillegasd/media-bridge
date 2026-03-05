@@ -13,9 +13,12 @@ import {
   storeDownload,
   deleteDownload,
 } from "./core/database/downloads";
+import { UploadManager } from "./core/cloud/upload-manager";
+import { S3Client } from "./core/cloud/s3-client";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { loadSettings } from "./core/storage/settings";
-import { MessageType } from "./shared/messages";
+import { SecureStorage } from "./core/storage/secure-storage";
+import { MessageType, CloudProvider } from "./shared/messages";
 import {
   DownloadState,
   StorageConfig,
@@ -37,6 +40,7 @@ import {
 } from "./core/utils/file-utils";
 import {
   deleteChunks,
+  getAllChunks,
   getChunkCount,
   getAllChunkDownloadIds,
 } from "./core/database/chunks";
@@ -50,6 +54,8 @@ import {
 } from "./shared/constants";
 
 const activeDownloads = new Map<string, Promise<void>>();
+const activeUploads = new Set<string>();
+const uploadAbortControllers = new Map<string, AbortController>();
 // Map to store AbortControllers for each download (keyed by normalized URL)
 const downloadAbortControllers = new Map<string, AbortController>();
 // Set of normalized URLs that should save partial progress on abort
@@ -79,6 +85,10 @@ const keepAlive = (
   }
 )();
 
+function updateKeepAlive(): void {
+  keepAlive(activeDownloads.size > 0 || activeUploads.size > 0);
+}
+
 /**
  * Initialize service worker
  */
@@ -89,6 +99,16 @@ async function init() {
   // Cleanup orphaned chunks from previous crashes (non-blocking)
   cleanupStaleChunks().catch((err) =>
     logger.error("Orphaned chunk cleanup failed:", err),
+  );
+
+  // Clean up orphaned S3 multipart uploads from previous crashes
+  cleanupOrphanedS3Uploads().catch((err) =>
+    logger.error("S3 orphaned upload cleanup failed:", err),
+  );
+
+  // Restore downloads stuck in UPLOADING stage after a crash
+  cleanupStaleUploads().catch((err) =>
+    logger.error("Stale upload cleanup failed:", err),
   );
 }
 
@@ -123,6 +143,35 @@ async function cleanupStaleChunks(): Promise<void> {
 }
 
 /**
+ * Abort orphaned S3 multipart uploads persisted from a previous service worker session.
+ */
+async function cleanupOrphanedS3Uploads(): Promise<void> {
+  const settings = await loadSettings();
+  const secret = await resolveS3Secret(settings.s3);
+  const s3 = settings.s3;
+  const config =
+    s3.bucket && s3.region && s3.accessKeyId && secret
+      ? { bucket: s3.bucket, region: s3.region, accessKeyId: s3.accessKeyId, secretAccessKey: secret, endpoint: s3.endpoint, prefix: s3.prefix }
+      : undefined;
+  await S3Client.cleanupOrphanedUploads(config);
+}
+
+/**
+ * Restore downloads stuck in UPLOADING stage after a service worker crash.
+ */
+async function cleanupStaleUploads(): Promise<void> {
+  const all = await getAllDownloads();
+  for (const d of all) {
+    if (d.progress.stage === DownloadStage.UPLOADING) {
+      d.progress.stage = DownloadStage.COMPLETED;
+      d.progress.message = "Upload interrupted";
+      d.progress.percentage = undefined;
+      await storeDownload(d);
+    }
+  }
+}
+
+/**
  * Handle extension installation
  */
 function handleInstallation(details: chrome.runtime.InstalledDetails) {
@@ -137,7 +186,6 @@ function handleInstallation(details: chrome.runtime.InstalledDetails) {
 async function handleDownloadRequestMessage(payload: {
   url: string;
   filename?: string;
-  uploadToDrive?: boolean;
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
@@ -397,6 +445,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleStopAndSaveMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.UPLOAD_REQUEST:
+        handleUploadRequestMessage(message.payload).then(sendResponse);
+        return true;
+
+      case MessageType.CANCEL_UPLOAD: {
+        (async () => {
+          const uid = message.payload?.downloadId as string | undefined;
+          if (uid) {
+            const ctrl = uploadAbortControllers.get(uid);
+            if (ctrl) {
+              ctrl.abort();
+              // Remove from tracking immediately so onStateUpdate stops writing
+              uploadAbortControllers.delete(uid);
+              activeUploads.delete(uid);
+              // Restore COMPLETED stage — awaited so deleteDownload() won't race
+              const s = await getDownload(uid);
+              if (s) {
+                s.progress.stage = DownloadStage.COMPLETED;
+                s.progress.message = "Upload cancelled";
+                s.progress.percentage = undefined;
+                await storeDownload(s);
+              }
+            }
+          }
+          sendResponse({ success: true });
+        })();
+        return true;
+      }
+
       case MessageType.CHECK_URL: {
         const checkUrl = async () => {
           try {
@@ -474,13 +551,35 @@ async function cleanupOrphanedChunks(existing: DownloadState) {
 }
 
 /**
+ * Resolve the S3 secret access key, decrypting it if stored as an EncryptedBlob.
+ * Returns undefined and logs a warning if the passphrase is missing from session storage.
+ */
+async function resolveS3Secret(
+  s3: { secretAccessKey?: string; secretKeyEncrypted?: import("./core/types").EncryptedBlob },
+): Promise<string | undefined> {
+  if (s3.secretKeyEncrypted) {
+    const passphrase = await SecureStorage.getPassphrase();
+    if (!passphrase) {
+      logger.warn("S3 upload skipped: passphrase not in session. Open Options → S3 and re-enter your passphrase.");
+      return undefined;
+    }
+    try {
+      return await SecureStorage.decrypt(s3.secretKeyEncrypted, passphrase);
+    } catch {
+      logger.error("S3 upload skipped: failed to decrypt secret key — wrong passphrase?");
+      return undefined;
+    }
+  }
+  return s3.secretAccessKey;
+}
+
+/**
  * Process download request
  * Validates request, checks for duplicates, creates download manager, and starts download
  */
 async function handleDownloadRequest(payload: {
   url: string;
   filename?: string;
-  uploadToDrive?: boolean;
   metadata: VideoMetadata;
   tabTitle?: string;
   website?: string;
@@ -494,7 +593,6 @@ async function handleDownloadRequest(payload: {
   const {
     url,
     filename,
-    uploadToDrive,
     metadata,
     tabTitle,
     website,
@@ -593,7 +691,6 @@ async function handleDownloadRequest(payload: {
         // Ignore errors - popup/content script might not be listening
       }
     },
-    uploadToDrive: uploadToDrive || config?.googleDrive?.enabled || false,
   });
 
   // Create AbortController for this download to enable real-time cancellation
@@ -613,9 +710,9 @@ async function handleDownloadRequest(payload: {
   );
   activeDownloads.set(normalizedUrl, downloadPromise);
 
-  // Start keep-alive if this is the first active download
+  // Start keep-alive if this is the first active operation
   if (activeDownloads.size === 1) {
-    keepAlive(true);
+    updateKeepAlive();
     // Pre-warm FFmpeg for HLS/M3U8/DASH downloads while segments download
     if (
       metadata.format === VideoFormat.HLS ||
@@ -662,14 +759,171 @@ async function handleDownloadRequest(payload: {
       // This handles both success and failure cases
       activeDownloads.delete(normalizedUrl);
 
-      // Stop keep-alive if no more active downloads
+      // Stop keep-alive if no more active operations
       if (activeDownloads.size === 0) {
-        keepAlive(false);
+        updateKeepAlive();
         closeOffscreenDocument().catch((err) =>
           logger.error("Failed to close offscreen document:", err),
         );
       }
     });
+}
+
+/** Extract a short, user-friendly message from an upload error. Full details stay in console logs. */
+function friendlyUploadError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+
+  // Try to extract the S3/R2 XML <Code> (e.g. "SignatureDoesNotMatch", "AccessDenied")
+  const codeMatch = msg.match(/<Code>(.+?)<\/Code>/);
+  const status = (err as any)?.statusCode as number | undefined;
+
+  if (codeMatch?.[1]) {
+    const code = codeMatch[1];
+    const friendly: Record<string, string> = {
+      AccessDenied: "Access denied — check your API token permissions",
+      SignatureDoesNotMatch: "Signature mismatch — verify your secret access key",
+      NoSuchBucket: "Bucket not found — check your bucket name",
+      InvalidAccessKeyId: "Invalid access key ID",
+      ExpiredToken: "Security token has expired",
+    };
+    return friendly[code] ?? `Upload failed: ${code}`;
+  }
+
+  // CORS preflight failures have no response body
+  if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+    return "Network error — check CORS configuration and endpoint URL";
+  }
+
+  if (status) {
+    return `Upload failed (HTTP ${status})`;
+  }
+
+  // Fallback: truncate to something reasonable
+  return msg.length > 120 ? msg.slice(0, 117) + "…" : msg;
+}
+
+/**
+ * Handle deferred upload request (triggered from popup or history after download completes).
+ * Since the blob URL is long gone, this re-downloads the segments and re-processes — OR
+ * if the localPath file is accessible (DIRECT downloads), it re-downloads from the source URL.
+ *
+ * For segmented downloads (HLS/DASH/M3U8), re-downloading is expensive and URLs may have
+ * expired. The popup should prompt the user to select the local file via showOpenFilePicker().
+ * This handler receives the file bytes forwarded from the popup after file picker selection.
+ */
+async function handleUploadRequestMessage(payload: {
+  downloadId: string;
+  provider: CloudProvider;
+}): Promise<{ success: boolean; error?: string }> {
+  const { downloadId, provider } = payload;
+
+  if (activeUploads.has(downloadId)) {
+    return { success: false, error: "Upload already in progress" };
+  }
+
+  const abortController = new AbortController();
+  uploadAbortControllers.set(downloadId, abortController);
+  activeUploads.add(downloadId);
+  updateKeepAlive();
+
+  try {
+    // Always clean up the temp IDB blob, even on early-return errors
+    const tempKey = `__upload_${downloadId}`;
+    const chunks = await getAllChunks(tempKey);
+    await deleteChunks(tempKey);
+
+    const state = await getDownload(downloadId);
+    if (!state) return { success: false, error: "Download not found" };
+    if (state.metadata.hasDrm) return { success: false, error: "DRM-protected content cannot be uploaded" };
+    if (!chunks.length || !chunks[0].byteLength) {
+      logger.warn(`Upload request for ${downloadId}: no file data in IDB (chunks=${chunks.length})`);
+      return { success: false, error: "No file data provided" };
+    }
+    const fileBytes = chunks[0];
+
+    // Clear any previous upload error so the UI reflects the retry in progress
+    if (state.uploadError) {
+      state.uploadError = undefined;
+      await storeDownload(state);
+    }
+
+    const config = await loadSettings();
+    const blob = new Blob([fileBytes], { type: "video/mp4" });
+    const filename = state.localPath?.split(/[/\\]/).pop() ?? "video.mp4";
+
+    const storageConfig = {
+      googleDrive: { ...config.googleDrive },
+      s3: { ...config.s3, secretAccessKey: await resolveS3Secret(config.s3) },
+    };
+
+    const uploadManager = new UploadManager({
+      config: storageConfig,
+      onStateUpdate: async (updatedState) => {
+        // Skip IDB write if upload was cancelled (record may be deleted)
+        if (abortController.signal.aborted || !activeUploads.has(updatedState.id)) return;
+        await storeDownload(updatedState);
+        try {
+          chrome.runtime.sendMessage(
+            { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: updatedState.id, progress: updatedState.progress } },
+            () => { if (chrome.runtime.lastError) {} },
+          );
+        } catch (_) {}
+      },
+    });
+
+    if (!uploadManager.isConfigured()) {
+      return { success: false, error: "No cloud provider configured" };
+    }
+
+    const links = await uploadManager.uploadBlob(blob, filename, state, provider, abortController.signal);
+
+    if (abortController.signal.aborted) {
+      return { success: false, error: "Upload cancelled" };
+    }
+
+    const freshState = await getDownload(downloadId);
+    if (freshState) {
+      freshState.cloudLinks = { ...freshState.cloudLinks, ...links };
+      freshState.uploadError = undefined;
+      freshState.progress.stage = DownloadStage.COMPLETED;
+      freshState.progress.message = "Upload complete";
+      await storeDownload(freshState);
+      try {
+        chrome.runtime.sendMessage(
+          { type: MessageType.UPLOAD_COMPLETE, payload: { id: downloadId, cloudLinks: links } },
+          () => { if (chrome.runtime.lastError) {} },
+        );
+      } catch (_) {}
+    }
+
+    return { success: true };
+  } catch (err) {
+    // If aborted, the CANCEL_UPLOAD handler already restored the state
+    if (abortController.signal.aborted) {
+      return { success: false, error: "Upload cancelled" };
+    }
+    logger.error("Upload request failed:", err);
+    const fullMsg = err instanceof Error ? err.message : String(err);
+    const userMsg = friendlyUploadError(err);
+    // Persist the error so the popup can show a retry button
+    const failedState = await getDownload(downloadId);
+    if (failedState) {
+      failedState.uploadError = fullMsg;
+      failedState.progress.stage = DownloadStage.COMPLETED;
+      await storeDownload(failedState);
+      try {
+        chrome.runtime.sendMessage(
+          { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: downloadId, progress: failedState.progress } },
+          () => { if (chrome.runtime.lastError) {} },
+        );
+      } catch (_) {}
+    }
+    return { success: false, error: userMsg };
+  } finally {
+    uploadAbortControllers.delete(downloadId);
+    activeUploads.delete(downloadId);
+    updateKeepAlive();
+  }
 }
 
 /**
@@ -1117,7 +1371,7 @@ async function handleStartRecording(payload: {
     .finally(() => {
       activeDownloads.delete(normalizedUrl);
       if (activeDownloads.size === 0) {
-        keepAlive(false);
+        updateKeepAlive();
         closeOffscreenDocument().catch((err) =>
           logger.error("Failed to close offscreen document:", err),
         );
@@ -1126,7 +1380,7 @@ async function handleStartRecording(payload: {
 
   activeDownloads.set(normalizedUrl, recordingPromise);
   if (activeDownloads.size === 1) {
-    keepAlive(true);
+    updateKeepAlive();
     // Pre-warm FFmpeg — recordings always need FFmpeg for the merge phase
     createOffscreenDocument()
       .then(() =>

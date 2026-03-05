@@ -5,9 +5,11 @@
 
 import { ChromeStorage } from "../core/storage/chrome-storage";
 import { loadSettings } from "../core/storage/settings";
+import { SecureStorage } from "../core/storage/secure-storage";
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "../core/cloud/google-auth";
-import { StorageConfig, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
-import { MessageType } from "../shared/messages";
+import { S3Client } from "../core/cloud/s3-client";
+import { StorageConfig, EncryptedBlob, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
+import { MessageType, CloudProvider } from "../shared/messages";
 import {
   getAllDownloads,
   getDownload,
@@ -15,6 +17,7 @@ import {
   bulkDeleteDownloads,
   clearAllDownloads,
 } from "../core/database/downloads";
+import { storeChunk } from "../core/database/chunks";
 import {
   DEFAULT_MAX_CONCURRENT,
   STORAGE_CONFIG_KEY,
@@ -63,6 +66,7 @@ const FINISHED_STAGES = new Set([
   DownloadStage.COMPLETED,
   DownloadStage.FAILED,
   DownloadStage.CANCELLED,
+  DownloadStage.UPLOADING,
 ]);
 
 // ─────────────────────────────────────────────
@@ -76,7 +80,7 @@ function init(): void {
 
   // Check URL hash to navigate directly to a view (e.g. opened via history button)
   const hash = location.hash.slice(1);
-  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced"]);
+  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced", "about"]);
   switchView(validViews.has(hash) ? hash : "download-settings");
 }
 
@@ -120,6 +124,16 @@ function switchView(viewId: string): void {
   if (viewId === "recording") loadRecordingSettings();
   if (viewId === "notifications") loadNotificationSettings();
   if (viewId === "advanced") loadAdvancedSettings();
+  if (viewId === "about") loadAboutSection();
+}
+
+// ─────────────────────────────────────────────
+// Section: About
+// ─────────────────────────────────────────────
+
+function loadAboutSection(): void {
+  const el = document.getElementById("about-version");
+  if (el) el.textContent = chrome.runtime.getManifest().version;
 }
 
 // ─────────────────────────────────────────────
@@ -238,18 +252,42 @@ function setupCloudProviderTabs(): void {
   });
 }
 
+let advancedTabsInitialized = false;
+
+function setupAdvancedTabs(): void {
+  if (advancedTabsInitialized) return;
+  advancedTabsInitialized = true;
+
+  document.querySelectorAll<HTMLButtonElement>(".advanced-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const tabId = tab.dataset.tab;
+      if (!tabId) return;
+
+      document.querySelectorAll(".advanced-tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".advanced-panel").forEach((p) => p.classList.remove("active"));
+
+      tab.classList.add("active");
+      document.getElementById(`advanced-${tabId}`)?.classList.add("active");
+    });
+  });
+}
+
 // -- Google Drive --
 
 async function loadDriveSettings(): Promise<void> {
   const config = await loadSettings();
 
   const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
+  const clientIdIn = document.getElementById("drive-client-id") as HTMLInputElement;
   const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
   const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
+  const redirectUriEl = document.getElementById("drive-redirect-uri");
 
   enabledCb.checked = config.googleDrive.enabled;
+  clientIdIn.value = (await GoogleAuth.getClientId()) ?? "";
   folderNameIn.value = config.googleDrive.folderName;
   folderIdIn.value = config.googleDrive.targetFolderId ?? "";
+  if (redirectUriEl) redirectUriEl.textContent = chrome.identity.getRedirectURL();
 
   const driveSettingsEl = document.getElementById("drive-settings");
   if (driveSettingsEl)
@@ -290,11 +328,19 @@ async function checkAuthStatus(): Promise<void> {
 
 async function handleAuth(): Promise<void> {
   const btn = document.getElementById("auth-btn") as HTMLButtonElement;
+  const clientIdIn = document.getElementById("drive-client-id") as HTMLInputElement;
+  const clientId = clientIdIn.value.trim();
+  if (!clientId) {
+    markInvalid(clientIdIn, "Enter your OAuth Client ID before signing in.");
+    return;
+  }
   btn.disabled = true;
   btn.textContent = "Authenticating…";
   try {
+    await GoogleAuth.setClientId(clientId);
     await GoogleAuth.authenticate(GOOGLE_DRIVE_SCOPES);
-    showStatus("Authenticated with Google.", "success");
+    await persistDriveSettings(true);
+    showStatus("Authenticated and settings saved.", "success");
     await checkAuthStatus();
   } catch (err) {
     showStatus(`Authentication failed: ${errorMsg(err)}`, "error");
@@ -314,24 +360,46 @@ async function handleSignOut(): Promise<void> {
   }
 }
 
+/**
+ * Persist current Drive form values to storage.
+ * If enabledOverride is provided, it overrides the checkbox value.
+ * Returns false if validation fails.
+ */
+async function persistDriveSettings(enabledOverride?: boolean): Promise<boolean> {
+  const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
+  const clientIdIn = document.getElementById("drive-client-id") as HTMLInputElement;
+  const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
+  const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
+
+  const enabled = enabledOverride ?? enabledCb.checked;
+  const clientId = clientIdIn.value.trim();
+  if (enabled && !clientId) {
+    markInvalid(clientIdIn, "OAuth Client ID is required when Google Drive is enabled.");
+    return false;
+  }
+
+  await GoogleAuth.setClientId(clientId);
+
+  if (enabledOverride !== undefined) enabledCb.checked = enabled;
+
+  const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+  config.googleDrive = {
+    enabled,
+    folderName: folderNameIn.value || DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
+    targetFolderId: folderIdIn.value || undefined,
+    createFolderIfNotExists: true,
+  };
+  await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+  return true;
+}
+
 async function saveDriveSettings(): Promise<void> {
   const btn = document.getElementById("save-drive-settings") as HTMLButtonElement;
   btn.disabled = true;
   btn.textContent = "Saving…";
 
   try {
-    const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
-    const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
-    const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
-
-    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
-    config.googleDrive = {
-      enabled: enabledCb.checked,
-      folderName: folderNameIn.value || DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
-      targetFolderId: folderIdIn.value || undefined,
-      createFolderIfNotExists: true,
-    };
-    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    if (!(await persistDriveSettings())) return;
     showStatus("Settings saved.", "success");
   } catch (err) {
     showStatus(`Save failed: ${errorMsg(err)}`, "error");
@@ -343,20 +411,154 @@ async function saveDriveSettings(): Promise<void> {
 
 // -- S3 --
 
+const S3_ENDPOINT_PRESETS: Record<string, { endpoint: string; region: string }> = {
+  r2: { endpoint: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com", region: "auto" },
+  b2: { endpoint: "https://s3.<REGION>.backblazeb2.com", region: "us-west-004" },
+  wasabi: { endpoint: "https://s3.<REGION>.wasabisys.com", region: "us-east-1" },
+  do: { endpoint: "https://<REGION>.digitaloceanspaces.com", region: "nyc3" },
+  minio: { endpoint: "https://your-minio-server.example.com", region: "us-east-1" },
+};
+
 async function loadS3Settings(): Promise<void> {
   const { s3 } = await loadSettings();
 
-  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+  const inp = (id: string) => document.getElementById(id) as HTMLInputElement;
 
-  get("s3-enabled").checked = s3.enabled;
-  get("s3-bucket").value = s3.bucket ?? "";
-  get("s3-region").value = s3.region ?? "";
-  get("s3-endpoint").value = s3.endpoint ?? "";
-  get("s3-access-key").value = s3.accessKeyId ?? "";
-  get("s3-secret-key").value = s3.secretAccessKey ?? "";
-  get("s3-prefix").value = s3.prefix ?? "";
+  const enabledCb = inp("s3-enabled");
+  enabledCb.checked = s3.enabled;
 
+  const s3SettingsEl = document.getElementById("s3-settings");
+  if (s3SettingsEl)
+    s3SettingsEl.style.display = enabledCb.checked ? "block" : "none";
+
+  enabledCb.addEventListener("change", () => {
+    if (s3SettingsEl) s3SettingsEl.style.display = enabledCb.checked ? "block" : "none";
+  });
+
+  inp("s3-bucket").value = s3.bucket ?? "";
+  inp("s3-region").value = s3.region ?? "";
+  inp("s3-endpoint").value = s3.endpoint ?? "";
+  inp("s3-access-key").value = s3.accessKeyId ?? "";
+
+  // Show placeholder when secret key is stored encrypted
+  if (s3.secretKeyEncrypted) {
+    inp("s3-secret-key").value = "";
+    inp("s3-secret-key").placeholder = "••••••••  (encrypted — leave blank to keep)";
+  } else {
+    inp("s3-secret-key").value = s3.secretAccessKey ?? "";
+  }
+
+  inp("s3-prefix").value = s3.prefix ?? "";
+  inp("s3-passphrase").value = "";
+  inp("s3-passphrase-confirm").value = "";
+
+  const confirmGroup = document.getElementById("s3-passphrase-confirm-group") as HTMLElement;
+  inp("s3-passphrase").addEventListener("input", () => {
+    confirmGroup.style.display = inp("s3-passphrase").value ? "block" : "none";
+  });
+
+  // Provider preset selector
+  const presetSel = document.getElementById("s3-provider-preset") as HTMLSelectElement;
+  if (presetSel) {
+    presetSel.addEventListener("change", () => {
+      const preset = S3_ENDPOINT_PRESETS[presetSel.value];
+      if (preset) {
+        inp("s3-endpoint").value = preset.endpoint;
+        inp("s3-region").value = preset.region;
+      }
+    });
+  }
+
+  // Render CORS config helper
+  const corsEl = document.getElementById("s3-cors-json");
+  if (corsEl) {
+    const extId = chrome.runtime.id;
+    const corsConfig = JSON.stringify([{
+      AllowedHeaders: ["*"],
+      AllowedMethods: ["PUT", "POST", "HEAD", "DELETE"],
+      AllowedOrigins: [`chrome-extension://${extId}`],
+      ExposeHeaders: ["ETag"],
+    }], null, 2);
+    corsEl.textContent = corsConfig;
+  }
+
+  document.getElementById("s3-copy-cors")?.addEventListener("click", async () => {
+    const text = document.getElementById("s3-cors-json")?.textContent ?? "";
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("s3-copy-cors") as HTMLButtonElement;
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = "Copy CORS Config"; }, 2000);
+  });
+
+  document.getElementById("s3-test-connection")?.addEventListener("click", testS3Connection);
   document.getElementById("save-s3-settings")?.addEventListener("click", saveS3Settings);
+}
+
+async function testS3Connection(): Promise<void> {
+  const btn = document.getElementById("s3-test-connection") as HTMLButtonElement;
+  const resultEl = document.getElementById("s3-test-result") as HTMLSpanElement;
+  btn.disabled = true;
+  btn.textContent = "Testing…";
+  resultEl.textContent = "";
+  resultEl.style.color = "";
+
+  try {
+    const inp = (id: string) =>
+      (document.getElementById(id) as HTMLInputElement).value.trim();
+
+    const bucket = inp("s3-bucket");
+    const region = inp("s3-region");
+    const accessKeyId = inp("s3-access-key");
+    const endpoint = inp("s3-endpoint") || undefined;
+
+    // Resolve secret key: prefer the text field; fall back to decrypting stored blob
+    let secretAccessKey = inp("s3-secret-key");
+    if (!secretAccessKey) {
+      const { s3 } = await loadSettings();
+      if (s3.secretKeyEncrypted) {
+        let passphrase = await SecureStorage.getPassphrase();
+        if (!passphrase) {
+          passphrase = window.prompt("Enter your S3 encryption passphrase to test the connection:") ?? "";
+          if (!passphrase) {
+            resultEl.textContent = "Passphrase required to decrypt the stored secret key.";
+            resultEl.style.color = "var(--error)";
+            return;
+          }
+        }
+        try {
+          secretAccessKey = await SecureStorage.decrypt(s3.secretKeyEncrypted, passphrase);
+          await SecureStorage.setPassphrase(passphrase);
+        } catch {
+          resultEl.textContent = "✗ Wrong passphrase — could not decrypt secret key.";
+          resultEl.style.color = "var(--error)";
+          return;
+        }
+      }
+    }
+
+    if (!bucket || !region || !accessKeyId || !secretAccessKey) {
+      resultEl.textContent = "Fill in bucket, region, and credentials first.";
+      resultEl.style.color = "var(--error)";
+      return;
+    }
+
+    const client = new S3Client({ bucket, region, accessKeyId, secretAccessKey, endpoint });
+    const { ok, error } = await client.testConnection();
+
+    if (ok) {
+      resultEl.textContent = "✓ Connection successful";
+      resultEl.style.color = "var(--success, #22c55e)";
+    } else {
+      resultEl.textContent = `✗ ${error}`;
+      resultEl.style.color = "var(--error)";
+    }
+  } catch (err) {
+    resultEl.textContent = `✗ ${errorMsg(err)}`;
+    resultEl.style.color = "var(--error)";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Test Connection";
+  }
 }
 
 async function saveS3Settings(): Promise<void> {
@@ -370,17 +572,58 @@ async function saveS3Settings(): Promise<void> {
     const checked = (id: string) =>
       (document.getElementById(id) as HTMLInputElement).checked;
 
+    const passphrase = get("s3-passphrase");
+    const passphraseConfirm = get("s3-passphrase-confirm");
+    const secretKeyRaw = get("s3-secret-key");
+
+    if (passphrase && passphrase !== passphraseConfirm) {
+      showStatus("Passphrases do not match.", "error");
+      return;
+    }
+
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    const existing = config.s3;
+
+    // Determine the secret key to store
+    let secretAccessKey: string | undefined;
+    let secretKeyEncrypted: EncryptedBlob | undefined;
+
+    if (secretKeyRaw) {
+      // User typed a (new) secret key
+      if (passphrase) {
+        secretKeyEncrypted = await SecureStorage.encrypt(secretKeyRaw, passphrase);
+        await SecureStorage.setPassphrase(passphrase);
+        secretAccessKey = undefined;
+      } else {
+        secretAccessKey = secretKeyRaw;
+        secretKeyEncrypted = undefined;
+      }
+    } else {
+      // Secret key field left blank — keep existing stored value
+      secretAccessKey = existing?.secretAccessKey;
+      secretKeyEncrypted = existing?.secretKeyEncrypted;
+      // If new passphrase provided, re-encrypt the existing plaintext key (migration)
+      if (passphrase && secretAccessKey) {
+        secretKeyEncrypted = await SecureStorage.encrypt(secretAccessKey, passphrase);
+        await SecureStorage.setPassphrase(passphrase);
+        secretAccessKey = undefined;
+      }
+    }
+
     config.s3 = {
       enabled: checked("s3-enabled"),
       bucket: get("s3-bucket") || undefined,
       region: get("s3-region") || undefined,
       endpoint: get("s3-endpoint") || undefined,
       accessKeyId: get("s3-access-key") || undefined,
-      secretAccessKey: get("s3-secret-key") || undefined,
+      secretAccessKey,
+      secretKeyEncrypted,
       prefix: get("s3-prefix") || undefined,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+
+    // Reload fields so encrypted placeholder appears
+    await loadS3Settings();
     showStatus("Settings saved.", "success");
   } catch (err) {
     showStatus(`Save failed: ${errorMsg(err)}`, "error");
@@ -414,11 +657,28 @@ function isProgressMsg(
   );
 }
 
+function isUploadCompleteMsg(
+  msg: unknown,
+): msg is { type: MessageType.UPLOAD_COMPLETE; payload: { id: string } } {
+  return (
+    typeof msg === "object" &&
+    msg !== null &&
+    (msg as { type?: unknown }).type === MessageType.UPLOAD_COMPLETE &&
+    typeof (msg as { payload?: { id?: unknown } }).payload?.id === "string"
+  );
+}
+
 function registerHistoryListener(): void {
   if (historyMessageListener) return;
   historyMessageListener = (msg) => {
+    if (isUploadCompleteMsg(msg)) {
+      handleFinishedDownload(msg.payload.id);
+      return;
+    }
     if (!isProgressMsg(msg)) return;
-    if (!FINISHED_STAGES.has(msg.payload.progress.stage as DownloadStage)) return;
+    const stage = msg.payload.progress.stage as DownloadStage;
+    // Re-render on finished stages and upload stage transitions
+    if (!FINISHED_STAGES.has(stage) && stage !== DownloadStage.UPLOADING) return;
     handleFinishedDownload(msg.payload.id);
   };
   chrome.runtime.onMessage.addListener(historyMessageListener);
@@ -541,7 +801,7 @@ async function onHistoryEnabledChange(): Promise<void> {
 
 async function fetchAndRenderHistory(): Promise<void> {
   const all = await getAllDownloads();
-  allHistory = all.filter((d) => FINISHED_STAGES.has(d.progress.stage));
+  allHistory = all.filter((d) => FINISHED_STAGES.has(d.progress.stage) || d.progress.stage === DownloadStage.UPLOADING);
   rerenderHistory();
 }
 
@@ -694,6 +954,11 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     );
   }
   badges.appendChild(makeStageBadge(state.progress.stage));
+  
+  if (state.cloudLinks?.googleDrive || state.cloudLinks?.s3) {
+    badges.appendChild(makeBadge("uploaded", "badge-uploaded"));
+  }
+  
   info.appendChild(badges);
 
   item.appendChild(info);
@@ -707,6 +972,23 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   date.title = new Date(state.createdAt).toLocaleString();
   date.textContent = relativeTime(state.createdAt);
   actions.appendChild(date);
+
+  // Upload progress indicator with cancel button
+  if (state.progress.stage === DownloadStage.UPLOADING) {
+    const pct = state.progress.percentage || 0;
+    const progressEl = document.createElement("div");
+    progressEl.className = "history-upload-progress";
+    progressEl.title = `Uploading... ${Math.round(pct)}%`;
+    progressEl.innerHTML = iconUploadProgress(pct);
+    actions.appendChild(progressEl);
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "history-cancel-upload";
+    cancelBtn.title = "Cancel upload";
+    cancelBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconX()}</svg>`;
+    cancelBtn.addEventListener("click", () => cancelUpload(state.id));
+    actions.appendChild(cancelBtn);
+  }
 
   // Actions menu
   const menuWrap = document.createElement("div");
@@ -765,6 +1047,17 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     }));
   }
 
+  // Upload to cloud (completed only, not while uploading)
+  if (state.progress.stage === DownloadStage.COMPLETED && !state.metadata.hasDrm) {
+    const uploadLabel = state.uploadError ? "Retry upload" : "Upload to cloud";
+    menu.appendChild(makeMenuItem(iconUpload(), uploadLabel, () => handleHistoryUpload(state.id)));
+  }
+
+  // Cancel upload (while uploading)
+  if (state.progress.stage === DownloadStage.UPLOADING) {
+    menu.appendChild(makeMenuItem(iconX(), "Cancel upload", () => cancelUpload(state.id)));
+  }
+
   menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url, state.metadata)));
   menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", async () => {
     await navigator.clipboard.writeText(state.url);
@@ -774,6 +1067,10 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   menu.appendChild(makeMenuItem(iconLink(), "Check manifest", () => checkManifest(state.url)));
 
   menu.appendChild(makeMenuItem(iconTrash(), "Delete", async () => {
+    // Cancel upload first if one is in progress for this item
+    if (state.progress.stage === DownloadStage.UPLOADING) {
+      await cancelUpload(state.id);
+    }
     await deleteDownload(state.id);
     allHistory = allHistory.filter((d) => d.id !== state.id);
     selectedIds.delete(state.id);
@@ -825,6 +1122,7 @@ function makeStageBadge(stage: DownloadStage): HTMLElement {
     [DownloadStage.COMPLETED]: "badge-completed",
     [DownloadStage.FAILED]: "badge-failed",
     [DownloadStage.CANCELLED]: "badge-cancelled",
+    [DownloadStage.UPLOADING]: "badge-completed",
   };
   return makeBadge(stage, map[stage] ?? "");
 }
@@ -842,6 +1140,121 @@ function syncBulkBar(): void {
   selectAll.checked = visible.length > 0 && visible.every((d) => selectedIds.has(d.id));
   selectAll.indeterminate =
     !selectAll.checked && visible.some((d) => selectedIds.has(d.id));
+}
+
+async function cancelUpload(downloadId: string): Promise<void> {
+  if (!confirm("Are you sure you want to cancel this upload?")) return;
+  try {
+    await chrome.runtime.sendMessage({
+      type: MessageType.CANCEL_UPLOAD,
+      payload: { downloadId },
+    });
+    showToast("Upload cancelled", "warning");
+    await fetchAndRenderHistory();
+  } catch (err: any) {
+    showToast("Failed to cancel upload: " + (err?.message || "Unknown error"), "error");
+  }
+}
+
+async function handleHistoryUpload(downloadId: string): Promise<void> {
+  const settings = await loadSettings();
+  const driveEnabled = settings.googleDrive?.enabled === true;
+  const s3Enabled = settings.s3?.enabled === true;
+
+  if (!driveEnabled && !s3Enabled) {
+    showToast("No cloud provider configured. Go to Cloud Providers settings.", "error");
+    return;
+  }
+
+  let provider: CloudProvider;
+  if (driveEnabled && !s3Enabled) {
+    provider = "googleDrive";
+  } else if (s3Enabled && !driveEnabled) {
+    provider = "s3";
+  } else {
+    // Both configured — ask user
+    const choice = await new Promise<CloudProvider | null>((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;";
+
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border-color,#3a3a5c);border-radius:8px;padding:20px;min-width:220px;text-align:center;";
+      dialog.innerHTML = `<div style="margin-bottom:12px;font-weight:500;color:var(--text-primary,#cdd6f4);">Choose provider</div>`;
+
+      const btnStyle = "display:block;width:100%;padding:8px 12px;margin-top:8px;border:1px solid var(--border-color,#3a3a5c);border-radius:6px;background:var(--bg-primary,#11111b);color:var(--text-primary,#cdd6f4);cursor:pointer;font-size:13px;";
+
+      const driveBtn = document.createElement("button");
+      driveBtn.textContent = "Google Drive";
+      driveBtn.style.cssText = btnStyle;
+      driveBtn.addEventListener("click", () => { overlay.remove(); resolve("googleDrive"); });
+
+      const s3Btn = document.createElement("button");
+      s3Btn.textContent = "S3";
+      s3Btn.style.cssText = btnStyle;
+      s3Btn.addEventListener("click", () => { overlay.remove(); resolve("s3"); });
+
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
+
+      dialog.appendChild(driveBtn);
+      dialog.appendChild(s3Btn);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+    });
+    if (!choice) return;
+    provider = choice;
+  }
+
+  // Open file picker
+  let file: File;
+  try {
+    const [fileHandle] = await (window as any).showOpenFilePicker({
+      multiple: false,
+      types: [{ description: "Video files", accept: { "video/*": [".mp4", ".webm", ".mkv", ".mov"] } }],
+    });
+    file = await fileHandle.getFile();
+  } catch (err: any) {
+    if (err?.name === "AbortError") return;
+    showToast("Failed to select file", "error");
+    return;
+  }
+
+  if (!file.type.startsWith("video/")) {
+    showToast(`Invalid file type "${file.type}". Select a video file.`, "error");
+    return;
+  }
+
+  showToast("Uploading…", "warning");
+
+  try {
+    // Store file bytes in IDB — chrome.runtime.sendMessage uses JSON
+    // serialization which destroys ArrayBuffer. IDB is shared across contexts.
+    const tempKey = `__upload_${downloadId}`;
+    await storeChunk(tempKey, 0, await file.arrayBuffer());
+
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.UPLOAD_REQUEST,
+          payload: { downloadId, provider },
+        },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(res);
+        },
+      );
+    });
+    if (response?.success) {
+      showToast("Upload complete", "success");
+      await fetchAndRenderHistory();
+    } else {
+      showToast("Upload failed: " + (response?.error || "Unknown error"), "error");
+    }
+  } catch (err: any) {
+    showToast("Upload failed: " + (err?.message || "Unknown error"), "error");
+  }
 }
 
 async function redownload(url: string, metadata?: VideoMetadata): Promise<void> {
@@ -1020,6 +1433,41 @@ function iconTrash(): string {
   return `<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>`;
 }
 
+function iconUpload(): string {
+  return `<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="20"></line>`;
+}
+
+function iconUploadProgress(pct: number): string {
+  // Water-fill rising from bottom: cloud borders + arrow interior fill with accent.
+  // Everything above the water line stays gray.
+  const cloudPath = "M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z";
+  const cloudTop = 6;
+  const cloudHeight = 14;
+  const fillY = cloudTop + cloudHeight - (pct / 100) * cloudHeight;
+  const fillH = 24 - fillY;
+  const gray = "#888";
+
+  return `
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <defs>
+        <clipPath id="upload-water-clip">
+          <rect x="0" y="${fillY}" width="24" height="${fillH}"/>
+        </clipPath>
+      </defs>
+      <!-- Base: gray cloud outline + arrow -->
+      <path d="${cloudPath}" stroke="${gray}" fill="none"/>
+      <polyline points="16 16 12 12 8 16" stroke="${gray}" fill="none"/>
+      <line x1="12" y1="12" x2="12" y2="20" stroke="${gray}"/>
+      <!-- Accent overlay clipped to water level -->
+      <g clip-path="url(#upload-water-clip)">
+        <path d="${cloudPath}" stroke="var(--accent)" fill="none"/>
+        <polyline points="16 16 12 12 8 16" stroke="var(--accent)" fill="var(--accent)"/>
+        <line x1="12" y1="12" x2="12" y2="20" stroke="var(--accent)"/>
+      </g>
+    </svg>
+  `;
+}
+
 function iconCheck(): string {
   return `<polyline points="20 6 9 17 4 12"></polyline>`;
 }
@@ -1144,16 +1592,19 @@ async function loadAdvancedSettings(): Promise<void> {
   get("master-playlist-cache-size").value = advanced.masterPlaylistCacheSize.toString();
   get("db-sync-interval").value = (advanced.dbSyncIntervalMs / 1000).toString();
 
-  document
-    .getElementById("save-advanced-settings")
-    ?.addEventListener("click", saveAdvancedSettings);
-  document
-    .getElementById("reset-advanced-settings")
-    ?.addEventListener("click", resetAdvancedSettings);
+  for (const id of ["save-advanced-settings", "save-advanced-settings-caches", "save-advanced-settings-perf"]) {
+    document.getElementById(id)?.addEventListener("click", saveAdvancedSettings);
+  }
+  for (const id of ["reset-advanced-settings", "reset-advanced-settings-caches", "reset-advanced-settings-perf"]) {
+    document.getElementById(id)?.addEventListener("click", resetAdvancedSettings);
+  }
+
+  setupAdvancedTabs();
 }
 
-async function saveAdvancedSettings(): Promise<void> {
-  const btn = document.getElementById("save-advanced-settings") as HTMLButtonElement;
+async function saveAdvancedSettings(event?: Event): Promise<void> {
+  const btn = ((event?.currentTarget as HTMLButtonElement | null)
+    ?? document.getElementById("save-advanced-settings")) as HTMLButtonElement;
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
 
   const maxRetries       = validateField(get("max-retries"),               MIN_MAX_RETRIES,               MAX_MAX_RETRIES,               true);
@@ -1193,8 +1644,9 @@ async function saveAdvancedSettings(): Promise<void> {
   }
 }
 
-async function resetAdvancedSettings(): Promise<void> {
-  const btn = document.getElementById("reset-advanced-settings") as HTMLButtonElement;
+async function resetAdvancedSettings(event?: Event): Promise<void> {
+  const btn = ((event?.currentTarget as HTMLButtonElement | null)
+    ?? document.getElementById("reset-advanced-settings")) as HTMLButtonElement;
   btn.disabled = true;
 
   try {

@@ -64,6 +64,7 @@ export abstract class BasePlaylistHandler {
   protected readonly maxPollIntervalMs: number;
   protected readonly pollFraction: number;
 
+
   protected downloadId: string = "";
   protected bytesDownloaded: number = 0;
   protected totalBytes: number = 0;

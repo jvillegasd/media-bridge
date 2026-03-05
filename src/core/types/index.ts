@@ -74,10 +74,21 @@ export interface DownloadState {
   progress: DownloadProgress;
   localPath?: string;
   cloudId?: string;
+  cloudLinks?: {
+    googleDrive?: string; // webViewLink
+    s3?: string;          // public URL or s3:// URI
+  };
+  uploadError?: string;     // last upload failure message
   isManual?: boolean; // Indicates if download was started from manual/manifest tab
   chromeDownloadId?: number; // Chrome downloads API ID for reliable cancellation (only set when Chrome API is used)
   createdAt: number;
   updatedAt: number;
+}
+
+export interface EncryptedBlob {
+  encrypted: string; // base64 ciphertext
+  iv: string;        // base64 IV
+  salt: string;      // base64 PBKDF2 salt
 }
 
 export interface StorageConfig {
@@ -96,7 +107,8 @@ export interface StorageConfig {
     region?: string;
     endpoint?: string; // For S3-compatible providers (Cloudflare R2, Backblaze, etc.)
     accessKeyId?: string;
-    secretAccessKey?: string;
+    secretAccessKey?: string;      // plaintext fallback (no passphrase set)
+    secretKeyEncrypted?: EncryptedBlob; // AES-GCM encrypted secret key (passphrase mode)
     prefix?: string;
   };
   recording?: {

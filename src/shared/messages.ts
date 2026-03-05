@@ -4,6 +4,8 @@
 
 import { VideoMetadata, DownloadStage } from "../core/types";
 
+export type CloudProvider = 'googleDrive' | 's3';
+
 export enum MessageType {
   // Download messages
   DOWNLOAD_REQUEST = "DOWNLOAD_REQUEST",
@@ -29,6 +31,7 @@ export enum MessageType {
   UPLOAD_PROGRESS = "UPLOAD_PROGRESS",
   UPLOAD_COMPLETE = "UPLOAD_COMPLETE",
   UPLOAD_FAILED = "UPLOAD_FAILED",
+  CANCEL_UPLOAD = "CANCEL_UPLOAD",
 
   // Config
   GET_CONFIG = "GET_CONFIG",
@@ -81,7 +84,6 @@ export interface DownloadRequestMessage extends BaseMessage {
   payload: {
     url: string;
     filename?: string;
-    uploadToDrive?: boolean;
     metadata: VideoMetadata;
     tabTitle?: string;
     website?: string;
