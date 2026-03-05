@@ -659,6 +659,26 @@
       color: var(--text-primary);
     }
 
+    .history-cancel-upload {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .history-cancel-upload:hover {
+      background: var(--surface-2);
+      color: var(--danger, #f38ba8);
+    }
+
     .history-menu {
       display: none;
       position: absolute;

@@ -39,6 +39,7 @@ export class GoogleDriveClient extends BaseCloudProvider {
     blob: Blob,
     filename: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<string> {
     try {
       const token = await GoogleAuth.getAccessToken(GOOGLE_DRIVE_SCOPES);
@@ -54,10 +55,10 @@ export class GoogleDriveClient extends BaseCloudProvider {
       // For files larger than 5MB, use resumable chunked upload
       let result: UploadResult;
       if (blob.size > RESUMABLE_UPLOAD_THRESHOLD_BYTES) {
-        result = await this.resumableUpload(blob, filename, token, folderId, onProgress);
+        result = await this.resumableUpload(blob, filename, token, folderId, onProgress, signal);
       } else {
         // Simple multipart upload for smaller files
-        result = await this.simpleUpload(blob, filename, token, folderId);
+        result = await this.simpleUpload(blob, filename, token, folderId, signal);
       }
 
       return result.webViewLink ?? result.fileId;
@@ -77,6 +78,7 @@ export class GoogleDriveClient extends BaseCloudProvider {
     filename: string,
     token: string,
     folderId?: string,
+    signal?: AbortSignal,
   ): Promise<UploadResult> {
     const metadata: any = {
       name: filename,
@@ -101,6 +103,7 @@ export class GoogleDriveClient extends BaseCloudProvider {
           Authorization: `Bearer ${token}`,
         },
         body: form,
+        signal,
       },
     );
 
@@ -139,6 +142,7 @@ export class GoogleDriveClient extends BaseCloudProvider {
     token: string,
     folderId?: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<UploadResult> {
     const totalBytes = blob.size;
     const mimeType = blob.type || "application/octet-stream";
@@ -180,6 +184,7 @@ export class GoogleDriveClient extends BaseCloudProvider {
     let offset = 0;
 
     while (offset < totalBytes) {
+      signal?.throwIfAborted();
       const end = Math.min(offset + CHUNK_SIZE, totalBytes);
       const chunk = blob.slice(offset, end);
       const chunkSize = end - offset;
@@ -193,6 +198,7 @@ export class GoogleDriveClient extends BaseCloudProvider {
           "Content-Type": mimeType,
         },
         body: chunk,
+        signal,
       });
 
       // Session expired — cannot recover without restarting

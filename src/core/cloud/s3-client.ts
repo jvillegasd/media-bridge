@@ -46,6 +46,7 @@ export class S3Client extends BaseCloudProvider {
     blob: Blob,
     filename: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<string> {
     const key = this.config.prefix
       ? `${this.config.prefix.replace(/\/$/, "")}/${filename}`
@@ -53,18 +54,19 @@ export class S3Client extends BaseCloudProvider {
 
     let result: S3UploadResult;
     if (blob.size >= MULTIPART_THRESHOLD) {
-      result = await this.multipartUpload(blob, key, onProgress);
+      result = await this.multipartUpload(blob, key, onProgress, signal);
     } else {
-      result = await this.putUpload(blob, key, onProgress);
+      result = await this.putUpload(blob, key, onProgress, signal);
     }
     return result.url;
   }
 
-  /** Single-part PUT upload for files < 100 MB */
+  /** Single-part PUT upload for files < 10 MB */
   private async putUpload(
     blob: Blob,
     key: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<S3UploadResult> {
     const url = this.objectUrl(key);
     const buffer = await blob.arrayBuffer();
@@ -97,6 +99,7 @@ export class S3Client extends BaseCloudProvider {
       method: "PUT",
       headers,
       body: buffer,
+      signal,
     });
 
     if (!response.ok) {
@@ -112,11 +115,12 @@ export class S3Client extends BaseCloudProvider {
     return { url, key };
   }
 
-  /** Multipart upload for files >= 100 MB */
+  /** Multipart upload for files >= 10 MB */
   private async multipartUpload(
     blob: Blob,
     key: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<S3UploadResult> {
     // 1. Initiate
     const uploadId = await this.initiateMultipart(key);
@@ -127,12 +131,13 @@ export class S3Client extends BaseCloudProvider {
       const totalParts = Math.ceil(blob.size / PART_SIZE);
 
       for (let i = 0; i < totalParts; i++) {
+        signal?.throwIfAborted();
         const start = i * PART_SIZE;
         const end = Math.min(start + PART_SIZE, blob.size);
         const partBlob = blob.slice(start, end);
         const partNumber = i + 1;
 
-        const etag = await this.uploadPart(key, uploadId, partNumber, partBlob);
+        const etag = await this.uploadPart(key, uploadId, partNumber, partBlob, signal);
         parts.push({ PartNumber: partNumber, ETag: etag });
 
         uploadedBytes += partBlob.size;
@@ -198,6 +203,7 @@ export class S3Client extends BaseCloudProvider {
     uploadId: string,
     partNumber: number,
     blob: Blob,
+    signal?: AbortSignal,
   ): Promise<string> {
     const baseUrl = this.objectUrl(key);
     const url = `${baseUrl}?partNumber=${partNumber}&uploadId=${encodeURIComponent(uploadId)}`;
@@ -224,7 +230,7 @@ export class S3Client extends BaseCloudProvider {
     headers["Authorization"] = authorization;
     delete headers["Host"];
 
-    const response = await fetch(url, { method: "PUT", headers, body: buffer });
+    const response = await fetch(url, { method: "PUT", headers, body: buffer, signal });
     if (!response.ok) {
       const text = await response.text().catch(() => response.statusText);
       throw new UploadError(

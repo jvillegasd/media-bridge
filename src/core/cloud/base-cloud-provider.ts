@@ -13,5 +13,6 @@ export abstract class BaseCloudProvider {
     blob: Blob,
     filename: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<string>;
 }
