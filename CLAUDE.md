@@ -32,7 +32,7 @@ All HLS, M3U8, and DASH downloads are processed by **FFmpeg.wasm** running insid
 - `s3-client.ts` — `S3Client extends BaseCloudProvider` (SigV4-signed PUT / multipart for files ≥ 10 MB)
 - `upload-manager.ts` — `Map<CloudProvider, BaseCloudProvider>` registry; routes `uploadBlob()` through `client.upload()`; `isConfigured()` checks `providers.size > 0`
 
-**Upload is not yet triggered** — the wiring from the download completion path into `UploadManager.uploadFromBlobUrl()` is not done. Do not document this as a working feature.
+**Upload is manual only** — completed downloads show an "Upload to cloud" action in the History page (Options → History → item menu). Clicking it opens a file picker (`showOpenFilePicker`); the user selects the local video file, which is sent to the service worker via `UPLOAD_REQUEST` message for cloud upload. If both providers are configured, a dialog lets the user choose. There is no automatic upload on download completion. The popup Downloads tab only shows in-progress downloads; finished downloads live in History.
 
 **To add a new provider**: create a class extending `BaseCloudProvider`, add its key to the `CloudProvider` union in `shared/messages.ts`, instantiate and register it in the `UploadManager` constructor — no other code needs to change.
 

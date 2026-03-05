@@ -9,7 +9,7 @@ import { SecureStorage } from "../core/storage/secure-storage";
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "../core/cloud/google-auth";
 import { S3Client } from "../core/cloud/s3-client";
 import { StorageConfig, EncryptedBlob, DownloadState, DownloadStage, VideoMetadata } from "../core/types";
-import { MessageType } from "../shared/messages";
+import { MessageType, CloudProvider } from "../shared/messages";
 import {
   getAllDownloads,
   getDownload,
@@ -972,6 +972,14 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     }));
   }
 
+  // Upload to cloud (completed only)
+  if (state.progress.stage === DownloadStage.COMPLETED && !state.metadata.hasDrm) {
+    const cloudLink = state.cloudLinks?.googleDrive || state.cloudLinks?.s3;
+    if (!cloudLink) {
+      menu.appendChild(makeMenuItem(iconUpload(), state.uploadError ? "Retry upload" : "Upload to cloud", () => handleHistoryUpload(state.id)));
+    }
+  }
+
   menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url, state.metadata)));
   menu.appendChild(makeMenuItem(iconCopy(), "Copy URL", async () => {
     await navigator.clipboard.writeText(state.url);
@@ -1049,6 +1057,92 @@ function syncBulkBar(): void {
   selectAll.checked = visible.length > 0 && visible.every((d) => selectedIds.has(d.id));
   selectAll.indeterminate =
     !selectAll.checked && visible.some((d) => selectedIds.has(d.id));
+}
+
+async function handleHistoryUpload(downloadId: string): Promise<void> {
+  const settings = await loadSettings();
+  const driveEnabled = settings.googleDrive?.enabled === true;
+  const s3Enabled = settings.s3?.enabled === true;
+
+  if (!driveEnabled && !s3Enabled) {
+    showToast("No cloud provider configured. Go to Cloud Providers settings.", "error");
+    return;
+  }
+
+  let provider: CloudProvider;
+  if (driveEnabled && !s3Enabled) {
+    provider = "googleDrive";
+  } else if (s3Enabled && !driveEnabled) {
+    provider = "s3";
+  } else {
+    // Both configured — ask user
+    const choice = await new Promise<CloudProvider | null>((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;";
+
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border-color,#3a3a5c);border-radius:8px;padding:20px;min-width:220px;text-align:center;";
+      dialog.innerHTML = `<div style="margin-bottom:12px;font-weight:500;color:var(--text-primary,#cdd6f4);">Choose provider</div>`;
+
+      const btnStyle = "display:block;width:100%;padding:8px 12px;margin-top:8px;border:1px solid var(--border-color,#3a3a5c);border-radius:6px;background:var(--bg-primary,#11111b);color:var(--text-primary,#cdd6f4);cursor:pointer;font-size:13px;";
+
+      const driveBtn = document.createElement("button");
+      driveBtn.textContent = "Google Drive";
+      driveBtn.style.cssText = btnStyle;
+      driveBtn.addEventListener("click", () => { overlay.remove(); resolve("googleDrive"); });
+
+      const s3Btn = document.createElement("button");
+      s3Btn.textContent = "S3";
+      s3Btn.style.cssText = btnStyle;
+      s3Btn.addEventListener("click", () => { overlay.remove(); resolve("s3"); });
+
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
+
+      dialog.appendChild(driveBtn);
+      dialog.appendChild(s3Btn);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+    });
+    if (!choice) return;
+    provider = choice;
+  }
+
+  // Open file picker
+  let file: File;
+  try {
+    const [fileHandle] = await (window as any).showOpenFilePicker({
+      multiple: false,
+      types: [{ description: "Video files", accept: { "video/*": [".mp4", ".webm", ".mkv", ".mov"] } }],
+    });
+    file = await fileHandle.getFile();
+  } catch (err: any) {
+    if (err?.name === "AbortError") return;
+    showToast("Failed to select file", "error");
+    return;
+  }
+
+  if (!file.type.startsWith("video/")) {
+    showToast(`Invalid file type "${file.type}". Select a video file.`, "error");
+    return;
+  }
+
+  showToast("Uploading…", "warning");
+
+  try {
+    const fileBytes = await file.arrayBuffer();
+    const response = await chrome.runtime.sendMessage({
+      type: MessageType.UPLOAD_REQUEST,
+      payload: { downloadId, fileBytes, provider },
+    });
+    if (response?.success) {
+      showToast("Upload complete", "success");
+      await fetchAndRenderHistory();
+    } else {
+      showToast("Upload failed: " + (response?.error || "Unknown error"), "error");
+    }
+  } catch (err: any) {
+    showToast("Upload failed: " + (err?.message || "Unknown error"), "error");
+  }
 }
 
 async function redownload(url: string, metadata?: VideoMetadata): Promise<void> {
@@ -1225,6 +1319,10 @@ function iconLink(): string {
 
 function iconTrash(): string {
   return `<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>`;
+}
+
+function iconUpload(): string {
+  return `<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="20"></line>`;
 }
 
 function iconCheck(): string {
