@@ -911,6 +911,12 @@ async function handleUploadRequestMessage(payload: {
       failedState.uploadError = fullMsg;
       failedState.progress.stage = DownloadStage.COMPLETED;
       await storeDownload(failedState);
+      try {
+        chrome.runtime.sendMessage(
+          { type: MessageType.DOWNLOAD_PROGRESS, payload: { id: downloadId, progress: failedState.progress } },
+          () => { if (chrome.runtime.lastError) {} },
+        );
+      } catch (_) {}
     }
     return { success: false, error: userMsg };
   } finally {
