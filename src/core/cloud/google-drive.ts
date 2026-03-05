@@ -96,7 +96,7 @@ export class GoogleDriveClient extends BaseCloudProvider {
     form.append("file", blob);
 
     const response = await fetch(
-      `${DRIVE_API_BASE}/files?uploadType=multipart`,
+      `${DRIVE_UPLOAD_BASE}/files?uploadType=multipart`,
       {
         method: "POST",
         headers: {
