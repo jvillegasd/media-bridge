@@ -1092,6 +1092,7 @@ function syncBulkBar(): void {
 }
 
 async function cancelUpload(downloadId: string): Promise<void> {
+  if (!confirm("Are you sure you want to cancel this upload?")) return;
   try {
     await chrome.runtime.sendMessage({
       type: MessageType.CANCEL_UPLOAD,
@@ -1382,35 +1383,34 @@ function iconTrash(): string {
 }
 
 function iconUpload(): string {
-  return `<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="20"></line>`;
+  return `<g transform="translate(0,0) scale(1.5)" fill="none" stroke="none"><path d="M14.966 7.211a2.91 2.91 0 00-2-.68 4.822 4.822 0 00-9.243-1.147A3.41 3.41 0 001.3 6.18 3.65 3.65 0 000 8.938a3.562 3.562 0 003.554 3.555H6.5v-1H3.547A2.559 2.559 0 011 8.938a2.64 2.64 0 01.943-1.992 2.413 2.413 0 012.032-.527l.435.075.13-.422a3.821 3.821 0 017.47 1.016l.017.57.563-.091a2.071 2.071 0 011.729.404A2.029 2.029 0 0115 9.508a1.987 1.987 0 01-1.985 1.985h-.032c-.061.001-.428.006-2.483.006v1c1.93 0 2.392-.004 2.515-.007a3.01 3.01 0 001.951-5.282v.001z" fill="currentColor"/><path d="M10.95 9.456l-2.46-2.5-2.46 2.5.712.701L7.99 8.89v3.62h1v-3.62l1.248 1.268.713-.701z" fill="currentColor"/></g>`;
 }
 
 function iconUploadProgress(pct: number): string {
-  // Water-fill rising from bottom: cloud borders + arrow interior fill with accent.
+  // Water-fill rising from bottom: cloud + arrow fill with accent color.
   // Everything above the water line stays gray.
-  const cloudPath = "M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z";
-  const cloudTop = 6;
-  const cloudHeight = 14;
-  const fillY = cloudTop + cloudHeight - (pct / 100) * cloudHeight;
-  const fillH = 24 - fillY;
+  const cloudPath = "M14.966 7.211a2.91 2.91 0 00-2-.68 4.822 4.822 0 00-9.243-1.147A3.41 3.41 0 001.3 6.18 3.65 3.65 0 000 8.938a3.562 3.562 0 003.554 3.555H6.5v-1H3.547A2.559 2.559 0 011 8.938a2.64 2.64 0 01.943-1.992 2.413 2.413 0 012.032-.527l.435.075.13-.422a3.821 3.821 0 017.47 1.016l.017.57.563-.091a2.071 2.071 0 011.729.404A2.029 2.029 0 0115 9.508a1.987 1.987 0 01-1.985 1.985h-.032c-.061.001-.428.006-2.483.006v1c1.93 0 2.392-.004 2.515-.007a3.01 3.01 0 001.951-5.282v.001z";
+  const arrowPath = "M10.95 9.456l-2.46-2.5-2.46 2.5.712.701L7.99 8.89v3.62h1v-3.62l1.248 1.268.713-.701z";
+  const iconTop = 4;
+  const iconHeight = 10;
+  const fillY = iconTop + iconHeight - (pct / 100) * iconHeight;
+  const fillH = 16 - fillY;
   const gray = "#888";
 
   return `
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
       <defs>
         <clipPath id="upload-water-clip">
-          <rect x="0" y="${fillY}" width="24" height="${fillH}"/>
+          <rect x="0" y="${fillY}" width="16" height="${fillH}"/>
         </clipPath>
       </defs>
-      <!-- Base: gray cloud outline + arrow -->
-      <path d="${cloudPath}" stroke="${gray}" fill="none"/>
-      <polyline points="16 16 12 12 8 16" stroke="${gray}" fill="none"/>
-      <line x1="12" y1="12" x2="12" y2="20" stroke="${gray}"/>
+      <!-- Base: gray cloud + arrow -->
+      <path d="${cloudPath}" fill="${gray}"/>
+      <path d="${arrowPath}" fill="${gray}"/>
       <!-- Accent overlay clipped to water level -->
       <g clip-path="url(#upload-water-clip)">
-        <path d="${cloudPath}" stroke="var(--accent)" fill="none"/>
-        <polyline points="16 16 12 12 8 16" stroke="var(--accent)" fill="var(--accent)"/>
-        <line x1="12" y1="12" x2="12" y2="20" stroke="var(--accent)"/>
+        <path d="${cloudPath}" fill="var(--accent)"/>
+        <path d="${arrowPath}" fill="var(--accent)"/>
       </g>
     </svg>
   `;
