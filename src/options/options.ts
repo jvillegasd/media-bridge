@@ -278,12 +278,16 @@ async function loadDriveSettings(): Promise<void> {
   const config = await loadSettings();
 
   const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
+  const clientIdIn = document.getElementById("drive-client-id") as HTMLInputElement;
   const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
   const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
+  const redirectUriEl = document.getElementById("drive-redirect-uri");
 
   enabledCb.checked = config.googleDrive.enabled;
+  clientIdIn.value = (await GoogleAuth.getClientId()) ?? "";
   folderNameIn.value = config.googleDrive.folderName;
   folderIdIn.value = config.googleDrive.targetFolderId ?? "";
+  if (redirectUriEl) redirectUriEl.textContent = chrome.identity.getRedirectURL();
 
   const driveSettingsEl = document.getElementById("drive-settings");
   if (driveSettingsEl)
@@ -324,11 +328,19 @@ async function checkAuthStatus(): Promise<void> {
 
 async function handleAuth(): Promise<void> {
   const btn = document.getElementById("auth-btn") as HTMLButtonElement;
+  const clientIdIn = document.getElementById("drive-client-id") as HTMLInputElement;
+  const clientId = clientIdIn.value.trim();
+  if (!clientId) {
+    markInvalid(clientIdIn, "Enter your OAuth Client ID before signing in.");
+    return;
+  }
   btn.disabled = true;
   btn.textContent = "Authenticating…";
   try {
+    await GoogleAuth.setClientId(clientId);
     await GoogleAuth.authenticate(GOOGLE_DRIVE_SCOPES);
-    showStatus("Authenticated with Google.", "success");
+    await persistDriveSettings(true);
+    showStatus("Authenticated and settings saved.", "success");
     await checkAuthStatus();
   } catch (err) {
     showStatus(`Authentication failed: ${errorMsg(err)}`, "error");
@@ -348,24 +360,46 @@ async function handleSignOut(): Promise<void> {
   }
 }
 
+/**
+ * Persist current Drive form values to storage.
+ * If enabledOverride is provided, it overrides the checkbox value.
+ * Returns false if validation fails.
+ */
+async function persistDriveSettings(enabledOverride?: boolean): Promise<boolean> {
+  const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
+  const clientIdIn = document.getElementById("drive-client-id") as HTMLInputElement;
+  const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
+  const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
+
+  const enabled = enabledOverride ?? enabledCb.checked;
+  const clientId = clientIdIn.value.trim();
+  if (enabled && !clientId) {
+    markInvalid(clientIdIn, "OAuth Client ID is required when Google Drive is enabled.");
+    return false;
+  }
+
+  await GoogleAuth.setClientId(clientId);
+
+  if (enabledOverride !== undefined) enabledCb.checked = enabled;
+
+  const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+  config.googleDrive = {
+    enabled,
+    folderName: folderNameIn.value || DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
+    targetFolderId: folderIdIn.value || undefined,
+    createFolderIfNotExists: true,
+  };
+  await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+  return true;
+}
+
 async function saveDriveSettings(): Promise<void> {
   const btn = document.getElementById("save-drive-settings") as HTMLButtonElement;
   btn.disabled = true;
   btn.textContent = "Saving…";
 
   try {
-    const enabledCb = document.getElementById("drive-enabled") as HTMLInputElement;
-    const folderNameIn = document.getElementById("drive-folder-name") as HTMLInputElement;
-    const folderIdIn = document.getElementById("drive-folder-id") as HTMLInputElement;
-
-    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
-    config.googleDrive = {
-      enabled: enabledCb.checked,
-      folderName: folderNameIn.value || DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
-      targetFolderId: folderIdIn.value || undefined,
-      createFolderIfNotExists: true,
-    };
-    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    if (!(await persistDriveSettings())) return;
     showStatus("Settings saved.", "success");
   } catch (err) {
     showStatus(`Save failed: ${errorMsg(err)}`, "error");

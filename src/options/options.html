@@ -1011,6 +1011,21 @@
 
             <div id="drive-settings" style="display:none;">
 
+              <div class="form-group">
+                <label class="form-label" for="drive-client-id">OAuth Client ID</label>
+                <input type="text" id="drive-client-id" class="form-input" placeholder="xxxxxxxxx.apps.googleusercontent.com" />
+                <!-- Google Drive requires users to create their own OAuth credentials (free). -->
+                <div class="form-help">
+                  To use Google Drive you need your own OAuth credentials (free):
+                  <ol style="margin:6px 0 0 16px;padding:0;line-height:1.6;">
+                    <li>Go to <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">Google Cloud Console → APIs</a> and enable the <strong>Google Drive API</strong>.</li>
+                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Credentials</a> → <strong>Create Credentials</strong> → <strong>OAuth client ID</strong>.</li>
+                    <li>Set application type to <strong>Web application</strong>.</li>
+                    <li>Under <strong>Authorized redirect URIs</strong>, add: <code id="drive-redirect-uri"></code></li>
+                    <li>Copy the <strong>Client ID</strong> and paste it below.</li>
+                  </ol>
+                </div>
+              </div>
 
               <div class="form-group">
                 <label class="form-label" for="drive-folder-name">Folder Name</label>

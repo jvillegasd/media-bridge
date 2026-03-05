@@ -16,6 +16,7 @@ A Manifest V3 Chromium extension that detects and downloads videos from the web 
 - **Header Injection**: Injects `Origin`/`Referer` headers via `declarativeNetRequest` for CDNs that require them
 - **Download History**: Completed, failed, and cancelled downloads are persisted and browsable in the options page History section with infinite scroll
 - **Notifications**: Optional OS notification and auto-open file on download completion
+- **Cloud Upload**: Upload completed downloads to Google Drive or S3-compatible storage from the History page
 - **Configurable Settings**: Recording poll intervals, fetch retry behaviour, detection cache sizes, IDB sync rate — all tunable from the options page
 
 ## ⚠️ Output File Size Limit
@@ -24,11 +25,31 @@ Because video processing uses **FFmpeg.wasm** (a WebAssembly build of FFmpeg run
 
 > **Planned**: A future release will replace FFmpeg.wasm with [mediabunny](https://github.com/nicktindall/mediabunny) for native-speed muxing without the 2 GB constraint.
 
-## Planned Features
+## Cloud Upload Setup
 
-The following features are planned but not yet implemented:
+Completed downloads can be uploaded to **Google Drive** or **S3-compatible storage** from **Options → History → item menu → Upload to cloud**.
 
-- **Cloud storage uploads**: The code infrastructure for Google Drive exists (`core/cloud/`) but is not wired up — no uploads are triggered after downloads complete. Future versions will support Google Drive and other cloud providers (S3, Dropbox, etc.).
+### Google Drive
+
+Google Drive requires you to create your own OAuth credentials (free):
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a project (or use an existing one).
+2. Enable the **[Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)**.
+3. Go to **[Credentials](https://console.cloud.google.com/apis/credentials)** → **Create Credentials** → **OAuth client ID**.
+4. Set application type to **Web application**.
+5. Under **Authorized redirect URIs**, add your extension's redirect URI.
+   - Find it in **Options → Cloud Providers → Google Drive** — it's shown next to the Client ID field.
+   - It looks like `https://<extension-id>.chromiumapp.org/`
+6. Copy the **Client ID** and paste it into the options page.
+7. Click **Sign in with Google** to authorize.
+
+> **Note:** If you haven't configured a consent screen yet, Google will prompt you to create one. Choose **External** user type, fill in the required fields, and add yourself as a test user. The app will work in "Testing" mode — no verification needed for personal use.
+
+### S3 / S3-Compatible Storage
+
+1. In **Options → Cloud Providers → S3**, enter your bucket name, region, access key ID, and secret access key.
+2. Your S3 bucket must have a CORS policy that allows the extension origin. The options page generates the correct JSON and provides a **Copy CORS Config** button — paste it into **S3 → Bucket → Permissions → CORS**.
+3. Works with AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO, and any S3-compatible provider.
 
 ## Installation
 
@@ -173,10 +194,11 @@ src/
 │   ├── storage/
 │   │   ├── chrome-storage.ts  # Raw chrome.storage.local access
 │   │   └── settings.ts        # AppSettings interface + loadSettings() — always use this
-│   ├── cloud/                 # ⚠️ Planned — infrastructure exists, not yet wired up
-│   │   ├── google-auth.ts
-│   │   ├── google-drive.ts
-│   │   └── upload-manager.ts
+│   ├── cloud/                 # Google Drive + S3 upload providers
+│   │   ├── google-auth.ts     # OAuth via launchWebAuthFlow (user-provided client ID)
+│   │   ├── google-drive.ts    # Resumable upload (chunked for files > 5 MB)
+│   │   ├── s3-client.ts       # SigV4-signed PUT / multipart upload
+│   │   └── upload-manager.ts  # Provider registry + routing
 │   ├── metadata/
 │   │   └── metadata-extractor.ts
 │   └── utils/
@@ -203,7 +225,7 @@ src/
 
 - `storage` — Config persistence
 - `downloads` — Save downloaded files
-- `identity` — OAuth (reserved for future cloud upload)
+- `identity` — Google OAuth via `launchWebAuthFlow`
 - `activeTab` / `scripting` — Content script injection
 - `offscreen` — Offscreen document for FFmpeg.wasm
 - `unlimitedStorage` — Large segment storage in IndexedDB
