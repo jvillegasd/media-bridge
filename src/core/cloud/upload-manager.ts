@@ -90,6 +90,7 @@ export class UploadManager {
     filename: string,
     downloadState: DownloadState,
     provider: CloudProvider,
+    signal?: AbortSignal,
   ): Promise<CloudLinks> {
     const client = this.providers.get(provider);
     if (!client) {
@@ -102,8 +103,17 @@ export class UploadManager {
     downloadState.progress.percentage = 0;
     await this.onStateUpdate?.(downloadState);
 
-    const onProgress: ProgressCallback = (u, t) => this.onProgress?.(u, t);
-    const url = await client.upload(blob, filename, onProgress);
+    const onProgress: ProgressCallback = (uploaded, total) => {
+      this.onProgress?.(uploaded, total);
+      const pct = total > 0 ? Math.round((uploaded / total) * 100) : 0;
+      if (downloadState.progress.percentage !== pct) {
+        downloadState.progress.percentage = pct;
+        downloadState.progress.message = `Uploading... ${pct}%`;
+        // Fire-and-forget — don't block the upload data flow
+        this.onStateUpdate?.(downloadState);
+      }
+    };
+    const url = await client.upload(blob, filename, onProgress, signal);
 
     const links: CloudLinks = {};
     links[provider] = url;

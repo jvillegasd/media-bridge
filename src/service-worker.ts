@@ -53,6 +53,8 @@ import {
 } from "./shared/constants";
 
 const activeDownloads = new Map<string, Promise<void>>();
+const activeUploads = new Set<string>();
+const uploadAbortControllers = new Map<string, AbortController>();
 // Map to store AbortControllers for each download (keyed by normalized URL)
 const downloadAbortControllers = new Map<string, AbortController>();
 // Set of normalized URLs that should save partial progress on abort
@@ -81,6 +83,10 @@ const keepAlive = (
     }
   }
 )();
+
+function updateKeepAlive(): void {
+  keepAlive(activeDownloads.size > 0 || activeUploads.size > 0);
+}
 
 /**
  * Initialize service worker
@@ -403,6 +409,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleUploadRequestMessage(message.payload).then(sendResponse);
         return true;
 
+      case MessageType.CANCEL_UPLOAD: {
+        (async () => {
+          const uid = message.payload?.downloadId as string | undefined;
+          if (uid) {
+            const ctrl = uploadAbortControllers.get(uid);
+            if (ctrl) {
+              ctrl.abort();
+              // Remove from tracking immediately so onStateUpdate stops writing
+              uploadAbortControllers.delete(uid);
+              activeUploads.delete(uid);
+              // Restore COMPLETED stage — awaited so deleteDownload() won't race
+              const s = await getDownload(uid);
+              if (s) {
+                s.progress.stage = DownloadStage.COMPLETED;
+                s.progress.message = "Upload cancelled";
+                s.progress.percentage = undefined;
+                await storeDownload(s);
+              }
+            }
+          }
+          sendResponse({ success: true });
+        })();
+        return true;
+      }
+
       case MessageType.CHECK_URL: {
         const checkUrl = async () => {
           try {
@@ -639,9 +670,9 @@ async function handleDownloadRequest(payload: {
   );
   activeDownloads.set(normalizedUrl, downloadPromise);
 
-  // Start keep-alive if this is the first active download
+  // Start keep-alive if this is the first active operation
   if (activeDownloads.size === 1) {
-    keepAlive(true);
+    updateKeepAlive();
     // Pre-warm FFmpeg for HLS/M3U8/DASH downloads while segments download
     if (
       metadata.format === VideoFormat.HLS ||
@@ -688,9 +719,9 @@ async function handleDownloadRequest(payload: {
       // This handles both success and failure cases
       activeDownloads.delete(normalizedUrl);
 
-      // Stop keep-alive if no more active downloads
+      // Stop keep-alive if no more active operations
       if (activeDownloads.size === 0) {
-        keepAlive(false);
+        updateKeepAlive();
         closeOffscreenDocument().catch((err) =>
           logger.error("Failed to close offscreen document:", err),
         );
@@ -744,9 +775,18 @@ async function handleUploadRequestMessage(payload: {
   downloadId: string;
   provider: CloudProvider;
 }): Promise<{ success: boolean; error?: string }> {
-  try {
-    const { downloadId, provider } = payload;
+  const { downloadId, provider } = payload;
 
+  if (activeUploads.has(downloadId)) {
+    return { success: false, error: "Upload already in progress" };
+  }
+
+  const abortController = new AbortController();
+  uploadAbortControllers.set(downloadId, abortController);
+  activeUploads.add(downloadId);
+  updateKeepAlive();
+
+  try {
     // Always clean up the temp IDB blob, even on early-return errors
     const tempKey = `__upload_${downloadId}`;
     const chunks = await getAllChunks(tempKey);
@@ -779,6 +819,8 @@ async function handleUploadRequestMessage(payload: {
     const uploadManager = new UploadManager({
       config: storageConfig,
       onStateUpdate: async (updatedState) => {
+        // Skip IDB write if upload was cancelled (record may be deleted)
+        if (abortController.signal.aborted || !activeUploads.has(updatedState.id)) return;
         await storeDownload(updatedState);
         try {
           chrome.runtime.sendMessage(
@@ -793,7 +835,12 @@ async function handleUploadRequestMessage(payload: {
       return { success: false, error: "No cloud provider configured" };
     }
 
-    const links = await uploadManager.uploadBlob(blob, filename, state, provider);
+    const links = await uploadManager.uploadBlob(blob, filename, state, provider, abortController.signal);
+
+    if (abortController.signal.aborted) {
+      return { success: false, error: "Upload cancelled" };
+    }
+
     const freshState = await getDownload(downloadId);
     if (freshState) {
       freshState.cloudLinks = { ...freshState.cloudLinks, ...links };
@@ -811,17 +858,25 @@ async function handleUploadRequestMessage(payload: {
 
     return { success: true };
   } catch (err) {
+    // If aborted, the CANCEL_UPLOAD handler already restored the state
+    if (abortController.signal.aborted) {
+      return { success: false, error: "Upload cancelled" };
+    }
     logger.error("Upload request failed:", err);
     const fullMsg = err instanceof Error ? err.message : String(err);
     const userMsg = friendlyUploadError(err);
     // Persist the error so the popup can show a retry button
-    const failedState = await getDownload(payload.downloadId);
+    const failedState = await getDownload(downloadId);
     if (failedState) {
       failedState.uploadError = fullMsg;
       failedState.progress.stage = DownloadStage.COMPLETED;
       await storeDownload(failedState);
     }
     return { success: false, error: userMsg };
+  } finally {
+    uploadAbortControllers.delete(downloadId);
+    activeUploads.delete(downloadId);
+    updateKeepAlive();
   }
 }
 
@@ -1270,7 +1325,7 @@ async function handleStartRecording(payload: {
     .finally(() => {
       activeDownloads.delete(normalizedUrl);
       if (activeDownloads.size === 0) {
-        keepAlive(false);
+        updateKeepAlive();
         closeOffscreenDocument().catch((err) =>
           logger.error("Failed to close offscreen document:", err),
         );
@@ -1279,7 +1334,7 @@ async function handleStartRecording(payload: {
 
   activeDownloads.set(normalizedUrl, recordingPromise);
   if (activeDownloads.size === 1) {
-    keepAlive(true);
+    updateKeepAlive();
     // Pre-warm FFmpeg — recordings always need FFmpeg for the merge phase
     createOffscreenDocument()
       .then(() =>
