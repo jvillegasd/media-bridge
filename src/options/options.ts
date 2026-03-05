@@ -66,6 +66,7 @@ const FINISHED_STAGES = new Set([
   DownloadStage.COMPLETED,
   DownloadStage.FAILED,
   DownloadStage.CANCELLED,
+  DownloadStage.UPLOADING,
 ]);
 
 // ─────────────────────────────────────────────
@@ -902,6 +903,11 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     );
   }
   badges.appendChild(makeStageBadge(state.progress.stage));
+  
+  if (state.cloudLinks?.googleDrive || state.cloudLinks?.s3) {
+    badges.appendChild(makeBadge("uploaded", "badge-uploaded"));
+  }
+  
   info.appendChild(badges);
 
   item.appendChild(info);
@@ -915,6 +921,16 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   date.title = new Date(state.createdAt).toLocaleString();
   date.textContent = relativeTime(state.createdAt);
   actions.appendChild(date);
+
+  // Upload progress indicator
+  if (state.progress.stage === DownloadStage.UPLOADING) {
+    const pct = state.progress.percentage || 0;
+    const progressEl = document.createElement("div");
+    progressEl.className = "history-upload-progress";
+    progressEl.title = `Uploading... ${Math.round(pct)}%`;
+    progressEl.innerHTML = iconUploadProgress(pct);
+    actions.appendChild(progressEl);
+  }
 
   // Actions menu
   const menuWrap = document.createElement("div");
@@ -975,10 +991,8 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
 
   // Upload to cloud (completed only)
   if (state.progress.stage === DownloadStage.COMPLETED && !state.metadata.hasDrm) {
-    const cloudLink = state.cloudLinks?.googleDrive || state.cloudLinks?.s3;
-    if (!cloudLink) {
-      menu.appendChild(makeMenuItem(iconUpload(), state.uploadError ? "Retry upload" : "Upload to cloud", () => handleHistoryUpload(state.id)));
-    }
+    const uploadLabel = state.uploadError ? "Retry upload" : "Upload to cloud";
+    menu.appendChild(makeMenuItem(iconUpload(), uploadLabel, () => handleHistoryUpload(state.id)));
   }
 
   menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url, state.metadata)));
@@ -1041,6 +1055,7 @@ function makeStageBadge(stage: DownloadStage): HTMLElement {
     [DownloadStage.COMPLETED]: "badge-completed",
     [DownloadStage.FAILED]: "badge-failed",
     [DownloadStage.CANCELLED]: "badge-cancelled",
+    [DownloadStage.UPLOADING]: "badge-completed",
   };
   return makeBadge(stage, map[stage] ?? "");
 }
@@ -1339,6 +1354,24 @@ function iconTrash(): string {
 
 function iconUpload(): string {
   return `<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="20"></line>`;
+}
+
+function iconUploadProgress(pct: number): string {
+  const radius = 9;
+  const circumference = 2 * Math.PI * radius;
+  const dashoffset = circumference - (pct / 100) * circumference;
+
+  return `
+    <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
+      <svg width="24" height="24" viewBox="0 0 24 24" style="position: absolute; top: 0; left: 0; transform: rotate(-90deg);">
+        <circle cx="12" cy="12" r="${radius}" fill="none" stroke="currentColor" stroke-width="2" stroke-opacity="0.2"></circle>
+        <circle cx="12" cy="12" r="${radius}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="${circumference}" stroke-dashoffset="${dashoffset}" stroke-linecap="round"></circle>
+      </svg>
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent);">
+        ${iconUpload()}
+      </svg>
+    </div>
+  `;
 }
 
 function iconCheck(): string {

@@ -386,7 +386,8 @@ export function renderDownloads(forceFullRebuild = false): void {
     (d) =>
       d.progress.stage !== DownloadStage.COMPLETED &&
       d.progress.stage !== DownloadStage.FAILED &&
-      d.progress.stage !== DownloadStage.CANCELLED,
+      d.progress.stage !== DownloadStage.CANCELLED &&
+      d.progress.stage !== DownloadStage.UPLOADING,
   );
 
   if (inProgress.length === 0) {

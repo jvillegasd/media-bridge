@@ -142,6 +142,11 @@ body {
   color: var(--success);
 }
 
+.badge-uploaded {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
 .badge-failed {
   background: rgba(248, 113, 113, 0.12);
   color: var(--error);
@@ -176,6 +181,11 @@ body {
 :root.light-mode .badge-completed {
   background: rgba(22, 163, 74, 0.08);
   color: #16a34a;
+}
+
+:root.light-mode .badge-uploaded {
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
 }
 
 :root.light-mode .badge-failed {
