@@ -922,7 +922,7 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   date.textContent = relativeTime(state.createdAt);
   actions.appendChild(date);
 
-  // Upload progress indicator
+  // Upload progress indicator with cancel button
   if (state.progress.stage === DownloadStage.UPLOADING) {
     const pct = state.progress.percentage || 0;
     const progressEl = document.createElement("div");
@@ -930,6 +930,13 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     progressEl.title = `Uploading... ${Math.round(pct)}%`;
     progressEl.innerHTML = iconUploadProgress(pct);
     actions.appendChild(progressEl);
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "history-cancel-upload";
+    cancelBtn.title = "Cancel upload";
+    cancelBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconX()}</svg>`;
+    cancelBtn.addEventListener("click", () => cancelUpload(state.id));
+    actions.appendChild(cancelBtn);
   }
 
   // Actions menu
@@ -989,10 +996,15 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
     }));
   }
 
-  // Upload to cloud (completed only)
+  // Upload to cloud (completed only, not while uploading)
   if (state.progress.stage === DownloadStage.COMPLETED && !state.metadata.hasDrm) {
     const uploadLabel = state.uploadError ? "Retry upload" : "Upload to cloud";
     menu.appendChild(makeMenuItem(iconUpload(), uploadLabel, () => handleHistoryUpload(state.id)));
+  }
+
+  // Cancel upload (while uploading)
+  if (state.progress.stage === DownloadStage.UPLOADING) {
+    menu.appendChild(makeMenuItem(iconX(), "Cancel upload", () => cancelUpload(state.id)));
   }
 
   menu.appendChild(makeMenuItem(iconDownload(), "Re-download", () => redownload(state.url, state.metadata)));
@@ -1004,6 +1016,10 @@ function renderHistoryItem(state: DownloadState): HTMLElement {
   menu.appendChild(makeMenuItem(iconLink(), "Check manifest", () => checkManifest(state.url)));
 
   menu.appendChild(makeMenuItem(iconTrash(), "Delete", async () => {
+    // Cancel upload first if one is in progress for this item
+    if (state.progress.stage === DownloadStage.UPLOADING) {
+      await cancelUpload(state.id);
+    }
     await deleteDownload(state.id);
     allHistory = allHistory.filter((d) => d.id !== state.id);
     selectedIds.delete(state.id);
@@ -1073,6 +1089,19 @@ function syncBulkBar(): void {
   selectAll.checked = visible.length > 0 && visible.every((d) => selectedIds.has(d.id));
   selectAll.indeterminate =
     !selectAll.checked && visible.some((d) => selectedIds.has(d.id));
+}
+
+async function cancelUpload(downloadId: string): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({
+      type: MessageType.CANCEL_UPLOAD,
+      payload: { downloadId },
+    });
+    showToast("Upload cancelled", "warning");
+    await fetchAndRenderHistory();
+  } catch (err: any) {
+    showToast("Failed to cancel upload: " + (err?.message || "Unknown error"), "error");
+  }
 }
 
 async function handleHistoryUpload(downloadId: string): Promise<void> {
@@ -1357,20 +1386,33 @@ function iconUpload(): string {
 }
 
 function iconUploadProgress(pct: number): string {
-  const radius = 9;
-  const circumference = 2 * Math.PI * radius;
-  const dashoffset = circumference - (pct / 100) * circumference;
+  // Water-fill rising from bottom: cloud borders + arrow interior fill with accent.
+  // Everything above the water line stays gray.
+  const cloudPath = "M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z";
+  const cloudTop = 6;
+  const cloudHeight = 14;
+  const fillY = cloudTop + cloudHeight - (pct / 100) * cloudHeight;
+  const fillH = 24 - fillY;
+  const gray = "#888";
 
   return `
-    <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
-      <svg width="24" height="24" viewBox="0 0 24 24" style="position: absolute; top: 0; left: 0; transform: rotate(-90deg);">
-        <circle cx="12" cy="12" r="${radius}" fill="none" stroke="currentColor" stroke-width="2" stroke-opacity="0.2"></circle>
-        <circle cx="12" cy="12" r="${radius}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="${circumference}" stroke-dashoffset="${dashoffset}" stroke-linecap="round"></circle>
-      </svg>
-      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent);">
-        ${iconUpload()}
-      </svg>
-    </div>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <defs>
+        <clipPath id="upload-water-clip">
+          <rect x="0" y="${fillY}" width="24" height="${fillH}"/>
+        </clipPath>
+      </defs>
+      <!-- Base: gray cloud outline + arrow -->
+      <path d="${cloudPath}" stroke="${gray}" fill="none"/>
+      <polyline points="16 16 12 12 8 16" stroke="${gray}" fill="none"/>
+      <line x1="12" y1="12" x2="12" y2="20" stroke="${gray}"/>
+      <!-- Accent overlay clipped to water level -->
+      <g clip-path="url(#upload-water-clip)">
+        <path d="${cloudPath}" stroke="var(--accent)" fill="none"/>
+        <polyline points="16 16 12 12 8 16" stroke="var(--accent)" fill="var(--accent)"/>
+        <line x1="12" y1="12" x2="12" y2="20" stroke="var(--accent)"/>
+      </g>
+    </svg>
   `;
 }
 
