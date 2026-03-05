@@ -3,6 +3,7 @@
  */
 
 import { GoogleAuth, GOOGLE_DRIVE_SCOPES } from "./google-auth";
+import { BaseCloudProvider, ProgressCallback } from "./base-cloud-provider";
 import { UploadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
@@ -22,21 +23,23 @@ export interface UploadResult {
   webViewLink?: string;
 }
 
-export class GoogleDriveClient {
+export class GoogleDriveClient extends BaseCloudProvider {
+  readonly id = 'googleDrive' as const;
   private config: GoogleDriveConfig;
 
   constructor(config: GoogleDriveConfig = {}) {
+    super();
     this.config = config;
   }
 
   /**
-   * Upload file to Google Drive
+   * Upload file to Google Drive. Returns the webViewLink (or fileId as fallback).
    */
-  async uploadFile(
+  async upload(
     blob: Blob,
     filename: string,
-    onProgress?: (uploaded: number, total: number) => void,
-  ): Promise<UploadResult> {
+    onProgress?: ProgressCallback,
+  ): Promise<string> {
     try {
       const token = await GoogleAuth.getAccessToken(GOOGLE_DRIVE_SCOPES);
 
@@ -49,12 +52,15 @@ export class GoogleDriveClient {
       }
 
       // For files larger than 5MB, use resumable chunked upload
+      let result: UploadResult;
       if (blob.size > RESUMABLE_UPLOAD_THRESHOLD_BYTES) {
-        return await this.resumableUpload(blob, filename, token, folderId, onProgress);
+        result = await this.resumableUpload(blob, filename, token, folderId, onProgress);
+      } else {
+        // Simple multipart upload for smaller files
+        result = await this.simpleUpload(blob, filename, token, folderId);
       }
 
-      // Simple multipart upload for smaller files
-      return await this.simpleUpload(blob, filename, token, folderId);
+      return result.webViewLink ?? result.fileId;
     } catch (error) {
       logger.error("Google Drive upload failed:", error);
       throw error instanceof UploadError
@@ -132,7 +138,7 @@ export class GoogleDriveClient {
     filename: string,
     token: string,
     folderId?: string,
-    onProgress?: (uploaded: number, total: number) => void,
+    onProgress?: ProgressCallback,
   ): Promise<UploadResult> {
     const totalBytes = blob.size;
     const mimeType = blob.type || "application/octet-stream";

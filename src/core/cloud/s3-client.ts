@@ -6,6 +6,7 @@
  * Uses Web Crypto API — no external dependencies.
  */
 
+import { BaseCloudProvider, ProgressCallback } from "./base-cloud-provider";
 import { UploadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
@@ -32,33 +33,38 @@ export interface S3UploadResult {
 const PART_SIZE = 10 * 1024 * 1024;
 const MULTIPART_THRESHOLD = PART_SIZE;
 
-export class S3Client {
+export class S3Client extends BaseCloudProvider {
+  readonly id = 's3' as const;
   private readonly config: S3Config;
 
   constructor(config: S3Config) {
+    super();
     this.config = config;
   }
 
-  async uploadBlob(
+  async upload(
     blob: Blob,
     filename: string,
-    onProgress?: (uploadedBytes: number, totalBytes: number) => void,
-  ): Promise<S3UploadResult> {
+    onProgress?: ProgressCallback,
+  ): Promise<string> {
     const key = this.config.prefix
       ? `${this.config.prefix.replace(/\/$/, "")}/${filename}`
       : filename;
 
+    let result: S3UploadResult;
     if (blob.size >= MULTIPART_THRESHOLD) {
-      return this.multipartUpload(blob, key, onProgress);
+      result = await this.multipartUpload(blob, key, onProgress);
+    } else {
+      result = await this.putUpload(blob, key, onProgress);
     }
-    return this.putUpload(blob, key, onProgress);
+    return result.url;
   }
 
   /** Single-part PUT upload for files < 100 MB */
   private async putUpload(
     blob: Blob,
     key: string,
-    onProgress?: (uploaded: number, total: number) => void,
+    onProgress?: ProgressCallback,
   ): Promise<S3UploadResult> {
     const url = this.objectUrl(key);
     const buffer = await blob.arrayBuffer();
@@ -110,7 +116,7 @@ export class S3Client {
   private async multipartUpload(
     blob: Blob,
     key: string,
-    onProgress?: (uploaded: number, total: number) => void,
+    onProgress?: ProgressCallback,
   ): Promise<S3UploadResult> {
     // 1. Initiate
     const uploadId = await this.initiateMultipart(key);
