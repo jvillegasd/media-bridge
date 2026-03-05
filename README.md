@@ -259,7 +259,6 @@ npm run type-check
 | `idb` | IndexedDB wrapper |
 | `uuid` | Unique download IDs |
 | `url-toolkit` | URL resolution for relative segment paths |
-| `@reduxjs/toolkit` `redux-observable` `rxjs` | State management |
 
 ## Limitations
 
