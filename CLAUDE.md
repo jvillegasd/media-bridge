@@ -36,6 +36,8 @@ All HLS, M3U8, and DASH downloads are processed by **FFmpeg.wasm** running insid
 
 **To add a new provider**: create a class extending `BaseCloudProvider`, add its key to the `CloudProvider` union in `shared/messages.ts`, instantiate and register it in the `UploadManager` constructor — no other code needs to change.
 
+**S3 bucket CORS requirement**: the bucket must have a CORS policy whitelisting the extension origin. The options page S3 section generates the correct JSON dynamically (using `chrome.runtime.id`) and provides a "Copy CORS Config" button. Paste it into **S3 → bucket → Permissions → Cross-origin resource sharing (CORS) → Edit**. Without it the browser will block upload requests from the `chrome-extension://` origin.
+
 ## Architecture
 
 Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
