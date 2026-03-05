@@ -25,7 +25,16 @@ All HLS, M3U8, and DASH downloads are processed by **FFmpeg.wasm** running insid
 
 ## Cloud Upload (Planned)
 
-The code infrastructure for Google Drive uploads exists in `src/core/cloud/` (`GoogleAuth`, `GoogleDriveClient`, `UploadManager`) and the `uploadToDrive` flag is plumbed through `DownloadManager`, but **no actual upload is ever triggered** — `this.uploadToDrive` is stored but never used in `download()`. Do not document this as a working feature. Future work will wire this up and add support for additional providers (S3, Dropbox, etc.).
+`src/core/cloud/` contains the full provider abstraction:
+
+- `base-cloud-provider.ts` — abstract `BaseCloudProvider` with `id: CloudProvider` and `upload(blob, filename, onProgress?): Promise<string>`
+- `google-drive.ts` — `GoogleDriveClient extends BaseCloudProvider` (resumable chunked upload for files > 5 MB)
+- `s3-client.ts` — `S3Client extends BaseCloudProvider` (SigV4-signed PUT / multipart for files ≥ 10 MB)
+- `upload-manager.ts` — `Map<CloudProvider, BaseCloudProvider>` registry; routes `uploadBlob()` through `client.upload()`; `isConfigured()` checks `providers.size > 0`
+
+**Upload is not yet triggered** — the wiring from the download completion path into `UploadManager.uploadFromBlobUrl()` is not done. Do not document this as a working feature.
+
+**To add a new provider**: create a class extending `BaseCloudProvider`, add its key to the `CloudProvider` union in `shared/messages.ts`, instantiate and register it in the `UploadManager` constructor — no other code needs to change.
 
 ## Architecture
 
@@ -204,10 +213,12 @@ src/
 │   ├── storage/
 │   │   ├── chrome-storage.ts
 │   │   └── settings.ts          # AppSettings interface + loadSettings() — always use this
-│   ├── cloud/                           # ⚠️ Planned — not wired up yet
+│   ├── cloud/                           # ⚠️ Upload trigger not wired up yet
+│   │   ├── base-cloud-provider.ts       # Abstract base + ProgressCallback type
 │   │   ├── google-auth.ts
-│   │   ├── google-drive.ts
-│   │   └── upload-manager.ts
+│   │   ├── google-drive.ts              # GoogleDriveClient extends BaseCloudProvider
+│   │   ├── s3-client.ts                 # S3Client extends BaseCloudProvider
+│   │   └── upload-manager.ts            # Provider registry (Map<CloudProvider, BaseCloudProvider>)
 │   ├── metadata/
 │   │   └── metadata-extractor.ts
 │   └── utils/
