@@ -4,6 +4,7 @@
 
 import { VideoMetadata, DownloadStage } from "../core/types";
 import { getDownload, deleteDownload } from "../core/database/downloads";
+import { storeChunk } from "../core/database/chunks";
 import { MessageType, CloudProvider } from "../shared/messages";
 import { canCancelDownload, CANNOT_CANCEL_MESSAGE } from "../core/utils/download-utils";
 import { loadDownloadStates } from "./state";
@@ -189,13 +190,16 @@ export async function handleUploadDownload(downloadId: string, provider: CloudPr
       return;
     }
 
-    const fileBytes: ArrayBuffer = await file.arrayBuffer();
+    // Store file bytes in IDB — chrome.runtime.sendMessage uses JSON
+    // serialization which destroys ArrayBuffer. IDB is shared across contexts.
+    const tempKey = `__upload_${downloadId}`;
+    await storeChunk(tempKey, 0, await file.arrayBuffer());
 
     const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
           type: MessageType.UPLOAD_REQUEST,
-          payload: { downloadId, fileBytes, provider },
+          payload: { downloadId, provider },
         },
         (res) => {
           if (chrome.runtime.lastError) {

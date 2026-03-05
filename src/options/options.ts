@@ -17,6 +17,7 @@ import {
   bulkDeleteDownloads,
   clearAllDownloads,
 } from "../core/database/downloads";
+import { storeChunk } from "../core/database/chunks";
 import {
   DEFAULT_MAX_CONCURRENT,
   STORAGE_CONFIG_KEY,
@@ -439,7 +440,7 @@ async function loadS3Settings(): Promise<void> {
     const extId = chrome.runtime.id;
     const corsConfig = JSON.stringify([{
       AllowedHeaders: ["*"],
-      AllowedMethods: ["PUT", "POST", "HEAD"],
+      AllowedMethods: ["PUT", "POST", "HEAD", "DELETE"],
       AllowedOrigins: [`chrome-extension://${extId}`],
       ExposeHeaders: ["ETag"],
     }], null, 2);
@@ -1129,10 +1130,25 @@ async function handleHistoryUpload(downloadId: string): Promise<void> {
   showToast("Uploading…", "warning");
 
   try {
-    const fileBytes = await file.arrayBuffer();
-    const response = await chrome.runtime.sendMessage({
-      type: MessageType.UPLOAD_REQUEST,
-      payload: { downloadId, fileBytes, provider },
+    // Store file bytes in IDB — chrome.runtime.sendMessage uses JSON
+    // serialization which destroys ArrayBuffer. IDB is shared across contexts.
+    const tempKey = `__upload_${downloadId}`;
+    await storeChunk(tempKey, 0, await file.arrayBuffer());
+
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          type: MessageType.UPLOAD_REQUEST,
+          payload: { downloadId, provider },
+        },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(res);
+        },
+      );
     });
     if (response?.success) {
       showToast("Upload complete", "success");

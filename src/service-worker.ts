@@ -39,6 +39,7 @@ import {
 } from "./core/utils/file-utils";
 import {
   deleteChunks,
+  getAllChunks,
   getChunkCount,
   getAllChunkDownloadIds,
 } from "./core/database/chunks";
@@ -697,6 +698,39 @@ async function handleDownloadRequest(payload: {
     });
 }
 
+/** Extract a short, user-friendly message from an upload error. Full details stay in console logs. */
+function friendlyUploadError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+
+  // Try to extract the S3/R2 XML <Code> (e.g. "SignatureDoesNotMatch", "AccessDenied")
+  const codeMatch = msg.match(/<Code>(.+?)<\/Code>/);
+  const status = (err as any)?.statusCode as number | undefined;
+
+  if (codeMatch?.[1]) {
+    const code = codeMatch[1];
+    const friendly: Record<string, string> = {
+      AccessDenied: "Access denied — check your API token permissions",
+      SignatureDoesNotMatch: "Signature mismatch — verify your secret access key",
+      NoSuchBucket: "Bucket not found — check your bucket name",
+      InvalidAccessKeyId: "Invalid access key ID",
+      ExpiredToken: "Security token has expired",
+    };
+    return friendly[code] ?? `Upload failed: ${code}`;
+  }
+
+  // CORS preflight failures have no response body
+  if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+    return "Network error — check CORS configuration and endpoint URL";
+  }
+
+  if (status) {
+    return `Upload failed (HTTP ${status})`;
+  }
+
+  // Fallback: truncate to something reasonable
+  return msg.length > 120 ? msg.slice(0, 117) + "…" : msg;
+}
+
 /**
  * Handle deferred upload request (triggered from popup or history after download completes).
  * Since the blob URL is long gone, this re-downloads the segments and re-processes — OR
@@ -708,15 +742,24 @@ async function handleDownloadRequest(payload: {
  */
 async function handleUploadRequestMessage(payload: {
   downloadId: string;
-  fileBytes?: ArrayBuffer;
   provider: CloudProvider;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    const { downloadId, fileBytes, provider } = payload;
+    const { downloadId, provider } = payload;
+
+    // Always clean up the temp IDB blob, even on early-return errors
+    const tempKey = `__upload_${downloadId}`;
+    const chunks = await getAllChunks(tempKey);
+    await deleteChunks(tempKey);
+
     const state = await getDownload(downloadId);
     if (!state) return { success: false, error: "Download not found" };
     if (state.metadata.hasDrm) return { success: false, error: "DRM-protected content cannot be uploaded" };
-    if (!fileBytes?.byteLength) return { success: false, error: "No file data provided" };
+    if (!chunks.length || !chunks[0].byteLength) {
+      logger.warn(`Upload request for ${downloadId}: no file data in IDB (chunks=${chunks.length})`);
+      return { success: false, error: "No file data provided" };
+    }
+    const fileBytes = chunks[0];
 
     // Clear any previous upload error so the UI reflects the retry in progress
     if (state.uploadError) {
@@ -769,15 +812,16 @@ async function handleUploadRequestMessage(payload: {
     return { success: true };
   } catch (err) {
     logger.error("Upload request failed:", err);
-    const errMsg = err instanceof Error ? err.message : String(err);
+    const fullMsg = err instanceof Error ? err.message : String(err);
+    const userMsg = friendlyUploadError(err);
     // Persist the error so the popup can show a retry button
     const failedState = await getDownload(payload.downloadId);
     if (failedState) {
-      failedState.uploadError = errMsg;
+      failedState.uploadError = fullMsg;
       failedState.progress.stage = DownloadStage.COMPLETED;
       await storeDownload(failedState);
     }
-    return { success: false, error: errMsg };
+    return { success: false, error: userMsg };
   }
 }
 

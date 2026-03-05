@@ -180,8 +180,9 @@ export class S3Client extends BaseCloudProvider {
 
     const response = await fetch(url, { method: "POST", headers });
     if (!response.ok) {
+      const text = await response.text().catch(() => response.statusText);
       throw new UploadError(
-        `Failed to initiate multipart upload: ${response.statusText}`,
+        `Failed to initiate multipart upload (${response.status}): ${text}`,
         response.status,
       );
     }
@@ -225,8 +226,9 @@ export class S3Client extends BaseCloudProvider {
 
     const response = await fetch(url, { method: "PUT", headers, body: buffer });
     if (!response.ok) {
+      const text = await response.text().catch(() => response.statusText);
       throw new UploadError(
-        `Part ${partNumber} upload failed: ${response.statusText}`,
+        `Part ${partNumber} upload failed (${response.status}): ${text}`,
         response.status,
       );
     }
@@ -344,7 +346,10 @@ export class S3Client extends BaseCloudProvider {
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
       .join("&");
 
-    const canonicalPath = url.pathname;
+    // url.pathname uses RFC 3986 encoding which leaves sub-delimiters like
+    // ( ) [ ] ! ' * unencoded, but SigV4 requires encoding everything except
+    // unreserved chars (A-Za-z0-9 - _ . ~). Decode then re-encode per SigV4.
+    const canonicalPath = sigV4EncodePath(decodeURIComponent(url.pathname));
 
     const canonicalRequest = [
       method,
@@ -438,6 +443,23 @@ export class S3Client extends BaseCloudProvider {
     }
     return `https://${this.config.bucket}.s3.${this.config.region}.amazonaws.com`;
   }
+}
+
+// ---- SigV4 URI encoding ----
+
+/** Encode a single URI component per SigV4: only A-Za-z0-9 - _ . ~ are unreserved. */
+function sigV4Encode(str: string): string {
+  return encodeURIComponent(str)
+    .replace(/!/g, "%21")
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29")
+    .replace(/\*/g, "%2A");
+}
+
+/** Encode a full path per SigV4, preserving '/' separators. */
+function sigV4EncodePath(rawPath: string): string {
+  return rawPath.split("/").map(sigV4Encode).join("/");
 }
 
 // ---- Crypto helpers ----
