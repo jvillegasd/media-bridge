@@ -63,10 +63,14 @@ export class GoogleDriveClient extends BaseCloudProvider {
 
       return result.webViewLink ?? result.fileId;
     } catch (error) {
+      // Abort is expected on cancel — not an error
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw error;
+      }
       logger.error("Google Drive upload failed:", error);
       throw error instanceof UploadError
         ? error
-        : new UploadError(`Upload failed: ${error}`);
+        : new UploadError(`Upload failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
