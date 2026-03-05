@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/jvillegasd/media-bridge/compare/v1.9.1...v1.10.0) (2026-03-05)
+
+
+### 🎉 New Features
+
+* cloud upload — Google Drive & S3 ([#36](https://github.com/jvillegasd/media-bridge/issues/36)) ([04f15f3](https://github.com/jvillegasd/media-bridge/commit/04f15f35be088e58ea2d5d1a13e1d62039995431))
+
+
+### 📚 Documentation
+
+* adjusted changelog ([46e9314](https://github.com/jvillegasd/media-bridge/commit/46e9314508548d66c3ef8385198ccb446e17e119))
+
 ## [1.9.1](https://github.com/jvillegasd/media-bridge/compare/v1.9.0...v1.9.1) (2026-03-04)
 
 
