@@ -14,6 +14,7 @@ import {
   deleteDownload,
 } from "./core/database/downloads";
 import { UploadManager } from "./core/cloud/upload-manager";
+import { S3Client } from "./core/cloud/s3-client";
 import { ChromeStorage } from "./core/storage/chrome-storage";
 import { loadSettings } from "./core/storage/settings";
 import { SecureStorage } from "./core/storage/secure-storage";
@@ -99,6 +100,16 @@ async function init() {
   cleanupStaleChunks().catch((err) =>
     logger.error("Orphaned chunk cleanup failed:", err),
   );
+
+  // Clean up orphaned S3 multipart uploads from previous crashes
+  cleanupOrphanedS3Uploads().catch((err) =>
+    logger.error("S3 orphaned upload cleanup failed:", err),
+  );
+
+  // Restore downloads stuck in UPLOADING stage after a crash
+  cleanupStaleUploads().catch((err) =>
+    logger.error("Stale upload cleanup failed:", err),
+  );
 }
 
 /**
@@ -128,6 +139,35 @@ async function cleanupStaleChunks(): Promise<void> {
   const cleaned = results.filter(Boolean).length;
   if (cleaned > 0) {
     logger.info(`Cleaned up orphaned chunks for ${cleaned} download(s)`);
+  }
+}
+
+/**
+ * Abort orphaned S3 multipart uploads persisted from a previous service worker session.
+ */
+async function cleanupOrphanedS3Uploads(): Promise<void> {
+  const settings = await loadSettings();
+  const secret = await resolveS3Secret(settings.s3);
+  const s3 = settings.s3;
+  const config =
+    s3.bucket && s3.region && s3.accessKeyId && secret
+      ? { bucket: s3.bucket, region: s3.region, accessKeyId: s3.accessKeyId, secretAccessKey: secret, endpoint: s3.endpoint, prefix: s3.prefix }
+      : undefined;
+  await S3Client.cleanupOrphanedUploads(config);
+}
+
+/**
+ * Restore downloads stuck in UPLOADING stage after a service worker crash.
+ */
+async function cleanupStaleUploads(): Promise<void> {
+  const all = await getAllDownloads();
+  for (const d of all) {
+    if (d.progress.stage === DownloadStage.UPLOADING) {
+      d.progress.stage = DownloadStage.COMPLETED;
+      d.progress.message = "Upload interrupted";
+      d.progress.percentage = undefined;
+      await storeDownload(d);
+    }
   }
 }
 

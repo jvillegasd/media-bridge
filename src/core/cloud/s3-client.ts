@@ -10,6 +10,13 @@ import { BaseCloudProvider, ProgressCallback } from "./base-cloud-provider";
 import { UploadError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
+const S3_PENDING_UPLOADS_KEY = "s3_pending_uploads";
+
+interface PendingUpload {
+  key: string;
+  uploadId: string;
+}
+
 export interface S3Config {
   bucket: string;
   region: string;
@@ -124,6 +131,7 @@ export class S3Client extends BaseCloudProvider {
   ): Promise<S3UploadResult> {
     // 1. Initiate
     const uploadId = await this.initiateMultipart(key);
+    await this.savePendingUpload(key, uploadId);
     const parts: Array<{ PartNumber: number; ETag: string }> = [];
     let uploadedBytes = 0;
 
@@ -146,11 +154,13 @@ export class S3Client extends BaseCloudProvider {
 
       // 2. Complete
       await this.completeMultipart(key, uploadId, parts);
+      await this.clearPendingUpload(key, uploadId);
     } catch (err) {
       // Abort on failure to avoid orphaned multipart uploads
       await this.abortMultipart(key, uploadId).catch((e) =>
         logger.warn("Failed to abort multipart upload:", e),
       );
+      await this.clearPendingUpload(key, uploadId);
       throw err;
     }
 
@@ -290,7 +300,7 @@ export class S3Client extends BaseCloudProvider {
     }
   }
 
-  private async abortMultipart(key: string, uploadId: string): Promise<void> {
+  async abortMultipart(key: string, uploadId: string): Promise<void> {
     const url = `${this.objectUrl(key)}?uploadId=${encodeURIComponent(uploadId)}`;
     const now = new Date();
     const datetime = isoDatetime(now);
@@ -314,6 +324,49 @@ export class S3Client extends BaseCloudProvider {
     delete headers["Host"];
 
     await fetch(url, { method: "DELETE", headers });
+  }
+
+  private async savePendingUpload(key: string, uploadId: string): Promise<void> {
+    const data = await chrome.storage.local.get(S3_PENDING_UPLOADS_KEY);
+    const pending: PendingUpload[] = data[S3_PENDING_UPLOADS_KEY] ?? [];
+    pending.push({ key, uploadId });
+    await chrome.storage.local.set({ [S3_PENDING_UPLOADS_KEY]: pending });
+  }
+
+  private async clearPendingUpload(key: string, uploadId: string): Promise<void> {
+    const data = await chrome.storage.local.get(S3_PENDING_UPLOADS_KEY);
+    const pending: PendingUpload[] = data[S3_PENDING_UPLOADS_KEY] ?? [];
+    const filtered = pending.filter(
+      (p) => !(p.key === key && p.uploadId === uploadId),
+    );
+    await chrome.storage.local.set({ [S3_PENDING_UPLOADS_KEY]: filtered });
+  }
+
+  /**
+   * Abort any orphaned multipart uploads from previous service worker crashes.
+   * Call from service worker init(). No-ops if S3 isn't configured or no pending uploads exist.
+   */
+  static async cleanupOrphanedUploads(config?: S3Config): Promise<void> {
+    const data = await chrome.storage.local.get(S3_PENDING_UPLOADS_KEY);
+    const pending: PendingUpload[] = data[S3_PENDING_UPLOADS_KEY] ?? [];
+    if (pending.length === 0) return;
+
+    if (!config) {
+      logger.warn(
+        `Found ${pending.length} orphaned S3 multipart upload(s) but S3 is not configured — clearing records`,
+      );
+      await chrome.storage.local.set({ [S3_PENDING_UPLOADS_KEY]: [] });
+      return;
+    }
+
+    const client = new S3Client(config);
+    for (const { key, uploadId } of pending) {
+      await client.abortMultipart(key, uploadId).catch((e) =>
+        logger.warn(`Failed to abort orphaned multipart upload ${uploadId}:`, e),
+      );
+    }
+    await chrome.storage.local.set({ [S3_PENDING_UPLOADS_KEY]: [] });
+    logger.info(`Cleaned up ${pending.length} orphaned S3 multipart upload(s)`);
   }
 
   /** Build SigV4 Authorization header value */
