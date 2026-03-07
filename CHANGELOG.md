@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/jvillegasd/media-bridge/compare/v1.10.0...v1.11.0) (2026-03-07)
+
+
+### 🎉 New Features
+
+* add copy URL button to detected video cards + remove mediabunny refs ([0dad966](https://github.com/jvillegasd/media-bridge/commit/0dad9663d15ca8a0d9c5a83df9a7649912a66257))
+
 ## [1.10.0](https://github.com/jvillegasd/media-bridge/compare/v1.9.1...v1.10.0) (2026-03-05)
 
 
