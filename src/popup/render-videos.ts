@@ -182,6 +182,19 @@ export function setupDetectedVideosEventDelegation(): void {
       return;
     }
 
+    // Copy URL button
+    const copyBtn = target.closest<HTMLElement>(".btn-copy-url");
+    if (copyBtn) {
+      const url = copyBtn.dataset.url;
+      if (url) {
+        navigator.clipboard.writeText(url).then(() => {
+          copyBtn.classList.add("copied");
+          setTimeout(() => copyBtn.classList.remove("copied"), 1500);
+        });
+      }
+      return;
+    }
+
     // Stop & Save button
     const stopSaveBtn = target.closest<HTMLElement>(".btn-stop-save");
     if (stopSaveBtn) {
@@ -446,6 +459,11 @@ function renderVideoItem(video: VideoMetadata): string {
             ${escapeHtml(video.title || getVideoTitleFromUrl(video.url))}
           </div>
           ${statusBadge}
+          <button class="btn-copy-url"
+                  data-url="${escapeHtml(video.url)}"
+                  title="Copy URL">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
         </div>
         <div class="video-meta">
           ${displayResolution ? `<span class="badge badge-resolution">${escapeHtml(displayResolution)}</span>` : ""}

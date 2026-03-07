@@ -17,11 +17,9 @@ npm run type-check
 
 There are no tests in this project. After building, load the `dist/` directory as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked).
 
-## FFmpeg.wasm Size Limit
+## Output Size Limit
 
-All HLS, M3U8, and DASH downloads are processed by **FFmpeg.wasm** running inside the browser. Output files are limited to approximately **2 GB** — files beyond this will exhaust browser memory during the merge stage.
-
-> **Planned**: Migrate FFmpeg.wasm to [mediabunny](https://github.com/nicktindall/mediabunny) for native-speed muxing without the 2 GB constraint.
+All HLS, M3U8, and DASH downloads are processed by the muxer running inside the browser. Output files are limited to approximately **2 GB** — files beyond this will exhaust browser memory during the merge stage.
 
 ## Cloud Upload (Planned)
 

@@ -321,6 +321,32 @@
 
     .btn-rec:hover { background: #dc2626; }
 
+    .btn-copy-url {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3px 5px;
+      background: transparent;
+      color: var(--text-tertiary);
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+
+    .btn-copy-url:hover {
+      background: var(--surface-3);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn-copy-url.copied {
+      background: rgba(34, 197, 94, 0.1);
+      border-color: #22c55e;
+      color: #22c55e;
+    }
+
     .btn-stop-rec {
       padding: 4px 10px;
       background: transparent;

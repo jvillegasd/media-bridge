@@ -21,9 +21,7 @@ A Manifest V3 Chromium extension that detects and downloads videos from the web 
 
 ## ⚠️ Output File Size Limit
 
-Because video processing uses **FFmpeg.wasm** (a WebAssembly build of FFmpeg running entirely inside the browser), output files are subject to browser memory limits. In practice, files above roughly **2 GB** will fail during the FFmpeg merge stage.
-
-> **Planned**: A future release will replace FFmpeg.wasm with [mediabunny](https://github.com/nicktindall/mediabunny) for native-speed muxing without the 2 GB constraint.
+Video processing runs entirely inside the browser, so output files are subject to browser memory limits. In practice, files above roughly **2 GB** will fail during the merge stage.
 
 ## Cloud Upload Setup
 
@@ -262,7 +260,7 @@ npm run type-check
 
 ## Limitations
 
-- **~2 GB output limit** — FFmpeg.wasm runs in browser memory; files larger than ~2 GB fail during merging. Planned fix: migrate to mediabunny.
+- **~2 GB output limit** — The muxer runs in browser memory; files larger than ~2 GB fail during merging.
 - **DRM content** — FairPlay and PlayReady protected streams cannot be downloaded.
 - **CDN restrictions** — Some sites block extension requests via token auth or IP restrictions.
 - **Browser memory** — Total concurrent segment data is limited by available RAM.
