@@ -9,12 +9,16 @@ import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
 import { logger } from "./core/utils/logger";
 import { STORAGE_CONFIG_KEY } from "./shared/constants";
+import { resolveUiSettings } from "./core/storage/settings";
+import { initCaptureClient, updateCaptureConfig } from "./content/capture-client";
+import { setOverlayEnabled } from "./content/overlay";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
 let sentToPopup = new Set<string>();
 let lastUrl = location.href;
 const inIframe = window.self !== window.top;
+let captureClientStarted = false;
 
 /**
  * Send message to popup with error handling for extension context invalidation
@@ -183,7 +187,33 @@ async function init() {
 
   // Initialize all detection mechanisms
   detectionManager.init();
+
+  const ui = resolveUiSettings(config);
+  if (!captureClientStarted) {
+    captureClientStarted = true;
+    initCaptureClient({
+      maxBytes: ui.captureMaxMb * 1024 * 1024,
+      autoArm: ui.autoArmCapture,
+    });
+  }
+  setOverlayEnabled(ui.showOverlayButton, {
+    getVideos: () => Object.values(detectedVideos),
+  });
+
+  // Ask the service worker to replay manifest/media requests that completed
+  // before this script loaded (common with autoplaying players).
+  safeSendMessage({ type: MessageType.CONTENT_READY });
 }
+
+// React to settings changes without requiring a page reload
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[STORAGE_CONFIG_KEY]) return;
+  const ui = resolveUiSettings(changes[STORAGE_CONFIG_KEY].newValue as StorageConfig | undefined);
+  setOverlayEnabled(ui.showOverlayButton, {
+    getVideos: () => Object.values(detectedVideos),
+  });
+  updateCaptureConfig({ maxBytes: ui.captureMaxMb * 1024 * 1024 });
+});
 
 /**
  * Handle SPA navigation by resetting detection state
@@ -252,8 +282,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Handle URL detected from service worker network interceptor
       const url = message.payload?.url;
       if (url && detectionManager) {
-        // Process URL through detection manager
-        detectionManager.handleNetworkRequest(url);
+        // Process URL through detection manager (format/size classified by SW from headers)
+        detectionManager.handleNetworkRequest(url, {
+          format: message.payload?.format,
+          size: message.payload?.size,
+        });
       }
       return false; // No response needed
     }

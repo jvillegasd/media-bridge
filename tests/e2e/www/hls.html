@@ -1,0 +1,2 @@
+<!doctype html><title>HLS Test Page</title><h1>HLS via extension-less URL</h1>
+<script>fetch('/stream?id=1').then(r => r.text()).then(t => { window.__loaded = t.length; });</script>

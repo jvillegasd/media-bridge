@@ -23,6 +23,8 @@ import {
   DEFAULT_DB_SYNC_INTERVAL_MS,
   STORAGE_CONFIG_KEY,
   DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
+  DEFAULT_CAPTURE_MAX_MB,
+  DEFAULT_MIN_DIRECT_SIZE_KB,
 } from "../../shared/constants";
 
 export interface AppSettings {
@@ -57,6 +59,13 @@ export interface AppSettings {
   notifications: {
     notifyOnCompletion: boolean;
     autoOpenFile: boolean;
+  };
+
+  ui: {
+    showOverlayButton: boolean;
+    captureMaxMb: number;
+    autoArmCapture: boolean;
+    minDirectSizeKb: number;
   };
 
   advanced: {
@@ -107,6 +116,8 @@ export async function loadSettings(): Promise<AppSettings> {
       autoOpenFile: raw?.notifications?.autoOpenFile ?? false,
     },
 
+    ui: resolveUiSettings(raw),
+
     advanced: {
       maxRetries: raw?.advanced?.maxRetries ?? DEFAULT_MAX_RETRIES,
       retryDelayMs: raw?.advanced?.retryDelayMs ?? INITIAL_RETRY_DELAY_MS,
@@ -116,5 +127,18 @@ export async function loadSettings(): Promise<AppSettings> {
       masterPlaylistCacheSize: raw?.advanced?.masterPlaylistCacheSize ?? DEFAULT_MASTER_PLAYLIST_CACHE_SIZE,
       dbSyncIntervalMs: raw?.advanced?.dbSyncIntervalMs ?? DEFAULT_DB_SYNC_INTERVAL_MS,
     },
+  };
+}
+
+/**
+ * Resolve page-integration settings. Exported separately because the content
+ * script reads raw StorageConfig synchronously from storage change events.
+ */
+export function resolveUiSettings(raw: StorageConfig | null | undefined): AppSettings["ui"] {
+  return {
+    showOverlayButton: raw?.ui?.showOverlayButton ?? true,
+    captureMaxMb: raw?.ui?.captureMaxMb ?? DEFAULT_CAPTURE_MAX_MB,
+    autoArmCapture: raw?.ui?.autoArmCapture ?? false,
+    minDirectSizeKb: raw?.ui?.minDirectSizeKb ?? DEFAULT_MIN_DIRECT_SIZE_KB,
   };
 }

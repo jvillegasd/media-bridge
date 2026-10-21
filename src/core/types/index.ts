@@ -7,6 +7,8 @@ export enum VideoFormat {
   HLS = "hls",
   M3U8 = "m3u8",
   DASH = "dash",
+  /** Stream captured from a MediaSource player (blob: src) via the in-page hook */
+  CAPTURE = "capture",
   UNKNOWN = "unknown",
 }
 
@@ -26,6 +28,7 @@ export interface VideoMetadata {
   hasDrm?: boolean; // Indicates if the video is DRM-protected
   unsupported?: boolean; // Indicates if the manifest uses unsupported encryption methods
   isLive?: boolean; // Indicates if the stream is a live stream (no #EXT-X-ENDLIST)
+  size?: number; // Content size in bytes when known from network headers
 }
 
 export interface VideoQuality {
@@ -119,6 +122,12 @@ export interface StorageConfig {
   notifications?: {
     notifyOnCompletion?: boolean; // Show OS notification when download finishes (default: false)
     autoOpenFile?: boolean; // Open file in Finder/Explorer after download (default: false)
+  };
+  ui?: {
+    showOverlayButton?: boolean; // Floating download button on page videos (default: true)
+    captureMaxMb?: number; // Max bytes buffered by stream capture per page, in MB (default: 1536)
+    autoArmCapture?: boolean; // Start capturing MSE streams as soon as playback starts (default: false)
+    minDirectSizeKb?: number; // Ignore direct media smaller than this when sniffed from network (default: 512)
   };
   advanced?: {
     maxRetries?: number; // Max segment/manifest fetch retries (default: 3)

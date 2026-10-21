@@ -59,6 +59,10 @@ import {
   MIN_MASTER_PLAYLIST_CACHE_SIZE,
   MAX_MASTER_PLAYLIST_CACHE_SIZE,
   MIN_DB_SYNC_S,
+  MIN_CAPTURE_MAX_MB,
+  MAX_CAPTURE_MAX_MB,
+  MIN_DIRECT_SIZE_KB,
+  MAX_DIRECT_SIZE_KB,
   MAX_DB_SYNC_S,
 } from "./constants";
 
@@ -80,7 +84,7 @@ function init(): void {
 
   // Check URL hash to navigate directly to a view (e.g. opened via history button)
   const hash = location.hash.slice(1);
-  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced", "about"]);
+  const validViews = new Set(["history", "cloud-providers", "recording", "page-integration", "notifications", "advanced", "about"]);
   switchView(validViews.has(hash) ? hash : "download-settings");
 }
 
@@ -122,6 +126,7 @@ function switchView(viewId: string): void {
     setupCloudProviderTabs();
   }
   if (viewId === "recording") loadRecordingSettings();
+  if (viewId === "page-integration") loadPageIntegrationSettings();
   if (viewId === "notifications") loadNotificationSettings();
   if (viewId === "advanced") loadAdvancedSettings();
   if (viewId === "about") loadAboutSection();
@@ -1564,6 +1569,52 @@ async function saveNotificationSettings(): Promise<void> {
     config.notifications = {
       notifyOnCompletion: notifyCb.checked,
       autoOpenFile: autoOpenCb.checked,
+    };
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    showStatus("Settings saved.", "success");
+  } catch (err) {
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save Settings";
+  }
+}
+
+// ─────────────────────────────────────────────
+// Section: Page Integration View
+// ─────────────────────────────────────────────
+
+async function loadPageIntegrationSettings(): Promise<void> {
+  const { ui } = await loadSettings();
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  get("show-overlay-button").checked = ui.showOverlayButton;
+  get("auto-arm-capture").checked = ui.autoArmCapture;
+  get("capture-max-mb").value = ui.captureMaxMb.toString();
+  get("min-direct-size").value = ui.minDirectSizeKb.toString();
+
+  document
+    .getElementById("save-page-integration-settings")
+    ?.addEventListener("click", savePageIntegrationSettings);
+}
+
+async function savePageIntegrationSettings(): Promise<void> {
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+  const captureMaxMb = validateField(get("capture-max-mb"), MIN_CAPTURE_MAX_MB, MAX_CAPTURE_MAX_MB, true);
+  const minDirectSizeKb = validateField(get("min-direct-size"), MIN_DIRECT_SIZE_KB, MAX_DIRECT_SIZE_KB, true);
+  if (captureMaxMb === null || minDirectSizeKb === null) return;
+
+  const btn = document.getElementById("save-page-integration-settings") as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    config.ui = {
+      showOverlayButton: get("show-overlay-button").checked,
+      autoArmCapture: get("auto-arm-capture").checked,
+      captureMaxMb,
+      minDirectSizeKb,
     };
     await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
     showStatus("Settings saved.", "success");

@@ -17,6 +17,12 @@ A Manifest V3 Chromium extension that detects and downloads videos from the web 
 - **Download History**: Completed, failed, and cancelled downloads are persisted and browsable in the options page History section with infinite scroll
 - **Notifications**: Optional OS notification and auto-open file on download completion
 - **Cloud Upload**: Upload completed downloads to Google Drive or S3-compatible storage from the History page
+- **Content-Type Detection**: Manifests and videos are detected from response headers too, so extension-less endpoints (`/api/stream?id=42`) work. Segments, byte-range slices and small clips are filtered out
+- **Early-Request Replay**: Detections that fire before the content script loads (common with autoplay) are queued and replayed
+- **Stream Capture**: Records MediaSource (`blob:`) players with no detectable manifest and muxes the captured tracks into MP4/WebM/MKV. DRM (EME) streams are never captured
+- **In-page Download Button**: Hover a video to get a button listing every source detected for that player
+- **Context Menus & Shortcuts**: Right-click to download a video, linked media, or everything on the page. `Alt+Shift+D` downloads the best detected video
+- **Badge & Download All**: Toolbar badge with the detected count; one-click bulk download in the popup
 - **Configurable Settings**: Recording poll intervals, fetch retry behaviour, detection cache sizes, IDB sync rate — all tunable from the options page
 
 ## ⚠️ Output File Size Limit
@@ -107,6 +113,26 @@ When a live stream is detected:
 - Click REC to start recording segments in real-time
 - Click STOP to stop — segments collected so far are merged into an MP4
 
+### Stream Capture
+
+For players that feed `<video>` through Media Source Extensions with no detectable source:
+
+1. Hover the video → **Download** → **Fast capture from start** (or use the **Stream capture** card in the popup)
+2. The video restarts muted at up to 16× while Media Bridge records what the player loads
+3. Click **Stop & save**. Tracks are merged in the offscreen FFmpeg document
+
+A MAIN-world hook (`src/inject/mse-capture.ts`, `document_start`) observes `SourceBuffer.appendBuffer()`. Segments are keyed by decode time (fMP4 `tfdt`, WebM cluster Timecode), so re-buffered segments dedupe and out-of-order appends are sorted. Buffers are handed to a token-authorized web-accessible bridge page that writes them to IndexedDB, then the existing DASH mux path produces the file. Sessions with EME `MediaKeys` or encrypted init segments are flagged DRM and never retained.
+
+Limitations: capture records only what the player loads (play to the end or use fast capture); MSE running in Web Workers isn't covered; captured data stays in page memory until saved (configurable cap, default 1.5 GB).
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Alt+Shift+M` | Open the popup |
+| `Alt+Shift+D` | Download the best video detected on the page |
+| *(unassigned)* | Download all detected videos (set at `chrome://extensions/shortcuts`) |
+
 ## Supported Formats
 
 | Format | Detection | VOD Download | Live Recording |
@@ -115,6 +141,7 @@ When a live stream is detected:
 | **M3U8** (`.m3u8` media playlist) | ✅ | ✅ | — |
 | **DASH** (`.mpd` manifest) | ✅ | ✅ | ✅ |
 | **Direct** (`.mp4`, `.webm`, etc.) | ✅ | ✅ | — |
+| **MediaSource players** (`blob:` src) | ✅ | ✅ via stream capture | — |
 
 ## Technical Details
 
@@ -230,6 +257,7 @@ src/
 - `webRequest` — Intercept `.m3u8` / `.mpd` network requests
 - `declarativeNetRequest` — Inject `Origin`/`Referer` headers
 - `tabs` / `webNavigation` — Tab tracking for video detection
+- `contextMenus` — Right-click download / capture actions
 - Host permissions (`http://*/* https://*/*`) — Fetch video content
 
 ## Development
@@ -245,6 +273,16 @@ npm run build
 
 # TypeScript type checking only
 npm run type-check
+```
+
+### End-to-End Tests
+
+`tests/e2e/` loads `dist/` into Chromium (puppeteer-core) against a local server with synthetic media and checks Content-Type detection, early-request replay, download-all, HLS download + mux, MSE capture with out-of-order and duplicate appends, DRM refusal, the in-page button and output probing with `ffprobe`.
+
+```bash
+npm run build
+tests/e2e/generate-media.sh          # requires ffmpeg
+CHROME_PATH=/path/to/chromium npm run test:e2e
 ```
 
 ### Key Dependencies

@@ -1,0 +1,38 @@
+<!doctype html><title>MSE Capture Test</title><h1>MSE player</h1>
+<video id="v" muted autoplay playsinline width="640" height="360"></video>
+<script>
+function boxes(buf) {
+  const dv = new DataView(buf); const out = []; let o = 0;
+  while (o + 8 <= buf.byteLength) { const size = dv.getUint32(o); const type = String.fromCharCode(...new Uint8Array(buf, o + 4, 4)); out.push({ o, size, type }); o += size; }
+  return out;
+}
+function split(buf) {
+  const bs = boxes(buf); const firstMoof = bs.find(b => b.type === 'moof').o;
+  const init = buf.slice(0, firstMoof); const frags = [];
+  for (let i = 0; i < bs.length; i++) if (bs[i].type === 'moof') { const mdat = bs[i + 1]; frags.push(buf.slice(bs[i].o, mdat.o + mdat.size)); }
+  return { init, frags };
+}
+const append = (sb, data) => new Promise((res, rej) => { sb.addEventListener('updateend', res, { once: true }); sb.addEventListener('error', rej, { once: true }); sb.appendBuffer(data); });
+(async () => {
+  const [v, a] = await Promise.all(['/v_frag.mp4', '/a_frag.mp4'].map(u => fetch(u).then(r => r.arrayBuffer())));
+  const V = split(v), A = split(a);
+  const ms = new MediaSource(); const el = document.getElementById('v'); el.src = URL.createObjectURL(ms);
+  await new Promise(r => ms.addEventListener('sourceopen', r, { once: true }));
+  if (location.search.includes('drm=1')) {
+    // Attach ClearKey MediaKeys: the extension must treat this session as DRM
+    const access = await navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{ initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.64001e"' }] }]);
+    await el.setMediaKeys(await access.createMediaKeys());
+  }
+  const vsb = ms.addSourceBuffer('video/mp4; codecs="avc1.64001e"');
+  const asb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
+  // Wait until the test (or auto-arm) has armed capture before feeding media
+  while (!window.__go) await new Promise(r => setTimeout(r, 100));
+  await append(vsb, V.init); await append(asb, A.init);
+  // Out-of-order + duplicate appends: capture must sort by tfdt and dedupe
+  const order = V.frags.map((_, i) => i); if (order.length > 2) { [order[1], order[2]] = [order[2], order[1]]; order.push(0); }
+  for (const i of order) await append(vsb, V.frags[i]);
+  for (const f of A.frags) await append(asb, f);
+  ms.endOfStream();
+  window.__appendDone = { video: V.frags.length, audio: A.frags.length };
+})().catch(e => { window.__appendError = String(e); });
+</script>

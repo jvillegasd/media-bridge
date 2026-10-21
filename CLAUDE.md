@@ -15,7 +15,11 @@ npm run build
 npm run type-check
 ```
 
-There are no tests in this project. After building, load the `dist/` directory as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked).
+After building, load the `dist/` directory as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked).
+
+### End-to-end tests
+
+`tests/e2e/` drives Chromium (puppeteer-core) with `dist/` loaded against a local server and synthetic media. Run `npm run build && tests/e2e/generate-media.sh && npm run test:e2e` (needs ffmpeg/ffprobe; set `CHROME_PATH` if Chromium isn't at `/usr/bin/chromium-browser`). It covers Content-Type detection, early-request replay, download-all, MSE capture (out-of-order + duplicate appends), DRM refusal, the overlay and output probing. Run it after touching detection, capture or the offscreen muxer.
 
 ## Output Size Limit
 
@@ -67,9 +71,9 @@ The S3 secret access key can be encrypted at rest with AES-GCM via `SecureStorag
 
 ## Architecture
 
-Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
+Media Bridge is a Manifest V3 Chrome extension. It has seven distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
 
-1. **Service Worker** (`src/service-worker.ts` → `dist/background.js`): The central orchestrator. Handles all download lifecycle management, routes messages from popup/content scripts, maintains download state, and keeps itself alive during long operations using `chrome.runtime.getPlatformInfo()` heartbeats. Intercepts `.m3u8` and `.mpd` network requests via `chrome.webRequest.onCompleted`.
+1. **Service Worker** (`src/service-worker.ts` → `dist/background.js`): The central orchestrator. Handles all download lifecycle management, routes messages from popup/content scripts, maintains download state, and keeps itself alive during long operations using `chrome.runtime.getPlatformInfo()` heartbeats. Feature modules live in `src/background/` (network sniffer, badge, page actions, capture pipeline) and are initialized synchronously from `init()` so their `chrome.*` listeners register on SW startup.
 
 2. **Content Script** (`src/content.ts` → `dist/content.js`): Built separately as IIFE (content scripts cannot use ES modules). Runs on all pages, uses `DetectionManager` to find videos via DOM observation and network request interception, and injects download buttons. Proxies fetch requests through the service worker to bypass CORS.
 
@@ -78,6 +82,10 @@ Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution c
 4. **Popup** (`src/popup/` → `dist/popup/`): Extension action UI — Videos tab (detected videos), Downloads tab (progress), Manifest tab (manual URL input with quality selector).
 
 5. **Options Page** (`src/options/` → `dist/options/`): Full settings UI with sidebar navigation. Sections: Download (FFmpeg timeout, max concurrent), History (completed/failed/cancelled download log with infinite scroll), Google Drive, S3, Recording (HLS poll interval tuning), Notifications, and Advanced (retries, backoff, cache sizes, fragment failure rate, IDB sync interval). All settings changes notify via bottom toast. History button in the popup header opens the options page directly on the `#history` anchor.
+
+6. **MAIN-world capture hook** (`src/inject/mse-capture.ts` → `dist/mse-capture.js`): IIFE content script with `"world": "MAIN"` at `document_start`. Wraps `MediaSource.addSourceBuffer`, `SourceBuffer.appendBuffer` and `URL.createObjectURL`. **Must stay dependency-free** (no imports): it runs in every page before page scripts.
+
+7. **Capture bridge** (`src/capture-bridge/` → `dist/capture-bridge/`): hidden web-accessible extension page the content script embeds while saving a capture; writes transferred buffers into the extension IDB `chunks` store.
 
 ### Download Flow
 
@@ -129,7 +137,7 @@ All inter-component communication uses the `MessageType` enum in `src/shared/mes
 ### Build System
 
 The Vite config (`vite.config.ts`) has two important quirks:
-- **Content script** is built in a separate Vite sub-build (IIFE format, `inlineDynamicImports: true`) triggered by the `build-content-script-as-iife` plugin. This avoids ES module restrictions for content scripts.
+- **Content scripts** (`content.ts` and `inject/mse-capture.ts`) are built in separate Vite sub-builds (IIFE format, `inlineDynamicImports: true`) triggered by the `build-content-script-as-iife` plugin. This avoids ES module restrictions for content scripts.
 - **HTML files** are post-processed by the `move-html-files` plugin to fix script src paths from absolute to relative after Vite moves them.
 
 FFmpeg WASM files are served from `public/ffmpeg/` and copied to `dist/ffmpeg/` at build time. They are explicitly excluded from Vite's dependency optimization.
@@ -140,7 +148,7 @@ FFmpeg WASM files are served from `public/ffmpeg/` and copied to `dist/ffmpeg/` 
 
 ### Format Detection
 
-`VideoFormat` is a string enum (`VideoFormat.DIRECT | HLS | M3U8 | DASH | UNKNOWN`). The distinctions matter:
+`VideoFormat` is a string enum (`VideoFormat.DIRECT | HLS | M3U8 | DASH | CAPTURE | UNKNOWN`). `CAPTURE` marks downloads produced by MSE stream capture. The distinctions matter:
 - `HLS` — master playlist with `#EXT-X-STREAM-INF` quality variants → `HlsDownloadHandler`
 - `M3U8` — direct media playlist with segments → `M3u8DownloadHandler`
 - `DASH` — MPEG-DASH `.mpd` manifest → `DashDownloadHandler`
@@ -186,6 +194,29 @@ Completed, failed, and cancelled downloads are persisted in IndexedDB when `hist
 
 After a download completes, `handlePostDownloadActions()` in the service worker reads `AppSettings.notifications` and optionally fires an OS notification (`notifyOnCompletion`) or opens the file in Finder/Explorer (`autoOpenFile`).
 
+### Network Detection (`background/network-sniffer.ts`)
+
+`webRequest.onCompleted` listens to all `xmlhttprequest`/`media`/`other` requests and classifies them by URL **and** `Content-Type` (`mpegurl` → HLS, `dash+xml` → DASH, `video/*` → direct). Segment-shaped URLs (`.ts`, `.m4s`, `range=`, `bytestart=` …), `video/mp2t`/`iso.segment` types and direct media below `ui.minDirectSizeKb` are dropped. Hits are sent to the requesting `frameId` as `NETWORK_URL_DETECTED { url, format, size }`; `DetectionManager.handleNetworkRequest(url, hint)` trusts the hint when the URL alone is inconclusive. If the frame's content script isn't listening yet, hits are queued and replayed on `CONTENT_READY` (sent at the end of content `init()`).
+
+### Stream Capture (MSE)
+
+- Hook keeps the latest init segment per SourceBuffer always; media segments only while armed. Segments are keyed `initId:decodeTime` (fMP4 `tfdt`, WebM cluster Timecode) → dedupe + sort on export; the init group with the most bytes wins.
+- DRM: a session is refused if its element has `mediaKeys` or the init signals encryption. Nothing is retained and export returns an error. Keep it that way.
+- Save flow: content `CAPTURE_PREPARE` → SW returns `{token, downloadId}` and creates a `VideoFormat.CAPTURE` DownloadState → content embeds the bridge, posts the token + a `MessageChannel` port to the exact extension origin, then transfers chunks → bridge stores video under `downloadId` and audio under `${downloadId}_a` → bridge sends `CAPTURE_FINALIZE` → SW checks sender URL + token and runs `OFFSCREEN_PROCESS_DASH` with `container` (`mp4`/`webm`/`mkv`).
+- If the bridge fails before transfer, `capture-client.ts` saves raw tracks via page-origin blob URLs.
+- `CAPTURE` downloads can't be retried or re-downloaded by URL; `handleDownloadRequest` rejects them.
+- Popup ⇄ frame capture status/commands go directly through `chrome.tabs.sendMessage(..., { frameId })` (`CAPTURE_GET_STATUS`, `CAPTURE_COMMAND`). The SW keeps no capture status cache.
+
+### Page Integration
+
+- `content/overlay.ts`: hover button in a closed shadow root on `<html>`; pointer tracking is document-level because player chrome covers `<video>`. Click-outside uses `composedPath()` to ignore its own shadow tree.
+- `background/page-actions.ts`: context menus (created on `onInstalled`/`onStartup`), `commands` (`download-best-video`, `download-all-videos`) and `DOWNLOAD_ALL_DETECTED`. All of them collect videos live from every frame via `GET_DETECTED_VIDEOS`.
+- Settings live under `StorageConfig.ui` (`resolveUiSettings()` in `settings.ts` is shared with the content script).
+
+### FFmpeg Loading
+
+`getFFmpeg()` in `offscreen.ts` memoizes the in-flight `load()` promise. `WARMUP_FFMPEG` and the first job used to race (the second caller got an unloaded instance → "ffmpeg is not loaded"). Don't assign `ffmpegInstance` before `load()` resolves.
+
 ### DASH-Specific Notes
 
 - No `-bsf:a aac_adtstoasc` bitstream filter — DASH segments are already in ISOBMF container format
@@ -200,7 +231,11 @@ After a download completes, `handlePostDownloadActions()` in the service worker 
 ```
 src/
 ├── service-worker.ts              # Central orchestrator
+├── background/                    # network-sniffer, badge, page-actions, capture-pipeline
+├── inject/mse-capture.ts          # MAIN-world MSE hook (IIFE, no imports)
 ├── content.ts                     # Content script (IIFE)
+├── content/                       # capture-client.ts, overlay.ts
+├── capture-bridge/                # bridge.html/.ts (web-accessible, writes capture chunks)
 ├── shared/
 │   ├── messages.ts                # MessageType enum
 │   └── constants.ts               # DEFAULT_MAX_CONCURRENT, DEFAULT_FFMPEG_TIMEOUT_MS, etc.

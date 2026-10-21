@@ -52,6 +52,14 @@ import {
   KEEPALIVE_INTERVAL_MS,
   STORAGE_CONFIG_KEY,
 } from "./shared/constants";
+import { initNetworkSniffer, replayPending } from "./background/network-sniffer";
+import { initBadge, badgeVideoDetected, badgeVideoRemoved, badgeReset } from "./background/badge";
+import {
+  initCapturePipeline,
+  handleCapturePrepare,
+  handleCaptureFinalize,
+} from "./background/capture-pipeline";
+import { initPageActions, downloadAllDetected } from "./background/page-actions";
 
 const activeDownloads = new Map<string, Promise<void>>();
 const activeUploads = new Set<string>();
@@ -60,6 +68,8 @@ const uploadAbortControllers = new Map<string, AbortController>();
 const downloadAbortControllers = new Map<string, AbortController>();
 // Set of normalized URLs that should save partial progress on abort
 const savePartialDownloads = new Set<string>();
+// Stream captures being transferred or muxed (keyed by downloadId)
+const activeCaptures = new Set<string>();
 
 /**
  * Keep-alive heartbeat mechanism to prevent service worker termination
@@ -86,7 +96,7 @@ const keepAlive = (
 )();
 
 function updateKeepAlive(): void {
-  keepAlive(activeDownloads.size > 0 || activeUploads.size > 0);
+  keepAlive(activeDownloads.size > 0 || activeUploads.size > 0 || activeCaptures.size > 0);
 }
 
 /**
@@ -95,6 +105,20 @@ function updateKeepAlive(): void {
 async function init() {
   logger.info("Service worker initialized");
   chrome.runtime.onInstalled.addListener(handleInstallation);
+
+  initNetworkSniffer();
+  initBadge();
+  initCapturePipeline({
+    setActive: (downloadId, active) => {
+      if (active) activeCaptures.add(downloadId);
+      else activeCaptures.delete(downloadId);
+      updateKeepAlive();
+    },
+    onCompleted: (downloadId) => {
+      handlePostDownloadActions(downloadId);
+    },
+  });
+  initPageActions((payload) => handleDownloadRequest(payload));
 
   // Cleanup orphaned chunks from previous crashes (non-blocking)
   cleanupStaleChunks().catch((err) =>
@@ -342,54 +366,6 @@ async function handleFetchResourceMessage(payload: {
 }
 
 /**
- * Set up network interceptor to detect video URLs
- * Intercepts completed network requests and sends valid video URLs to content scripts
- * Using onCompleted ensures the request has finished (better for autoplay scenarios)
- */
-chrome.webRequest.onCompleted.addListener(
-  (details) => {
-    const url = details.url;
-    logger.info(`Network request completed: ${url}`);
-    // Detect if this is a video URL
-    const format = detectFormatFromUrl(url);
-    if (format === VideoFormat.UNKNOWN) {
-      return;
-    }
-
-    // Send URL to content script in the tab that made the request
-    if (details.tabId && details.tabId > 0) {
-      chrome.tabs.sendMessage(
-        details.tabId,
-        {
-          type: MessageType.NETWORK_URL_DETECTED,
-          payload: { url },
-        },
-        (response) => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - content script might not be available or tab closed
-          }
-        },
-      );
-    }
-  },
-  {
-    urls: [
-      "http://*/*.m3u8",
-      "https://*/*.m3u8",
-      "http://*/*.m3u8?*",
-      "https://*/*.m3u8?*",
-      "http://*/*.mpd",
-      "https://*/*.mpd",
-      "http://*/*.mpd?*",
-      "https://*/*.mpd?*",
-    ],
-    types: ["xmlhttprequest"],
-  },
-  ["responseHeaders"],
-);
-
-/**
  * Handle messages from popup and content scripts
  * Processes download requests, state queries, config management, and CORS bypass requests
  */
@@ -421,8 +397,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
 
       case MessageType.VIDEO_DETECTED:
-        // This message is sent from content script to popup
-        // Service worker doesn't need to handle it, just ignore silently
+        // Broadcast from content script to popup; the SW only tracks the badge count
+        badgeVideoDetected(sender.tab?.id, message.payload);
+        return false;
+
+      case MessageType.VIDEO_REMOVED:
+        badgeVideoRemoved(sender.tab?.id, message.payload?.url);
         return false;
 
       case MessageType.SET_ICON_BLUE:
@@ -430,7 +410,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
 
       case MessageType.SET_ICON_GRAY:
+        // Top frame (re)initialized: new page or SPA navigation
         handleSetIconGray(sender.tab?.id);
+        badgeReset(sender.tab?.id);
+        return false;
+
+      case MessageType.CONTENT_READY:
+        if (sender.tab?.id !== undefined) {
+          replayPending(sender.tab.id, sender.frameId ?? 0);
+        }
+        return false;
+
+      case MessageType.DOWNLOAD_ALL_DETECTED:
+        downloadAllDetected(message.payload.tabId).then(sendResponse);
+        return true;
+
+      case MessageType.CAPTURE_PREPARE:
+        handleCapturePrepare(message.payload ?? {}, sender).then(sendResponse);
+        return true;
+
+      case MessageType.CAPTURE_FINALIZE:
+        handleCaptureFinalize(message.payload ?? {}, sender).then(sendResponse);
+        return true;
+
+      // Handled by content scripts (popup -> frame); ignore if they reach the SW
+      case MessageType.CAPTURE_GET_STATUS:
+      case MessageType.CAPTURE_COMMAND:
+      case MessageType.DOWNLOAD_PROGRESS:
+      case MessageType.DOWNLOAD_COMPLETE:
+      case MessageType.DOWNLOAD_FAILED:
         return false;
 
       case MessageType.START_RECORDING:
@@ -599,6 +607,11 @@ async function handleDownloadRequest(payload: {
     manifestQuality,
     isManual,
   } = payload;
+  if (metadata?.format === VideoFormat.CAPTURE) {
+    return {
+      error: "Captured streams can't be re-downloaded by URL. Open the page and capture the stream again.",
+    };
+  }
   const normalizedUrl = normalizeUrl(url);
   const existing = await getDownloadByUrl(normalizedUrl);
 

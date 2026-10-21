@@ -2,7 +2,7 @@
  * Download action handlers (open, remove, retry, start download, upload).
  */
 
-import { VideoMetadata, DownloadStage } from "../core/types";
+import { VideoMetadata, DownloadStage, VideoFormat } from "../core/types";
 import { getDownload, deleteDownload } from "../core/database/downloads";
 import { storeChunk } from "../core/database/chunks";
 import { MessageType, CloudProvider } from "../shared/messages";
@@ -106,6 +106,10 @@ export async function handleRetryDownload(downloadId: string): Promise<void> {
     const download = await getDownload(downloadId);
     if (!download) {
       alert("Download not found");
+      return;
+    }
+    if (download.metadata.format === VideoFormat.CAPTURE) {
+      alert("Captured streams can't be retried by URL. Open the page and capture the stream again.");
       return;
     }
 

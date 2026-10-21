@@ -64,6 +64,17 @@ export const DEFAULT_MASTER_PLAYLIST_CACHE_SIZE = 50;
 /** IDB write interval during segment downloads (configurable via Advanced settings) */
 export const DEFAULT_DB_SYNC_INTERVAL_MS = 500;
 
+// ---- Page integration / stream capture (configurable via Page Integration settings) ----
+
+/** Default per-page memory cap for MediaSource stream capture, in MB */
+export const DEFAULT_CAPTURE_MAX_MB = 1536;
+
+/** Direct media sniffed from network smaller than this (KB) is ignored as noise */
+export const DEFAULT_MIN_DIRECT_SIZE_KB = 512;
+
+/** window.postMessage channel shared by the MAIN-world capture hook and the content script */
+export const CAPTURE_CHANNEL = "__media_bridge_capture__";
+
 // ---- Chrome storage keys ----
 
 export const STORAGE_CONFIG_KEY = "storage_config";

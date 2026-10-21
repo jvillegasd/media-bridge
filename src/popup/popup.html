@@ -849,6 +849,95 @@
       width: 100%;
     }
 
+    /* ---- Videos toolbar ---- */
+    .videos-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3) 0;
+      flex-shrink: 0;
+    }
+
+    .videos-count {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .small-btn {
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    .small-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ---- Stream capture panel ---- */
+    .capture-panel {
+      padding: var(--space-2) var(--space-3) 0;
+      flex-shrink: 0;
+    }
+
+    .capture-card {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-left: 3px solid #16a34a;
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      margin-bottom: var(--space-2);
+    }
+
+    .capture-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .capture-badge {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(22, 163, 74, 0.15);
+      color: #16a34a;
+    }
+
+    .capture-badge.rec {
+      background: rgba(220, 38, 38, 0.15);
+      color: #dc2626;
+    }
+
+    .capture-title {
+      font-weight: 600;
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .capture-meta {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .capture-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .capture-hint {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      line-height: 1.4;
+    }
   </style>
 </head>
 <body>
@@ -895,6 +984,11 @@
 
   <!-- Auto Detect Tab Content -->
   <div id="autoDetectContent" class="tab-content active">
+    <div id="videosToolbar" class="videos-toolbar" style="display: none;">
+      <span id="videosCount" class="videos-count"></span>
+      <button id="downloadAllBtn" class="secondary-btn small-btn" title="Download every non-DRM, non-live video detected on this page (Alt+Shift+A)">Download all</button>
+    </div>
+    <div id="capturePanel" class="capture-panel" style="display: none;"></div>
     <div id="detectedVideosList"></div>
 
     <!-- No Video Notice -->

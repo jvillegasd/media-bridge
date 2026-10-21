@@ -72,6 +72,51 @@ export enum MessageType {
 
   // URL health check (options page manifest check feature)
   CHECK_URL = "CHECK_URL",
+
+  // Page-initiated downloads (overlay button) and bulk actions
+  DOWNLOAD_ALL_DETECTED = "DOWNLOAD_ALL_DETECTED",
+
+  // MediaSource stream capture
+  CAPTURE_GET_STATUS = "CAPTURE_GET_STATUS", // popup -> content (per frame): capture state
+  CAPTURE_COMMAND = "CAPTURE_COMMAND", // popup -> content (per frame): start/stop/discard/boost
+  CAPTURE_PREPARE = "CAPTURE_PREPARE", // content -> SW: allocate token + downloadId
+  CAPTURE_FINALIZE = "CAPTURE_FINALIZE", // bridge -> SW: chunks stored, mux and save
+
+  // Content script finished init in a frame — SW replays network detections it missed
+  CONTENT_READY = "CONTENT_READY",
+}
+
+export type CaptureAction = "start" | "boost" | "stop-save" | "discard";
+
+export interface CaptureTrackStatus {
+  kind: "video" | "audio" | "unknown";
+  mime: string;
+  segments: number;
+  bytes: number;
+}
+
+export interface CaptureSessionStatus {
+  id: number;
+  tracks: CaptureTrackStatus[];
+  bytes: number;
+  /** Media element duration in seconds, when known */
+  duration?: number;
+  /** Seconds of media covered by captured video segments (approximate) */
+  capturedSeconds?: number;
+  /** EME/DRM detected — capture is refused */
+  drm: boolean;
+  width?: number;
+  height?: number;
+}
+
+export interface CaptureFrameStatus {
+  frameId: number;
+  armed: boolean;
+  limitReached: boolean;
+  saving: boolean;
+  sessions: CaptureSessionStatus[];
+  title: string;
+  pageUrl: string;
 }
 
 export interface BaseMessage {

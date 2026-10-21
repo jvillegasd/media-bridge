@@ -81,9 +81,10 @@ export class DirectDetectionHandler {
   async detect(
     url: string,
     videoElement?: HTMLVideoElement,
+    options: { trusted?: boolean; size?: number } = {},
   ): Promise<VideoMetadata | null> {
-    // Check if URL is a direct video URL
-    if (!this.isDirectVideoUrl(url)) {
+    // Check if URL is a direct video URL (trusted: Content-Type already says video/*)
+    if (!options.trusted && !this.isDirectVideoUrl(url)) {
       return null;
     }
 
@@ -99,7 +100,10 @@ export class DirectDetectionHandler {
     }
 
     // Extract metadata
-    const metadata = await this.extractMetadata(url, videoElement);
+    const metadata = await this.extractMetadata(url, videoElement, options.trusted);
+    if (metadata && options.size) {
+      metadata.size = options.size;
+    }
 
     if (metadata && this.onVideoDetected) {
       this.onVideoDetected(metadata);
@@ -110,27 +114,42 @@ export class DirectDetectionHandler {
 
   /**
    * Handle network request for direct video
-   * Associates URL with video elements and triggers detection
+   * Associates URL with video elements and triggers detection.
+   * `trusted` requests were classified as video by the service worker from
+   * response headers; if no element claims them they are still reported.
    */
-  handleNetworkRequest(url: string): void {
-    if (this.isDirectVideoUrl(url) && !this.isAudioOnlyUrl(url)) {
-      // Query DOM for current video elements and filter to known ones
-      const videos = document.querySelectorAll("video");
-      for (const node of Array.from(videos)) {
-        const vid = node as HTMLVideoElement;
-        if (!this.knownVideos.has(vid)) continue;
+  handleNetworkRequest(url: string, size?: number, trusted = false): void {
+    if (!trusted && !this.isDirectVideoUrl(url)) return;
+    if (this.isAudioOnlyUrl(url)) return;
 
-        const existing = this.capturedUrls.get(vid);
+    let claimed = false;
+    // Query DOM for current video elements and filter to known ones
+    const videos = document.querySelectorAll("video");
+    for (const node of Array.from(videos)) {
+      const vid = node as HTMLVideoElement;
+      if (!this.knownVideos.has(vid)) continue;
 
-        if (
-          !existing ||
-          existing.startsWith("blob:") ||
-          existing.startsWith("data:")
-        ) {
-          this.capturedUrls.set(vid, url);
-          this.detect(url, vid);
+      const existing = this.capturedUrls.get(vid);
+      const src = vid.currentSrc || vid.src;
+
+      if (
+        src === url ||
+        !existing ||
+        existing.startsWith("blob:") ||
+        existing.startsWith("data:")
+      ) {
+        if (existing === url) {
+          claimed = true;
+          continue;
         }
+        this.capturedUrls.set(vid, url);
+        this.detect(url, vid, { trusted, size });
+        claimed = true;
       }
+    }
+
+    if (!claimed && trusted) {
+      this.detect(url, undefined, { trusted, size });
     }
   }
 
@@ -335,8 +354,12 @@ export class DirectDetectionHandler {
   private async extractMetadata(
     url: string,
     videoElement?: HTMLVideoElement,
+    trusted = false,
   ): Promise<VideoMetadata | null> {
-    const format = detectFormatFromUrl(url);
+    let format = detectFormatFromUrl(url);
+    if (format === VideoFormat.UNKNOWN && trusted) {
+      format = VideoFormat.DIRECT;
+    }
 
     // Reject unknown formats
     if (format === VideoFormat.UNKNOWN) {

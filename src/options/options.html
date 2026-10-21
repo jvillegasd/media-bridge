@@ -892,6 +892,15 @@
           <span>Recording</span>
         </button>
 
+        <button class="nav-item" data-view="page-integration" title="Page Integration">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+            <polyline points="9 10 12 13 15 10"></polyline>
+            <line x1="12" y1="7" x2="12" y2="13"></line>
+          </svg>
+          <span>Page Integration</span>
+        </button>
+
         <button class="nav-item" data-view="notifications" title="Notifications">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
@@ -1270,6 +1279,55 @@
 
         <div class="btn-row">
           <button id="save-recording-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+      </div>
+
+      <!-- ===== Page Integration View ===== -->
+      <div id="view-page-integration" class="view">
+        <div class="view-header">
+          <h1>Page Integration</h1>
+          <p>In-page download button, network detection and stream capture.</p>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">In-page Button</h2>
+          <div class="form-group">
+            <label class="toggle-row" style="margin-top:0;">
+              <input type="checkbox" id="show-overlay-button">
+              <span>Show download button on videos</span>
+            </label>
+            <div class="form-help" style="margin-top:6px;">A floating button appears in the corner of a video when you hover it, listing every source detected for that player.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Network Detection</h2>
+          <div class="form-group">
+            <label class="form-label" for="min-direct-size">Ignore direct media smaller than (KB)</label>
+            <input type="number" id="min-direct-size" class="form-input" min="0" max="102400" step="64" value="512" style="max-width: 140px;" />
+            <div class="form-help">Filters short previews, ads and thumbnails sniffed from network traffic (0–102400 KB).</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2 class="section-title">Stream Capture</h2>
+          <div class="form-help" style="margin-bottom:12px;">For players that use MediaSource with no detectable manifest, Media Bridge can record the stream data the player loads and merge it into a file. DRM-protected (EME) streams are always skipped.</div>
+          <div class="form-group">
+            <label class="form-label" for="capture-max-mb">Memory limit per page (MB)</label>
+            <input type="number" id="capture-max-mb" class="form-input" min="128" max="4096" step="128" value="1536" style="max-width: 140px;" />
+            <div class="form-help">Capture pauses when this much data is buffered in the page (128–4096 MB). Output is also bounded by the ~2 GB merge limit.</div>
+          </div>
+          <div class="form-group">
+            <label class="toggle-row" style="margin-top:0;">
+              <input type="checkbox" id="auto-arm-capture">
+              <span>Capture automatically when playback starts</span>
+            </label>
+            <div class="form-help" style="margin-top:6px;">Uses more memory on video-heavy sites; when off, start capture from the in-page button or popup. Applies to newly loaded pages.</div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="save-page-integration-settings" class="btn btn-primary">Save Settings</button>
         </div>
       </div>
 
