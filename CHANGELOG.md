@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.1](https://github.com/jvillegasd/media-bridge/compare/v1.11.0...v1.11.1) (2026-11-12)
+
+
+### 🐛 Bug Fixes
+
+* **offscreen:** share in-flight FFmpeg load between warmup and first job ([#39](https://github.com/jvillegasd/media-bridge/issues/39)) ([0f13644](https://github.com/jvillegasd/media-bridge/commit/0f1364440191c8dcb779256f1c7d1fd63100bb9a))
+* **offscreen:** terminate FFmpeg instance when load fails ([#42](https://github.com/jvillegasd/media-bridge/issues/42)) ([05241b3](https://github.com/jvillegasd/media-bridge/commit/05241b3381c7f517288ce0c273d0235943d39907))
+
 ## [1.11.0](https://github.com/jvillegasd/media-bridge/compare/v1.10.0...v1.11.0) (2026-03-07)
 
 
