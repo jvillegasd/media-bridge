@@ -26,10 +26,17 @@ async function getFFmpeg(): Promise<FFmpeg> {
     ffmpegLoading = (async () => {
       logger.info("Initializing FFmpeg in offscreen document");
       const instance = new FFmpeg();
-      await instance.load({
-        coreURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.js"),
-        wasmURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.wasm"),
-      });
+      try {
+        await instance.load({
+          coreURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.js"),
+          wasmURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.wasm"),
+        });
+      } catch (err) {
+        // load() spawns its Worker before loading the core; without this, every
+        // failed load (and each retry) leaves an orphaned Worker behind.
+        instance.terminate();
+        throw err;
+      }
       instance.on("log", ({ message }) => {
         logger.debug("FFmpeg:", message);
       });
