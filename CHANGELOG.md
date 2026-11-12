@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/jvillegasd/media-bridge/compare/v1.11.1...v1.11.2) (2026-11-12)
+
+
+### 📚 Documentation
+
+* rewrite README with badges and icon ([58cdb1c](https://github.com/jvillegasd/media-bridge/commit/58cdb1c17cd3b2d733c6d590100c53fb251afb34))
+
 ## [1.11.1](https://github.com/jvillegasd/media-bridge/compare/v1.11.0...v1.11.1) (2026-11-12)
 
 
