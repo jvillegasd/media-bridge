@@ -10,28 +10,37 @@ import { readChunkRange } from "../core/database/chunks";
 import { logger } from "../core/utils/logger";
 
 let ffmpegInstance: FFmpeg | null = null;
+/**
+ * In-flight load, shared by concurrent callers. Without this, WARMUP_FFMPEG and
+ * the first processing job race: the second caller would receive the instance
+ * before load() resolved and fail with "ffmpeg is not loaded".
+ */
+let ffmpegLoading: Promise<FFmpeg> | null = null;
 
 /**
  * Initialize FFmpeg instance
  */
 async function getFFmpeg(): Promise<FFmpeg> {
-  if (!ffmpegInstance) {
-    logger.info("Initializing FFmpeg in offscreen document");
-    ffmpegInstance = new FFmpeg();
-
-    await ffmpegInstance.load({
-      coreURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.js"),
-      wasmURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.wasm"),
+  if (ffmpegInstance) return ffmpegInstance;
+  if (!ffmpegLoading) {
+    ffmpegLoading = (async () => {
+      logger.info("Initializing FFmpeg in offscreen document");
+      const instance = new FFmpeg();
+      await instance.load({
+        coreURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.js"),
+        wasmURL: chrome.runtime.getURL("./ffmpeg/core/ffmpeg-core.wasm"),
+      });
+      instance.on("log", ({ message }) => {
+        logger.debug("FFmpeg:", message);
+      });
+      logger.info("FFmpeg initialized successfully");
+      ffmpegInstance = instance;
+      return instance;
+    })().finally(() => {
+      ffmpegLoading = null;
     });
-
-    ffmpegInstance.on("log", ({ message }) => {
-      logger.debug("FFmpeg:", message);
-    });
-
-    logger.info("FFmpeg initialized successfully");
   }
-
-  return ffmpegInstance;
+  return ffmpegLoading;
 }
 
 /**
