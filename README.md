@@ -1,122 +1,143 @@
-# Media Bridge Browser Extension
+<div align="center">
 
-A Manifest V3 Chromium extension that detects and downloads videos from the web — HLS, MPEG-DASH, and direct video URLs.
+<img src="docs/icon.png" alt="Media Bridge icon" width="96" height="96" />
 
-## Features
+# Media Bridge
 
-- **Multiple Format Support**: HLS (`.m3u8`), MPEG-DASH (`.mpd`), and direct video URLs (`.mp4`, `.webm`, etc.)
-- **Automatic Video Detection**: Content script detects videos via DOM observation and network request interception
-- **Live Stream Recording**: Record live HLS and DASH streams in real-time with a REC button
-- **Popup Interface**: Manual URL input with quality selector for HLS/DASH playlists
-- **Real-time Progress**: Download speed, percentage, and stage displayed live
-- **Segment Merging**: FFmpeg.wasm muxes HLS/DASH segments into MP4 files
-- **Concurrent Downloads**: Up to 10 simultaneous segment downloads (default: 3)
-- **Partial Save on Cancel**: Save whatever segments were collected before cancellation
-- **AES-128 Decryption**: Decrypts encrypted HLS segments transparently
-- **Header Injection**: Injects `Origin`/`Referer` headers via `declarativeNetRequest` for CDNs that require them
-- **Download History**: Completed, failed, and cancelled downloads are persisted and browsable in the options page History section with infinite scroll
-- **Notifications**: Optional OS notification and auto-open file on download completion
-- **Cloud Upload**: Upload completed downloads to Google Drive or S3-compatible storage from the History page
-- **Configurable Settings**: Recording poll intervals, fetch retry behaviour, detection cache sizes, IDB sync rate — all tunable from the options page
+**Detect, download, and record web video, right from your browser.**
 
-## ⚠️ Output File Size Limit
+HLS · MPEG-DASH · direct files · live streams, merged to MP4 entirely on your machine.
 
-Video processing runs entirely inside the browser, so output files are subject to browser memory limits. In practice, files above roughly **2 GB** will fail during the merge stage.
+[![Release](https://img.shields.io/github/v/release/jvillegasd/media-bridge?style=flat-square&color=blue)](https://github.com/jvillegasd/media-bridge/releases)
+[![License: MIT](https://img.shields.io/github/license/jvillegasd/media-bridge?style=flat-square)](LICENSE)
+[![Manifest V3](https://img.shields.io/badge/Manifest-V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/intro/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/built%20with-Vite-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev/)
+[![FFmpeg.wasm](https://img.shields.io/badge/FFmpeg-WASM-007808?style=flat-square&logo=ffmpeg&logoColor=white)](https://ffmpegwasm.netlify.app/)
+[![Last commit](https://img.shields.io/github/last-commit/jvillegasd/media-bridge?style=flat-square)](https://github.com/jvillegasd/media-bridge/commits/main)
 
-## Cloud Upload Setup
+</div>
 
-Completed downloads can be uploaded to **Google Drive** or **S3-compatible storage** from **Options → History → item menu → Upload to cloud**.
+---
 
-### Google Drive
+## Why Media Bridge?
 
-Google Drive requires you to create your own OAuth credentials (free):
+Most video downloaders either send your data to a server or only handle plain `.mp4` links. Media Bridge does the whole job **locally**: it finds the stream, downloads the segments, and stitches them into a single MP4 using FFmpeg compiled to WebAssembly. Nothing leaves your browser unless you choose to upload it to your own cloud storage.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a project (or use an existing one).
-2. Enable the **[Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)**.
-3. Go to **[Credentials](https://console.cloud.google.com/apis/credentials)** → **Create Credentials** → **OAuth client ID**.
-4. Set application type to **Web application**.
-5. Under **Authorized redirect URIs**, add your extension's redirect URI.
-   - Find it in **Options → Cloud Providers → Google Drive** — it's shown next to the Client ID field.
-   - It looks like `https://<extension-id>.chromiumapp.org/`
-6. Copy the **Client ID** and paste it into the options page.
-7. Click **Sign in with Google** to authorize.
+## Highlights
 
-> **Note:** If you haven't configured a consent screen yet, Google will prompt you to create one. Choose **External** user type, fill in the required fields, and add yourself as a test user. The app will work in "Testing" mode — no verification needed for personal use.
-
-### S3 / S3-Compatible Storage
-
-1. In **Options → Cloud Providers → S3**, enter your bucket name, region, access key ID, and secret access key.
-2. Your S3 bucket must have a CORS policy that allows the extension origin. The options page generates the correct JSON and provides a **Copy CORS Config** button — paste it into **S3 → Bucket → Permissions → CORS**.
-3. Works with AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO, and any S3-compatible provider.
-
-## Installation
-
-### Development Build
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd media-bridge
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Build the extension:
-```bash
-npm run build
-```
-
-4. Load the extension in Chrome:
-   - Open Chrome and navigate to `chrome://extensions/`
-   - Enable "Developer mode" (toggle in top right)
-   - Click "Load unpacked"
-   - Select the `dist` directory
-
-### Production Build
-
-```bash
-npm run build
-```
-
-The built extension will be in the `dist` directory.
-
-## Usage
-
-### Manual Download
-
-1. Click the extension icon in your browser toolbar
-2. Go to the **Manifest** tab
-3. Paste a video URL (HLS, DASH, or direct video)
-4. Select quality (for HLS/DASH playlists)
-5. Click "Download"
-
-### Automatic Detection
-
-When visiting a page with video content:
-- The extension automatically detects videos via network request interception
-- Detected videos appear in the **Videos** tab
-- Click "Download" to start
-
-### Live Stream Recording
-
-When a live stream is detected:
-- A **REC** button appears in the popup
-- Click REC to start recording segments in real-time
-- Click STOP to stop — segments collected so far are merged into an MP4
+| | |
+|---|---|
+| **Auto-detection** | Finds videos on any page through DOM observation and network interception. |
+| **Every common format** | HLS (`.m3u8`), MPEG-DASH (`.mpd`), and direct files (`.mp4`, `.webm`, ...). |
+| **Live recording** | One-click REC for live HLS and DASH streams; stop any time and get an MP4. |
+| **Private by design** | Muxing runs in-browser with FFmpeg.wasm. No third-party servers. |
+| **Resilient** | Concurrent segment downloads, retries, AES-128 decryption, and partial save on cancel. |
+| **Cloud upload** | Send finished files to Google Drive or any S3-compatible bucket. |
+| **History** | Browse, re-download, or delete past downloads from the options page. |
+| **Tunable** | Concurrency, retries, polling intervals, notifications, and more. |
 
 ## Supported Formats
 
 | Format | Detection | VOD Download | Live Recording |
-|--------|-----------|-------------|----------------|
+|--------|:---------:|:------------:|:--------------:|
 | **HLS** (`.m3u8` master playlist) | ✅ | ✅ | ✅ |
 | **M3U8** (`.m3u8` media playlist) | ✅ | ✅ | — |
 | **DASH** (`.mpd` manifest) | ✅ | ✅ | ✅ |
 | **Direct** (`.mp4`, `.webm`, etc.) | ✅ | ✅ | — |
 
-## Technical Details
+## Installation
+
+Media Bridge is loaded as an unpacked extension in any Chromium browser.
+
+```bash
+git clone https://github.com/jvillegasd/media-bridge.git
+cd media-bridge
+npm install
+npm run build
+```
+
+Then in Chrome:
+
+1. Open `chrome://extensions/`
+2. Turn on **Developer mode** (top right)
+3. Click **Load unpacked** and select the `dist` directory
+
+## Usage
+
+**Automatic detection.** Browse to a page with video. Detected videos appear in the extension popup's **Videos** tab; click **Download**.
+
+**Manual URL.** Open the popup, go to the **Manifest** tab, paste an HLS, DASH, or direct URL, pick a quality, and click **Download**.
+
+**Live streams.** When a live stream is detected a **REC** button appears. Click it to start recording and **STOP** when done; the segments collected so far are merged into an MP4.
+
+## Cloud Upload
+
+Upload is manual: open **Options → History → item menu → Upload to cloud**, pick the local file, and choose a provider.
+
+<details>
+<summary><strong>Google Drive setup</strong></summary>
+
+Google Drive needs your own free OAuth credentials:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a project (or use an existing one).
+2. Enable the **[Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)**.
+3. Go to **[Credentials](https://console.cloud.google.com/apis/credentials)** → **Create Credentials** → **OAuth client ID**.
+4. Set the application type to **Web application**.
+5. Under **Authorized redirect URIs**, add your extension's redirect URI, shown in **Options → Cloud Providers → Google Drive** next to the Client ID field. It looks like `https://<extension-id>.chromiumapp.org/`.
+6. Copy the **Client ID** into the options page.
+7. Click **Sign in with Google** to authorize.
+
+> If you have not configured a consent screen yet, choose **External**, fill in the required fields, and add yourself as a test user. "Testing" mode needs no verification for personal use.
+
+</details>
+
+<details>
+<summary><strong>S3 / S3-compatible storage setup</strong></summary>
+
+1. In **Options → Cloud Providers → S3**, enter your bucket name, region, access key ID, and secret access key.
+2. Your bucket needs a CORS policy that allows the extension origin. The options page generates the JSON and has a **Copy CORS Config** button; paste it into **S3 → Bucket → Permissions → CORS**.
+3. Works with AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO, and other S3-compatible providers.
+
+</details>
+
+## Limitations
+
+- **~2 GB output limit.** The muxer runs in browser memory; larger files fail during merging.
+- **No DRM.** FairPlay and PlayReady protected streams cannot be downloaded.
+- **CDN restrictions.** Some sites block extension requests via token auth or IP restrictions.
+- **Browser memory.** Total concurrent segment data is bounded by available RAM.
+
+## Troubleshooting
+
+<details>
+<summary><strong>Download fails</strong></summary>
+
+- Verify the URL is accessible and not DRM-protected.
+- Check the browser console for errors.
+- Make sure the format is supported (HLS, DASH, or direct).
+
+</details>
+
+<details>
+<summary><strong>FFmpeg merge fails</strong></summary>
+
+- The file may exceed the ~2 GB limit; try a shorter clip or lower quality.
+- Increase the FFmpeg timeout in **Options → Download Settings** if processing is slow.
+- Check the offscreen document console for FFmpeg output.
+
+</details>
+
+<details>
+<summary><strong>Videos are not detected</strong></summary>
+
+- Some sites obfuscate requests or use proprietary players.
+- Use the **Manifest** tab to paste the URL manually.
+- Check the browser console for content script errors.
+
+</details>
+
+## Architecture & Internals
 
 ### Architecture
 
@@ -232,9 +253,9 @@ src/
 - `tabs` / `webNavigation` — Tab tracking for video detection
 - Host permissions (`http://*/* https://*/*`) — Fetch video content
 
-## Development
+### Development
 
-### Build Commands
+#### Build Commands
 
 ```bash
 # Development build with watch mode
@@ -247,7 +268,7 @@ npm run build
 npm run type-check
 ```
 
-### Key Dependencies
+#### Key Dependencies
 
 | Package | Purpose |
 |---------|---------|
@@ -258,30 +279,6 @@ npm run type-check
 | `uuid` | Unique download IDs |
 | `url-toolkit` | URL resolution for relative segment paths |
 
-## Limitations
-
-- **~2 GB output limit** — The muxer runs in browser memory; files larger than ~2 GB fail during merging.
-- **DRM content** — FairPlay and PlayReady protected streams cannot be downloaded.
-- **CDN restrictions** — Some sites block extension requests via token auth or IP restrictions.
-- **Browser memory** — Total concurrent segment data is limited by available RAM.
-
-## Troubleshooting
-
-### Download Fails
-- Verify the URL is accessible and not DRM-protected
-- Check browser console for errors
-- Ensure the format is supported (HLS, DASH, or direct)
-
-### FFmpeg Merge Fails
-- File may exceed the ~2 GB limit — try a shorter clip or lower quality
-- Increase FFmpeg timeout in **Options → Download Settings** if processing is slow
-- Check the offscreen document console for FFmpeg error output
-
-### Extension Not Detecting Videos
-- Some sites obfuscate network requests or use proprietary players
-- Use the **Manifest** tab to paste the URL manually
-- Check browser console for content script errors
-
 ## License
 
-MIT License — see LICENSE file for details
+Released under the [MIT License](LICENSE).
