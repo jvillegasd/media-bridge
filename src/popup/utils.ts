@@ -78,6 +78,7 @@ export function getFormatDisplayName(
 ): string {
   if (actualFormat) return actualFormat;
   if (format === VideoFormat.DIRECT) return "MP4";
+  if (format === VideoFormat.CAPTURE) return "Capture";
   return format.toUpperCase();
 }
 
@@ -89,6 +90,8 @@ export function getLinkTypeDisplayName(format: VideoFormat): string {
       return "HLS";
     case VideoFormat.M3U8:
       return "M3U8";
+    case VideoFormat.CAPTURE:
+      return "Stream capture";
     default:
       return format.toUpperCase();
   }

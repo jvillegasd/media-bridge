@@ -1,0 +1,4 @@
+<!doctype html><title>Noise Test Page</title><h1>Small media and segments only</h1>
+<script>
+Promise.all([fetch('/media/small?id=1'), fetch('/hls/seg000.ts')]).then(() => { window.__done = true; });
+</script>

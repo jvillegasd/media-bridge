@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
           // Content script excluded - will be built separately as IIFE
           'popup/popup': resolve(__dirname, 'src/popup/popup.html'),
           'options/options': resolve(__dirname, 'src/options/options.html'),
+          'capture-bridge/bridge': resolve(__dirname, 'src/capture-bridge/bridge.html'),
         },
         output: {
           // ES modules for service worker and other scripts
@@ -39,6 +40,9 @@ export default defineConfig(({ mode }) => {
             if (chunkInfo.name.includes('offscreen')) {
               return 'offscreen/offscreen.js';
             }
+            if (chunkInfo.name.includes('bridge')) {
+              return 'capture-bridge/bridge.js';
+            }
             return '[name].js';
           },
           chunkFileNames: '[name].js',
@@ -53,6 +57,9 @@ export default defineConfig(({ mode }) => {
               }
               if (assetInfo.name.includes('offscreen')) {
                 return 'offscreen/offscreen.html';
+              }
+              if (assetInfo.name.includes('bridge')) {
+                return 'capture-bridge/bridge.html';
               }
             }
             return '[name].[ext]';
@@ -90,6 +97,7 @@ export default defineConfig(({ mode }) => {
             { from: 'dist/src/popup/popup.html', to: 'dist/popup/popup.html' },
             { from: 'dist/src/options/options.html', to: 'dist/options/options.html' },
             { from: 'dist/src/offscreen/offscreen.html', to: 'dist/offscreen/offscreen.html' },
+            { from: 'dist/src/capture-bridge/bridge.html', to: 'dist/capture-bridge/bridge.html' },
           ];
           
           htmlMoves.forEach(({ from, to }) => {
@@ -103,13 +111,14 @@ export default defineConfig(({ mode }) => {
             'dist/popup/popup.html',
             'dist/options/options.html',
             'dist/offscreen/offscreen.html',
+            'dist/capture-bridge/bridge.html',
           ];
           
           htmlFiles.forEach((file) => {
             if (existsSync(file)) {
               let content = readFileSync(file, 'utf-8');
               // Replace absolute paths with relative paths
-              content = content.replace(/src="\/(popup|options|offscreen)\/([^"]+)"/g, 'src="./$2"');
+              content = content.replace(/src="\/(popup|options|offscreen|capture-bridge)\/([^"]+)"/g, 'src="./$2"');
               writeFileSync(file, content, 'utf-8');
             }
           });
@@ -129,17 +138,22 @@ export default defineConfig(({ mode }) => {
           (globalThis as any).__buildingContentScript = true;
           
           try {
-            // Build content script separately with IIFE format
+            // Build content scripts separately with IIFE format:
+            // content.ts (isolated world) and mse-capture.ts (MAIN world hook)
+            for (const [entry, outName] of [
+              ['src/content.ts', 'content.js'],
+              ['src/inject/mse-capture.ts', 'mse-capture.js'],
+            ] as const) {
             await viteBuild({
               configFile: false, // Don't use the main config file
               build: {
                 outDir: resolve(__dirname, 'dist'),
                 emptyOutDir: false,
                 rollupOptions: {
-                  input: resolve(__dirname, 'src/content.ts'),
+                  input: resolve(__dirname, entry),
                   output: {
                     format: 'iife',
-                    entryFileNames: 'content.js',
+                    entryFileNames: outName,
                     inlineDynamicImports: true, // Bundle everything into one file
                   },
                 },
@@ -157,7 +171,9 @@ export default defineConfig(({ mode }) => {
                 exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
               },
               plugins: [], // No plugins to avoid recursion
+              logLevel: 'warn',
             });
+            }
           } finally {
             (globalThis as any).__buildingContentScript = false;
           }

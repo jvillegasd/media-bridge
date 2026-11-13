@@ -362,12 +362,26 @@ async function processHlsVideoAndAudioSeparate(
   }
 }
 
+/** Output container for DASH/capture muxing. Captured MSE streams may be WebM (VP9/Opus). */
+type OutputContainer = "mp4" | "webm" | "mkv";
+
+const CONTAINER_MIME: Record<OutputContainer, string> = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mkv: "video/x-matroska",
+};
+
+function containerArgs(container: OutputContainer): string[] {
+  return container === "mp4" ? ["-movflags", "+faststart"] : [];
+}
+
 async function processDashSingleStream(
   ffmpeg: FFmpeg,
   downloadId: string,
   fragmentCount: number,
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
+  container: OutputContainer = "mp4",
 ): Promise<string | undefined> {
   const inputFile = `${downloadId}_media.mp4`;
 
@@ -378,12 +392,12 @@ async function processDashSingleStream(
     onProgress?.(0.5, "Writing media stream");
     await ffmpeg.writeFile(inputFile, await fetchFile(result.blob));
 
-    onProgress?.(0.7, "Converting to MP4");
+    onProgress?.(0.7, `Converting to ${container.toUpperCase()}`);
     await ffmpeg.exec([
       "-y",
       "-i", inputFile,
       "-c", "copy",
-      "-movflags", "+faststart",
+      ...containerArgs(container),
       outputFileName,
     ]);
 
@@ -405,6 +419,7 @@ async function processDashVideoAndAudioSeparate(
   audioLength: number,
   outputFileName: string,
   onProgress?: (progress: number, message: string) => void,
+  container: OutputContainer = "mp4",
 ): Promise<string | undefined> {
   const videoFile = `${videoDownloadId}_video.mp4`;
   const audioFile = `${audioDownloadId}_audio.mp4`;
@@ -430,7 +445,7 @@ async function processDashVideoAndAudioSeparate(
       "-c:v", "copy",
       "-c:a", "copy",
       "-shortest",
-      "-movflags", "+faststart",
+      ...containerArgs(container),
       outputFileName,
     ]);
 
@@ -448,11 +463,13 @@ async function processDashChunks(
   audioLength: number,
   audioDownloadId?: string,
   onProgress?: (progress: number, message: string) => void,
+  container: OutputContainer = "mp4",
 ): Promise<ProcessResult> {
   validateDownloadId(downloadId);
+  if (!(container in CONTAINER_MIME)) container = "mp4";
   const ffmpeg = await getFFmpeg();
 
-  const outputFileName = `/tmp/${downloadId}.mp4`;
+  const outputFileName = `/tmp/${downloadId}.${container}`;
 
   try {
     let warning: string | undefined;
@@ -470,6 +487,7 @@ async function processDashChunks(
         audioLength,
         outputFileName,
         onProgress,
+        container,
       );
     } else if (videoLength > 0) {
       warning = await processDashSingleStream(
@@ -478,6 +496,7 @@ async function processDashChunks(
         videoLength,
         outputFileName,
         onProgress,
+        container,
       );
     } else {
       throw new Error("No DASH chunks to process");
@@ -486,7 +505,7 @@ async function processDashChunks(
     const data = await ffmpeg.readFile(outputFileName);
     onProgress?.(1, "Done");
 
-    const blob = new Blob([data as BlobPart], { type: "video/mp4" });
+    const blob = new Blob([data as BlobPart], { type: CONTAINER_MIME[container] });
     const blobUrl = URL.createObjectURL(blob);
 
     try {
@@ -666,6 +685,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           payload.audioLength as number,
           payload.audioDownloadId as string | undefined,
           onProgress,
+          (payload.container as OutputContainer | undefined) ?? "mp4",
         ),
     )
   )

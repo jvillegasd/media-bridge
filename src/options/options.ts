@@ -32,6 +32,8 @@ import {
   RETRY_BACKOFF_FACTOR,
   MAX_FRAGMENT_FAILURE_RATE,
   DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
+  MIN_CAPTURE_MAX_MB,
+  MAX_CAPTURE_MAX_MB,
 } from "../shared/constants";
 
 import {
@@ -80,7 +82,7 @@ function init(): void {
 
   // Check URL hash to navigate directly to a view (e.g. opened via history button)
   const hash = location.hash.slice(1);
-  const validViews = new Set(["history", "cloud-providers", "recording", "notifications", "advanced", "about"]);
+  const validViews = new Set(["history", "cloud-providers", "recording", "page-integration", "notifications", "advanced", "about"]);
   switchView(validViews.has(hash) ? hash : "download-settings");
 }
 
@@ -122,6 +124,7 @@ function switchView(viewId: string): void {
     setupCloudProviderTabs();
   }
   if (viewId === "recording") loadRecordingSettings();
+  if (viewId === "page-integration") loadPageIntegrationSettings();
   if (viewId === "notifications") loadNotificationSettings();
   if (viewId === "advanced") loadAdvancedSettings();
   if (viewId === "about") loadAboutSection();
@@ -1484,6 +1487,46 @@ function iconQuestion(): string {
 // ─────────────────────────────────────────────
 // Section: Recording View
 // ─────────────────────────────────────────────
+
+// ─────────────────────────────────────────────
+// Section: Page Integration View
+// ─────────────────────────────────────────────
+
+async function loadPageIntegrationSettings(): Promise<void> {
+  const { capture } = await loadSettings();
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  get("capture-enabled").checked = capture.enabled;
+  get("capture-max-mb").value = capture.maxMb.toString();
+
+  const btn = document.getElementById("save-page-integration-settings") as HTMLButtonElement | null;
+  if (btn) btn.onclick = () => void savePageIntegrationSettings();
+}
+
+async function savePageIntegrationSettings(): Promise<void> {
+  const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+  const maxMb = validateField(get("capture-max-mb"), MIN_CAPTURE_MAX_MB, MAX_CAPTURE_MAX_MB, true);
+  if (maxMb === null) return;
+
+  const btn = document.getElementById("save-page-integration-settings") as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    config.capture = {
+      enabled: get("capture-enabled").checked,
+      maxMb,
+    };
+    await ChromeStorage.set(STORAGE_CONFIG_KEY, config);
+    showStatus("Settings saved.", "success");
+  } catch (err) {
+    showStatus(`Save failed: ${errorMsg(err)}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save Settings";
+  }
+}
 
 async function loadRecordingSettings(): Promise<void> {
   const { recording } = await loadSettings();
