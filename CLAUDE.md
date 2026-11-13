@@ -15,7 +15,11 @@ npm run build
 npm run type-check
 ```
 
-There are no tests in this project. After building, load the `dist/` directory as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked).
+After building, load the `dist/` directory as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked).
+
+### End-to-end tests
+
+`tests/e2e/` drives Chromium (puppeteer-core) with `dist/` loaded against a local server and synthetic media. Run `npm run build && tests/e2e/generate-media.sh && npm run test:e2e` (needs ffmpeg; set `CHROME_PATH` if Chromium isn't at `/usr/bin/chromium-browser`). It covers Content-Type detection, `.m3u8` URL detection, early-request replay, noise filtering and the toolbar badge. Run it after touching detection.
 
 ## Output Size Limit
 
@@ -69,7 +73,7 @@ The S3 secret access key can be encrypted at rest with AES-GCM via `SecureStorag
 
 Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
 
-1. **Service Worker** (`src/service-worker.ts` → `dist/background.js`): The central orchestrator. Handles all download lifecycle management, routes messages from popup/content scripts, maintains download state, and keeps itself alive during long operations using `chrome.runtime.getPlatformInfo()` heartbeats. Intercepts `.m3u8` and `.mpd` network requests via `chrome.webRequest.onCompleted`.
+1. **Service Worker** (`src/service-worker.ts` → `dist/background.js`): The central orchestrator. Handles all download lifecycle management, routes messages from popup/content scripts, maintains download state, and keeps itself alive during long operations using `chrome.runtime.getPlatformInfo()` heartbeats. Network detection lives in `src/background/network-sniffer.ts`: it classifies completed requests by URL **and** `Content-Type` (HLS/DASH manifests on extension-less endpoints, progressive `video/*` files sized from `Content-Range`/`Content-Length`), filters out segments and clips under 512 KB, and forwards hits to the requesting frame. Hits that arrive before the frame's content script is listening are queued and replayed when it sends `CONTENT_READY`. `src/background/badge.ts` shows the per-tab detected count on the toolbar icon.
 
 2. **Content Script** (`src/content.ts` → `dist/content.js`): Built separately as IIFE (content scripts cannot use ES modules). Runs on all pages, uses `DetectionManager` to find videos via DOM observation and network request interception, and injects download buttons. Proxies fetch requests through the service worker to bypass CORS.
 

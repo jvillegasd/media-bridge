@@ -27,6 +27,13 @@ import { DirectDetectionHandler } from "./direct/direct-detection-handler";
 import { HlsDetectionHandler } from "./hls/hls-detection-handler";
 import { DashDetectionHandler } from "./dash/dash-detection-handler";
 
+/** Classification computed by the service worker from response headers */
+export interface NetworkHint {
+  format?: VideoFormat;
+  /** Total content size in bytes, if known */
+  size?: number;
+}
+
 /** Configuration options for DetectionManager */
 export interface DetectionManagerOptions {
   /** Optional callback for detected videos */
@@ -76,23 +83,30 @@ export class DetectionManager {
    * Detect videos from network request
    * Routes to format-specific handler based on URL format
    */
-  handleNetworkRequest(url: string): void {
-    const format = detectFormatFromUrl(url);
+  handleNetworkRequest(url: string, hint: NetworkHint = {}): void {
+    // The service worker classifies responses by Content-Type too, so manifests
+    // and media served without a telling extension still arrive with a format.
+    const urlFormat = detectFormatFromUrl(url);
+    const format =
+      urlFormat !== VideoFormat.UNKNOWN && !(hint.format && urlFormat === VideoFormat.DIRECT && hint.format !== VideoFormat.DIRECT)
+        ? urlFormat
+        : hint.format ?? VideoFormat.UNKNOWN;
+    const forced = format !== urlFormat;
 
     switch (format) {
       case VideoFormat.DIRECT:
         logger.debug("[Media Bridge] Direct video detected", { url });
-        this.directHandler.handleNetworkRequest(url);
+        this.directHandler.handleNetworkRequest(url, hint.size, forced || !!hint.format);
         break;
 
       case VideoFormat.HLS:
         logger.debug("[Media Bridge] HLS video detected", { url });
-        this.hlsHandler.handleNetworkRequest(url);
+        this.hlsHandler.handleNetworkRequest(url, forced);
         break;
 
       case VideoFormat.DASH:
         logger.debug("[Media Bridge] DASH video detected", { url });
-        this.dashHandler.handleNetworkRequest(url);
+        this.dashHandler.handleNetworkRequest(url, forced);
         break;
 
       default:

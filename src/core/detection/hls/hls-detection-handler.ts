@@ -95,8 +95,8 @@ export class HlsDetectionHandler {
    * @param url - Playlist URL to detect
    * @returns Promise resolving to VideoMetadata or null if not detected
    */
-  async detect(url: string): Promise<VideoMetadata | null> {
-    if (!this.isHlsUrl(url)) {
+  async detect(url: string, force = false): Promise<VideoMetadata | null> {
+    if (!force && !this.isHlsUrl(url)) {
       return null;
     }
 
@@ -291,10 +291,10 @@ export class HlsDetectionHandler {
    * Handle network request for HLS playlist
    * Triggers detection for HLS URLs
    */
-  handleNetworkRequest(url: string): void {
-    if (this.isHlsUrl(url)) {
-      // Trigger detection for HLS URL
-      this.detect(url);
+  handleNetworkRequest(url: string, force = false): void {
+    if (force || this.isHlsUrl(url)) {
+      // Trigger detection for HLS URL (force: identified by Content-Type)
+      this.detect(url, force);
     }
   }
 
