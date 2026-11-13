@@ -20,6 +20,7 @@ import {
 } from "./utils";
 import { startDownload } from "./download-actions";
 import { handleSendToManifestTab } from "./render-manifest";
+import { updateVideosToolbar } from "./videos-toolbar";
 
 // SVG play icon for no-thumbnail state
 const PLAY_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
@@ -219,6 +220,7 @@ export function renderDetectedVideos(forceFullRebuild = false): void {
   if (!detectedVideosList) return;
 
   const uniqueVideos = Object.values(detectedVideos);
+  updateVideosToolbar(uniqueVideos);
 
   if (uniqueVideos.length === 0) {
     detectedVideosList.innerHTML = `

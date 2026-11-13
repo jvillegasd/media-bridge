@@ -24,6 +24,7 @@ import {
   STORAGE_CONFIG_KEY,
   DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
   DEFAULT_CAPTURE_MAX_MB,
+  DEFAULT_MIN_DIRECT_SIZE_KB,
   MIN_CAPTURE_MAX_MB,
   MAX_CAPTURE_MAX_MB,
 } from "../../shared/constants";
@@ -60,6 +61,11 @@ export interface AppSettings {
   notifications: {
     notifyOnCompletion: boolean;
     autoOpenFile: boolean;
+  };
+
+  ui: {
+    showOverlayButton: boolean;
+    minDirectSizeKb: number;
   };
 
   capture: {
@@ -115,6 +121,7 @@ export async function loadSettings(): Promise<AppSettings> {
       autoOpenFile: raw?.notifications?.autoOpenFile ?? false,
     },
 
+    ui: resolveUiSettings(raw),
     capture: resolveCaptureSettings(raw),
 
     advanced: {
@@ -140,5 +147,14 @@ export function resolveCaptureSettings(raw: StorageConfig | null | undefined): A
     maxMb: Number.isFinite(mb)
       ? Math.min(MAX_CAPTURE_MAX_MB, Math.max(MIN_CAPTURE_MAX_MB, Math.round(mb)))
       : DEFAULT_CAPTURE_MAX_MB,
+  };
+}
+
+/** Resolve page-integration UI settings (overlay button, sniffing threshold). */
+export function resolveUiSettings(raw: StorageConfig | null | undefined): AppSettings["ui"] {
+  const kb = Number(raw?.ui?.minDirectSizeKb);
+  return {
+    showOverlayButton: raw?.ui?.showOverlayButton === true,
+    minDirectSizeKb: Number.isFinite(kb) && kb >= 0 ? Math.round(kb) : DEFAULT_MIN_DIRECT_SIZE_KB,
   };
 }

@@ -180,6 +180,11 @@ function onStatus(status: PageStatus): void {
   notify();
 }
 
+/** True once stream capture is enabled for this frame. */
+export function isCaptureEnabled(): boolean {
+  return started;
+}
+
 export function getCaptureStatus(): PageStatus {
   return lastStatus;
 }

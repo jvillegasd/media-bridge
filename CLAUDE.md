@@ -19,7 +19,7 @@ After building, load the `dist/` directory as an unpacked extension in Chrome (`
 
 ### End-to-end tests
 
-`tests/e2e/` drives Chromium (puppeteer-core) with `dist/` loaded against a local server and synthetic media. Run `npm run build && tests/e2e/generate-media.sh && npm run test:e2e` (needs ffmpeg; set `CHROME_PATH` if Chromium isn't at `/usr/bin/chromium-browser`). It covers Content-Type detection, `.m3u8` URL detection, early-request replay, noise filtering, the toolbar badge, and stream capture (opt-in hook registration, capture/dedupe/mux, DRM refusal, forged page status, forged bridge claims, bridge failure fallback and cleanup, restart cleanup). Run it after touching detection or capture.
+`tests/e2e/` drives Chromium (puppeteer-core) with `dist/` loaded against a local server and synthetic media. Run `npm run build && tests/e2e/generate-media.sh && npm run test:e2e` (needs ffmpeg; set `CHROME_PATH` if Chromium isn't at `/usr/bin/chromium-browser`). It covers Content-Type detection, `.m3u8` URL detection, early-request replay, noise filtering, the toolbar badge, page actions (overlay on/off, shortcuts, download-all, sniffing threshold), and stream capture (opt-in hook registration, capture/dedupe/mux, DRM refusal, forged page status, forged bridge claims, bridge failure fallback and cleanup, restart cleanup). Run it after touching detection or capture.
 
 ## Output Size Limit
 
@@ -73,7 +73,7 @@ The S3 secret access key can be encrypted at rest with AES-GCM via `SecureStorag
 
 Media Bridge is a Manifest V3 Chrome extension. It has five distinct execution contexts that communicate via `chrome.runtime.sendMessage`:
 
-1. **Service Worker** (`src/service-worker.ts` → `dist/background.js`): The central orchestrator. Handles all download lifecycle management, routes messages from popup/content scripts, maintains download state, and keeps itself alive during long operations using `chrome.runtime.getPlatformInfo()` heartbeats. Network detection lives in `src/background/network-sniffer.ts`: it classifies completed requests by URL **and** `Content-Type` (HLS/DASH manifests on extension-less endpoints, progressive `video/*` files sized from `Content-Range`/`Content-Length`), filters out segments and clips under 512 KB, and forwards hits to the requesting frame. Hits that arrive before the frame's content script is listening are queued and replayed when it sends `CONTENT_READY`. `src/background/badge.ts` shows the per-tab detected count on the toolbar icon.
+1. **Service Worker** (`src/service-worker.ts` → `dist/background.js`): The central orchestrator. Handles all download lifecycle management, routes messages from popup/content scripts, maintains download state, and keeps itself alive during long operations using `chrome.runtime.getPlatformInfo()` heartbeats. Network detection lives in `src/background/network-sniffer.ts`: it classifies completed requests by URL **and** `Content-Type` (HLS/DASH manifests on extension-less endpoints, progressive `video/*` files sized from `Content-Range`/`Content-Length`), filters out segments and clips under the configurable `ui.minDirectSizeKb` (default 512 KB), and forwards hits to the requesting frame. Hits that arrive before the frame's content script is listening are queued and replayed when it sends `CONTENT_READY`. `src/background/badge.ts` shows the per-tab detected count on the toolbar icon.
 
 2. **Content Script** (`src/content.ts` → `dist/content.js`): Built separately as IIFE (content scripts cannot use ES modules). Runs on all pages, uses `DetectionManager` to find videos via DOM observation and network request interception, and injects download buttons. Proxies fetch requests through the service worker to bypass CORS.
 
@@ -136,6 +136,12 @@ Opt-in (`capture.enabled`, default `false`, Options → Page Integration). For p
 - Saving: content script → `CAPTURE_PREPARE` (SW allocates `cap_*` id + token) → hidden `capture-bridge/bridge.html` iframe. The bridge sends `CAPTURE_CLAIM` and writes **nothing** until the SW accepts the token; chunks are copied (not transferred) with acks and a byte budget, so the content script keeps its buffers until the result. `CAPTURE_FINALIZE` checks stored chunk counts and muxes via the DASH offscreen path.
 - Failure handling: content-side idle timeout + `CAPTURE_ABORT`, SW claim/idle timers (`CAPTURE_CLAIM_TIMEOUT_MS`, `CAPTURE_IDLE_TIMEOUT_MS`, refreshed by `CAPTURE_HEARTBEAT`), tab-close cleanup, and `cleanupStaleCaptures()` at SW startup. If the bridge fails the tracks are saved unmuxed from the page; success is only reported when a file was saved.
 - EME (`mediaKeys`) or encrypted init segments mark a session as DRM; it is never exported.
+
+### Page Actions
+
+- `src/content/overlay.ts`: optional floating "Download" button on hovered videos (`ui.showOverlayButton`, default `false`). Closed shadow root, `textContent` only, acts on `isTrusted` clicks only. Shows stream capture controls only when capture is enabled.
+- `src/background/page-actions.ts`: context menus (download element/link, download all, capture entry only when capture is enabled), keyboard shortcuts (`Alt+Shift+M` open popup, `Alt+Shift+D` download best video, unbound "download all"), and `DOWNLOAD_ALL_DETECTED`, which only extension pages may send.
+- `src/popup/videos-toolbar.ts`: detected count + "Download all" in the Videos tab.
 
 ### Message Protocol
 
@@ -217,11 +223,13 @@ src/
 ├── service-worker.ts              # Central orchestrator
 ├── content.ts                     # Content script (IIFE)
 ├── content/capture-client.ts      # Isolated-world side of stream capture
+├── content/overlay.ts             # Optional in-page download button
 ├── inject/mse-capture.ts          # MAIN-world MediaSource hook (registered only when enabled)
 ├── capture-bridge/                # Hidden web-accessible page that writes capture chunks to IDB
 ├── background/
 │   ├── network-sniffer.ts         # Content-Type detection + early-request replay
 │   ├── badge.ts                   # Per-tab detected count
+│   ├── page-actions.ts            # Context menus, shortcuts, download-all
 │   ├── capture-hook.ts            # Registers/unregisters the MAIN-world hook from settings
 │   └── capture-pipeline.ts        # PREPARE/CLAIM/FINALIZE/ABORT, timers, mux, startup cleanup
 ├── shared/

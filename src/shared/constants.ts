@@ -65,7 +65,7 @@ export const DEFAULT_MASTER_PLAYLIST_CACHE_SIZE = 50;
 export const DEFAULT_DB_SYNC_INTERVAL_MS = 500;
 
 /** Direct media sniffed from the network smaller than this (bytes) is ignored as noise */
-export const MIN_SNIFFED_DIRECT_BYTES = 512 * 1024;
+export const DEFAULT_MIN_DIRECT_SIZE_KB = 512;
 
 // ---- Stream capture (MediaSource) ----
 

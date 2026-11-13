@@ -38,3 +38,7 @@ export const MIN_MASTER_PLAYLIST_CACHE_SIZE = 10;
 export const MAX_MASTER_PLAYLIST_CACHE_SIZE = 200;
 export const MIN_DB_SYNC_S = 0.1;   // 100 ms
 export const MAX_DB_SYNC_S = 2;     // 2 000 ms
+
+// Page integration: network detection threshold for sniffed direct media
+export const MIN_DIRECT_SIZE_KB = 0;
+export const MAX_DIRECT_SIZE_KB = 102_400; // 100 MB

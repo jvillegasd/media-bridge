@@ -123,6 +123,10 @@ export interface StorageConfig {
     notifyOnCompletion?: boolean; // Show OS notification when download finishes (default: false)
     autoOpenFile?: boolean; // Open file in Finder/Explorer after download (default: false)
   };
+  ui?: {
+    showOverlayButton?: boolean; // Floating download button on page videos (default: false)
+    minDirectSizeKb?: number; // Ignore direct media smaller than this when sniffed from network (default: 512)
+  };
   capture?: {
     enabled?: boolean; // Inject the MediaSource capture hook into pages (default: false)
     maxMb?: number; // Max data buffered by stream capture per page, in MB (default: 1536)

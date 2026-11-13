@@ -21,10 +21,22 @@
 import { VideoFormat } from "../core/types";
 import { MessageType } from "../shared/messages";
 import { detectFormatFromUrl } from "../core/utils/url-utils";
-import { MIN_SNIFFED_DIRECT_BYTES } from "../shared/constants";
+import { DEFAULT_MIN_DIRECT_SIZE_KB, STORAGE_CONFIG_KEY } from "../shared/constants";
+import { loadSettings } from "../core/storage/settings";
 
 const MAX_SEEN_PER_TAB = 2000;
 const MAX_PENDING_PER_TAB = 100;
+
+/** Direct media smaller than this is ignored (Options → Page Integration) */
+let minDirectBytes = DEFAULT_MIN_DIRECT_SIZE_KB * 1024;
+
+async function refreshThreshold(): Promise<void> {
+  try {
+    minDirectBytes = (await loadSettings()).ui.minDirectSizeKb * 1024;
+  } catch {
+    // keep the previous value
+  }
+}
 const PENDING_TTL_MS = 60_000;
 
 const HLS_CONTENT_TYPE = /mpegurl/i;
@@ -95,7 +107,7 @@ export function classifyResponse(
   if (SEGMENT_URL.test(url)) return null;
 
   const size = totalSize(details.responseHeaders);
-  if (size !== undefined && size < MIN_SNIFFED_DIRECT_BYTES) return null;
+  if (size !== undefined && size < minDirectBytes) return null;
 
   return { url, format: VideoFormat.DIRECT, size };
 }
@@ -171,6 +183,11 @@ export function resetTab(tabId: number): void {
 }
 
 export function initNetworkSniffer(): void {
+  void refreshThreshold();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes[STORAGE_CONFIG_KEY]) void refreshThreshold();
+  });
+
   chrome.webRequest.onCompleted.addListener(
     (details) => {
       if (details.tabId < 0) return;

@@ -46,6 +46,7 @@ import {
   handleCaptureAbort,
 } from "./background/capture-pipeline";
 import { initCaptureHook } from "./background/capture-hook";
+import { initPageActions, downloadAllDetected } from "./background/page-actions";
 import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
@@ -370,6 +371,9 @@ initBadge();
  * and the pipeline keeps the SW alive while a capture is transferred or muxed.
  */
 initCaptureHook();
+
+/** Context menus, keyboard shortcuts and bulk download (work without the popup). */
+initPageActions((payload) => handleDownloadRequest(payload));
 initCapturePipeline({
   setActive: (downloadId, active) => {
     if (active) activeCaptures.add(downloadId);
@@ -427,6 +431,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           replayPending(sender.tab.id, sender.frameId ?? 0);
         }
         return false;
+
+      case MessageType.DOWNLOAD_ALL_DETECTED: {
+        const tabId = Number(message.payload?.tabId);
+        const fromExtensionPage =
+          sender.id === chrome.runtime.id && !!sender.url?.startsWith(chrome.runtime.getURL(""));
+        if (!Number.isInteger(tabId) || !fromExtensionPage) {
+          // Only extension pages (popup/options) may trigger a bulk download, not content scripts
+          sendResponse({ success: false, started: 0, skipped: 0 });
+          return false;
+        }
+        downloadAllDetected(tabId).then(sendResponse);
+        return true;
+      }
 
       case MessageType.CAPTURE_PREPARE:
         handleCapturePrepare(message.payload ?? {}, sender).then(sendResponse);

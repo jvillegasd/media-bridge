@@ -76,6 +76,9 @@ export enum MessageType {
   // Content script finished init in a frame — SW replays network detections it missed
   CONTENT_READY = "CONTENT_READY",
 
+  // Bulk download of every detected video in a tab (popup -> SW)
+  DOWNLOAD_ALL_DETECTED = "DOWNLOAD_ALL_DETECTED",
+
   // MediaSource stream capture
   CAPTURE_GET_STATUS = "CAPTURE_GET_STATUS", // popup -> content (per frame): capture state
   CAPTURE_COMMAND = "CAPTURE_COMMAND", // popup -> content (per frame): start/stop/discard/boost

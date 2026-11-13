@@ -1,7 +1,8 @@
 /**
  * End-to-end test for Media Bridge: loads the built extension (dist/) into
  * Chromium and checks Content-Type based detection, early-request replay, the
- * toolbar badge, and MediaSource stream capture (opt-in registration, capture
+ * toolbar badge, page actions (overlay, shortcuts, bulk download, sniffing
+ * threshold), and MediaSource stream capture (opt-in registration, capture
  * and mux, DRM refusal, and hostile-page / failure-path handling) against a
  * local test server.
  *
@@ -148,6 +149,64 @@ try {
   await sleep(1000);
   const navBadge = await ext((id) => chrome.action.getBadgeText({ tabId: id }), hlsTab);
   check("Badge resets after navigation", navBadge === "", `badge="${navBadge}"`);
+
+  // ================= Page actions (overlay, shortcuts, bulk) =================
+
+  const setConfig = (patch) =>
+    ext(async (pt) => {
+      const k = "storage_config";
+      const c = (await chrome.storage.local.get(k))[k] ?? {};
+      Object.assign(c, pt);
+      await chrome.storage.local.set({ [k]: c });
+    }, patch);
+  const hoverVideo = async (page) => {
+    await page.bringToFront();
+    await page.setViewport({ width: 900, height: 560 });
+    const r = await page.evaluate(() => { const b = document.querySelector("video").getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+    await page.mouse.move(r.x - 10, r.y - 10);
+    await sleep(300);
+    await page.mouse.move(r.x, r.y);
+    await sleep(600);
+    return page.evaluate(() => !!document.querySelector("media-bridge-overlay"));
+  };
+
+  // ---- P1. Overlay is off by default ----
+  check("Overlay not injected by default", (await hoverVideo(directPage)) === false);
+
+  // ---- P2. Enabling the overlay applies without reload ----
+  await setConfig({ ui: { showOverlayButton: true, minDirectSizeKb: 512 } });
+  await sleep(500);
+  check("Overlay injected on hover once enabled", (await hoverVideo(directPage)) === true);
+  await directPage.screenshot({ path: path.join(HERE, "overlay.png") });
+  await setConfig({ ui: { showOverlayButton: false, minDirectSizeKb: 512 } });
+  await sleep(500);
+  check("Overlay removed when disabled again", (await directPage.evaluate(() => !!document.querySelector("media-bridge-overlay"))) === false);
+
+  // ---- P3. Keyboard shortcuts declared ----
+  const commands = await ext(() => chrome.commands.getAll());
+  check(
+    "Shortcuts registered",
+    ["_execute_action", "download-best-video", "download-all-videos"].every((n) => commands.some((c) => c.name === n)),
+    JSON.stringify(commands.map((c) => [c.name, c.shortcut])),
+  );
+
+  // ---- P4. Download all detected (from an extension page) ----
+  const bulk = await ext((id) => chrome.runtime.sendMessage({ type: "DOWNLOAD_ALL_DETECTED", payload: { tabId: id } }), directTab);
+  check("Download-all started the detected direct video", bulk?.started === 1, JSON.stringify(bulk));
+
+  // ---- P5. Sniffing threshold is configurable ----
+  await setConfig({ ui: { showOverlayButton: false, minDirectSizeKb: 4096 } });
+  await sleep(500);
+  {
+    const page = await browser.newPage();
+    await page.goto(`${BASE}/direct.html?threshold=1`);
+    const tab = await tabIdFor(`${BASE}/direct.html?threshold=1`);
+    await sleep(3000);
+    const vids = await detected(tab);
+    check("Direct media under the configured threshold is ignored", !vids.some((v) => v.url.includes("/media/file?id=7")), summary(vids));
+    await page.close();
+  }
+  await setConfig({ ui: { showOverlayButton: false, minDirectSizeKb: 512 } });
 
   // ================= Stream capture =================
 

@@ -62,6 +62,8 @@ import {
   MAX_MASTER_PLAYLIST_CACHE_SIZE,
   MIN_DB_SYNC_S,
   MAX_DB_SYNC_S,
+  MIN_DIRECT_SIZE_KB,
+  MAX_DIRECT_SIZE_KB,
 } from "./constants";
 
 const FINISHED_STAGES = new Set([
@@ -1493,8 +1495,11 @@ function iconQuestion(): string {
 // ─────────────────────────────────────────────
 
 async function loadPageIntegrationSettings(): Promise<void> {
-  const { capture } = await loadSettings();
+  const { capture, ui } = await loadSettings();
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  get("show-overlay-button").checked = ui.showOverlayButton;
+  get("min-direct-size").value = ui.minDirectSizeKb.toString();
 
   get("capture-enabled").checked = capture.enabled;
   get("capture-max-mb").value = capture.maxMb.toString();
@@ -1506,7 +1511,8 @@ async function loadPageIntegrationSettings(): Promise<void> {
 async function savePageIntegrationSettings(): Promise<void> {
   const get = (id: string) => document.getElementById(id) as HTMLInputElement;
   const maxMb = validateField(get("capture-max-mb"), MIN_CAPTURE_MAX_MB, MAX_CAPTURE_MAX_MB, true);
-  if (maxMb === null) return;
+  const minDirectSizeKb = validateField(get("min-direct-size"), MIN_DIRECT_SIZE_KB, MAX_DIRECT_SIZE_KB, true);
+  if (maxMb === null || minDirectSizeKb === null) return;
 
   const btn = document.getElementById("save-page-integration-settings") as HTMLButtonElement;
   btn.disabled = true;
@@ -1514,6 +1520,10 @@ async function savePageIntegrationSettings(): Promise<void> {
 
   try {
     const config = (await ChromeStorage.get<StorageConfig>(STORAGE_CONFIG_KEY)) ?? {};
+    config.ui = {
+      showOverlayButton: get("show-overlay-button").checked,
+      minDirectSizeKb,
+    };
     config.capture = {
       enabled: get("capture-enabled").checked,
       maxMb,

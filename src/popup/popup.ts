@@ -26,6 +26,7 @@ import {
 } from "./render-manifest";
 import { switchTab } from "./tabs";
 import { setupCapturePanel } from "./capture-panel";
+import { setupVideosToolbar } from "./videos-toolbar";
 
 const RENDER_DEBOUNCE_MS = 200;
 
@@ -572,6 +573,7 @@ async function init(): Promise<void> {
   setupDownloadsEventDelegation();
   setupDetectedVideosEventDelegation();
   setupCapturePanel();
+  setupVideosToolbar();
 
   // Event delegation for force-detect in empty state
   if (dom.detectedVideosList) {
