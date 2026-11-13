@@ -64,6 +64,9 @@ export const DEFAULT_MASTER_PLAYLIST_CACHE_SIZE = 50;
 /** IDB write interval during segment downloads (configurable via Advanced settings) */
 export const DEFAULT_DB_SYNC_INTERVAL_MS = 500;
 
+/** Direct media sniffed from the network smaller than this (bytes) is ignored as noise */
+export const MIN_SNIFFED_DIRECT_BYTES = 512 * 1024;
+
 // ---- Chrome storage keys ----
 
 export const STORAGE_CONFIG_KEY = "storage_config";

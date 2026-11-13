@@ -183,6 +183,10 @@ async function init() {
 
   // Initialize all detection mechanisms
   detectionManager.init();
+
+  // Ask the service worker to replay manifest/media requests that completed
+  // before this script loaded (common with autoplaying players).
+  safeSendMessage({ type: MessageType.CONTENT_READY });
 }
 
 /**
@@ -252,8 +256,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Handle URL detected from service worker network interceptor
       const url = message.payload?.url;
       if (url && detectionManager) {
-        // Process URL through detection manager
-        detectionManager.handleNetworkRequest(url);
+        // Process URL through detection manager (format/size classified by SW from headers)
+        detectionManager.handleNetworkRequest(url, {
+          format: message.payload?.format,
+          size: message.payload?.size,
+        });
       }
       return false; // No response needed
     }

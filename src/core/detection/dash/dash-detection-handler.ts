@@ -39,14 +39,14 @@ export class DashDetectionHandler {
     this.seenPathKeys.clear();
   }
 
-  handleNetworkRequest(url: string): void {
-    if (this.isDashUrl(url)) {
-      this.detect(url);
+  handleNetworkRequest(url: string, force = false): void {
+    if (force || this.isDashUrl(url)) {
+      this.detect(url, force);
     }
   }
 
-  async detect(url: string): Promise<VideoMetadata | null> {
-    if (!this.isDashUrl(url)) return null;
+  async detect(url: string, force = false): Promise<VideoMetadata | null> {
+    if (!force && !this.isDashUrl(url)) return null;
 
     // Deduplicate by origin+pathname — ignores auth tokens in query params
     const pathKey = this.getPathKey(url);

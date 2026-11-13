@@ -72,6 +72,9 @@ export enum MessageType {
 
   // URL health check (options page manifest check feature)
   CHECK_URL = "CHECK_URL",
+
+  // Content script finished init in a frame — SW replays network detections it missed
+  CONTENT_READY = "CONTENT_READY",
 }
 
 export interface BaseMessage {

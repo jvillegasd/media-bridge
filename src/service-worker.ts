@@ -34,6 +34,8 @@ import {
   CANNOT_CANCEL_MESSAGE,
 } from "./core/utils/download-utils";
 import { normalizeUrl, detectFormatFromUrl } from "./core/utils/url-utils";
+import { initNetworkSniffer, replayPending } from "./background/network-sniffer";
+import { initBadge, badgeVideoDetected, badgeVideoRemoved, badgeReset } from "./background/badge";
 import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
@@ -342,52 +344,12 @@ async function handleFetchResourceMessage(payload: {
 }
 
 /**
- * Set up network interceptor to detect video URLs
- * Intercepts completed network requests and sends valid video URLs to content scripts
- * Using onCompleted ensures the request has finished (better for autoplay scenarios)
+ * Network detection (Content-Type sniffing, early-request replay) and the
+ * toolbar badge. Registered synchronously at top level so MV3 wakes the
+ * service worker for these events.
  */
-chrome.webRequest.onCompleted.addListener(
-  (details) => {
-    const url = details.url;
-    logger.info(`Network request completed: ${url}`);
-    // Detect if this is a video URL
-    const format = detectFormatFromUrl(url);
-    if (format === VideoFormat.UNKNOWN) {
-      return;
-    }
-
-    // Send URL to content script in the tab that made the request
-    if (details.tabId && details.tabId > 0) {
-      chrome.tabs.sendMessage(
-        details.tabId,
-        {
-          type: MessageType.NETWORK_URL_DETECTED,
-          payload: { url },
-        },
-        (response) => {
-          // Check for errors to prevent "unchecked runtime.lastError" warning
-          if (chrome.runtime.lastError) {
-            // Ignore - content script might not be available or tab closed
-          }
-        },
-      );
-    }
-  },
-  {
-    urls: [
-      "http://*/*.m3u8",
-      "https://*/*.m3u8",
-      "http://*/*.m3u8?*",
-      "https://*/*.m3u8?*",
-      "http://*/*.mpd",
-      "https://*/*.mpd",
-      "http://*/*.mpd?*",
-      "https://*/*.mpd?*",
-    ],
-    types: ["xmlhttprequest"],
-  },
-  ["responseHeaders"],
-);
+initNetworkSniffer();
+initBadge();
 
 /**
  * Handle messages from popup and content scripts
@@ -421,8 +383,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
 
       case MessageType.VIDEO_DETECTED:
-        // This message is sent from content script to popup
-        // Service worker doesn't need to handle it, just ignore silently
+        // Broadcast from content script to popup; the SW only tracks the badge count
+        badgeVideoDetected(sender.tab?.id, message.payload);
+        return false;
+
+      case MessageType.VIDEO_REMOVED:
+        badgeVideoRemoved(sender.tab?.id, message.payload?.url);
+        return false;
+
+      case MessageType.CONTENT_READY:
+        // Content script finished init in a frame: replay detections it missed
+        if (sender.tab?.id !== undefined) {
+          replayPending(sender.tab.id, sender.frameId ?? 0);
+        }
         return false;
 
       case MessageType.SET_ICON_BLUE:
@@ -430,7 +403,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
 
       case MessageType.SET_ICON_GRAY:
+        // Top frame (re)initialized: new page or SPA navigation
         handleSetIconGray(sender.tab?.id);
+        badgeReset(sender.tab?.id);
         return false;
 
       case MessageType.START_RECORDING:

@@ -26,6 +26,7 @@ export interface VideoMetadata {
   hasDrm?: boolean; // Indicates if the video is DRM-protected
   unsupported?: boolean; // Indicates if the manifest uses unsupported encryption methods
   isLive?: boolean; // Indicates if the stream is a live stream (no #EXT-X-ENDLIST)
+  size?: number; // Content size in bytes when known from network headers
 }
 
 export interface VideoQuality {
