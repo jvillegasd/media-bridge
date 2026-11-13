@@ -9,6 +9,9 @@ import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
 import { logger } from "./core/utils/logger";
 import { STORAGE_CONFIG_KEY } from "./shared/constants";
+import { resolveCaptureSettings, resolveUiSettings } from "./core/storage/settings";
+import { setOverlayEnabled } from "./content/overlay";
+import { initCaptureClient, updateCaptureLimit } from "./content/capture-client";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
@@ -183,6 +186,14 @@ async function init() {
 
   // Initialize all detection mechanisms
   detectionManager.init();
+
+  // In-page button and stream capture are both opt-in. The capture hook is
+  // only injected while capture is enabled, so there is nothing to talk to otherwise.
+  applyPageSettings(config);
+
+  // Ask the service worker to replay manifest/media requests that completed
+  // before this script loaded (common with autoplaying players).
+  safeSendMessage({ type: MessageType.CONTENT_READY });
 }
 
 /**
@@ -252,8 +263,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Handle URL detected from service worker network interceptor
       const url = message.payload?.url;
       if (url && detectionManager) {
-        // Process URL through detection manager
-        detectionManager.handleNetworkRequest(url);
+        // Process URL through detection manager (format/size classified by SW from headers)
+        detectionManager.handleNetworkRequest(url, {
+          format: message.payload?.format,
+          size: message.payload?.size,
+        });
       }
       return false; // No response needed
     }
@@ -270,3 +284,20 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
+
+function applyPageSettings(config: StorageConfig | null | undefined): void {
+  setOverlayEnabled(resolveUiSettings(config).showOverlayButton, {
+    getVideos: () => Object.values(detectedVideos),
+  });
+  const capture = resolveCaptureSettings(config);
+  const bytes = capture.maxMb * 1024 * 1024;
+  if (capture.enabled) initCaptureClient({ maxBytes: bytes });
+  else updateCaptureLimit(bytes);
+}
+
+// React to page-integration settings changes without a reload (the hook itself only
+// reaches pages loaded after capture was enabled).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[STORAGE_CONFIG_KEY]) return;
+  applyPageSettings(changes[STORAGE_CONFIG_KEY].newValue as StorageConfig | undefined);
+});

@@ -64,6 +64,39 @@ export const DEFAULT_MASTER_PLAYLIST_CACHE_SIZE = 50;
 /** IDB write interval during segment downloads (configurable via Advanced settings) */
 export const DEFAULT_DB_SYNC_INTERVAL_MS = 500;
 
+/** Direct media sniffed from the network smaller than this (bytes) is ignored as noise */
+export const DEFAULT_MIN_DIRECT_SIZE_KB = 512;
+
+// ---- Stream capture (MediaSource) ----
+
+/** Default per-page memory cap for stream capture, in MB */
+export const DEFAULT_CAPTURE_MAX_MB = 1536;
+
+/** Bounds for the capture memory cap setting, in MB */
+export const MIN_CAPTURE_MAX_MB = 128;
+export const MAX_CAPTURE_MAX_MB = 4096;
+
+/** window.postMessage channel shared by the MAIN-world capture hook and the content script */
+export const CAPTURE_CHANNEL = "__media_bridge_capture__";
+
+/** window.postMessage channel the content script uses to hand a port to the capture bridge */
+export const CAPTURE_BRIDGE_CHANNEL = "__media_bridge_bridge__";
+
+/** Id of the dynamically registered MAIN-world content script */
+export const CAPTURE_HOOK_SCRIPT_ID = "media-bridge-mse-capture";
+
+/** A prepared capture must be claimed by the bridge within this window */
+export const CAPTURE_CLAIM_TIMEOUT_MS = 60_000;
+
+/** A claimed capture with no bridge activity for this long is abandoned */
+export const CAPTURE_IDLE_TIMEOUT_MS = 60_000;
+
+/** Overhead allowed on top of the memory cap when the bridge writes a capture (init segments etc.) */
+export const CAPTURE_BYTES_MARGIN = 64 * 1024 * 1024;
+
+/** Hard upper bound on chunks per track written by one capture */
+export const CAPTURE_MAX_CHUNKS_PER_TRACK = 100_000;
+
 // ---- Chrome storage keys ----
 
 export const STORAGE_CONFIG_KEY = "storage_config";

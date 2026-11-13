@@ -1,0 +1,2 @@
+<!doctype html><title>M3U8 Test Page</title><h1>HLS via .m3u8 URL</h1>
+<script>fetch('/hls/media.m3u8').then(r => r.text()).then(t => { window.__loaded = t.length; });</script>
