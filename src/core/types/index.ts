@@ -7,6 +7,8 @@ export enum VideoFormat {
   HLS = "hls",
   M3U8 = "m3u8",
   DASH = "dash",
+  /** Stream captured from a MediaSource player (blob: src) via the in-page hook */
+  CAPTURE = "capture",
   UNKNOWN = "unknown",
 }
 
@@ -120,6 +122,10 @@ export interface StorageConfig {
   notifications?: {
     notifyOnCompletion?: boolean; // Show OS notification when download finishes (default: false)
     autoOpenFile?: boolean; // Open file in Finder/Explorer after download (default: false)
+  };
+  capture?: {
+    enabled?: boolean; // Inject the MediaSource capture hook into pages (default: false)
+    maxMb?: number; // Max data buffered by stream capture per page, in MB (default: 1536)
   };
   advanced?: {
     maxRetries?: number; // Max segment/manifest fetch retries (default: 3)

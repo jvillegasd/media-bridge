@@ -75,6 +75,48 @@ export enum MessageType {
 
   // Content script finished init in a frame — SW replays network detections it missed
   CONTENT_READY = "CONTENT_READY",
+
+  // MediaSource stream capture
+  CAPTURE_GET_STATUS = "CAPTURE_GET_STATUS", // popup -> content (per frame): capture state
+  CAPTURE_COMMAND = "CAPTURE_COMMAND", // popup -> content (per frame): start/stop/discard/boost
+  CAPTURE_PREPARE = "CAPTURE_PREPARE", // content -> SW: allocate token + downloadId
+  CAPTURE_CLAIM = "CAPTURE_CLAIM", // bridge -> SW: validate token before any write
+  CAPTURE_HEARTBEAT = "CAPTURE_HEARTBEAT", // bridge -> SW: transfer still making progress
+  CAPTURE_FINALIZE = "CAPTURE_FINALIZE", // bridge -> SW: chunks stored, mux and save
+  CAPTURE_ABORT = "CAPTURE_ABORT", // content/bridge -> SW: transfer failed, clean up
+}
+
+export type CaptureAction = "start" | "boost" | "stop-save" | "discard";
+
+export interface CaptureTrackStatus {
+  kind: "video" | "audio" | "unknown";
+  mime: string;
+  segments: number;
+  bytes: number;
+}
+
+export interface CaptureSessionStatus {
+  id: number;
+  tracks: CaptureTrackStatus[];
+  bytes: number;
+  /** Media element duration in seconds, when known */
+  duration?: number;
+  /** Seconds of media covered by captured video segments (approximate) */
+  capturedSeconds?: number;
+  /** EME/DRM detected — capture is refused */
+  drm: boolean;
+  width?: number;
+  height?: number;
+}
+
+export interface CaptureFrameStatus {
+  frameId: number;
+  armed: boolean;
+  limitReached: boolean;
+  saving: boolean;
+  sessions: CaptureSessionStatus[];
+  title: string;
+  pageUrl: string;
 }
 
 export interface BaseMessage {

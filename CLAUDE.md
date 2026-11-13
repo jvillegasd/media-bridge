@@ -19,7 +19,7 @@ After building, load the `dist/` directory as an unpacked extension in Chrome (`
 
 ### End-to-end tests
 
-`tests/e2e/` drives Chromium (puppeteer-core) with `dist/` loaded against a local server and synthetic media. Run `npm run build && tests/e2e/generate-media.sh && npm run test:e2e` (needs ffmpeg; set `CHROME_PATH` if Chromium isn't at `/usr/bin/chromium-browser`). It covers Content-Type detection, `.m3u8` URL detection, early-request replay, noise filtering and the toolbar badge. Run it after touching detection.
+`tests/e2e/` drives Chromium (puppeteer-core) with `dist/` loaded against a local server and synthetic media. Run `npm run build && tests/e2e/generate-media.sh && npm run test:e2e` (needs ffmpeg; set `CHROME_PATH` if Chromium isn't at `/usr/bin/chromium-browser`). It covers Content-Type detection, `.m3u8` URL detection, early-request replay, noise filtering, the toolbar badge, and stream capture (opt-in hook registration, capture/dedupe/mux, DRM refusal, forged page status, forged bridge claims, bridge failure fallback and cleanup, restart cleanup). Run it after touching detection or capture.
 
 ## Output Size Limit
 
@@ -104,7 +104,7 @@ Download state is persisted in **IndexedDB** (not `chrome.storage`), in the `med
 - `downloads`: Full `DownloadState` objects keyed by `id`
 - `chunks`: Raw `Uint8Array` segments keyed by `[downloadId, index]`
 
-Configuration lives in `chrome.storage.local` under the `storage_config` key (`StorageConfig` type). Always access config through `loadSettings()` (`core/storage/settings.ts`) which returns a fully-typed `AppSettings` object with all defaults applied — never read `StorageConfig` directly. `AppSettings` covers: `ffmpegTimeout`, `maxConcurrent`, `historyEnabled`, `googleDrive`, `s3`, `recording`, `notifications`, and `advanced`.
+Configuration lives in `chrome.storage.local` under the `storage_config` key (`StorageConfig` type). Always access config through `loadSettings()` (`core/storage/settings.ts`) which returns a fully-typed `AppSettings` object with all defaults applied — never read `StorageConfig` directly. `AppSettings` covers: `ffmpegTimeout`, `maxConcurrent`, `historyEnabled`, `googleDrive`, `s3`, `recording`, `notifications`, `capture`, and `advanced`.
 
 IndexedDB is used as the shared state store because the five execution contexts don't share memory. The service worker writes state via `storeDownload()` (`core/database/downloads.ts`), which is a single IDB `put` upsert keyed by `id`. The popup reads the full list via `getAllDownloads()` on open. The offscreen document reads raw chunks from the `chunks` store during FFmpeg processing. `chrome.storage` is only used for config because it has a 10 MB quota and can't store `ArrayBuffer`.
 
@@ -125,6 +125,17 @@ Progress updates use two complementary channels:
 `HlsRecordingHandler.updateRecordingProgress()` and `DashRecordingHandler.updateRecordingProgress()` also always do a full IDB read + write, but are naturally rate-limited to once per poll cycle (every 1–10 seconds).
 
 **Do not add `getDownload()` calls inside `updateProgress()` or the `onProgress` callback** — that was the root cause of the UI freezing bug fixed in commit `9f2a21e`. With 3 concurrent downloads each firing per segment, even one extra IDB read per callback produces dozens of blocking reads per second that queue up behind user interaction messages in the service worker event loop.
+
+### Stream Capture (MediaSource)
+
+Opt-in (`capture.enabled`, default `false`, Options → Page Integration). For players that feed a `blob:` MediaSource with no detectable manifest.
+
+- `src/background/capture-hook.ts` registers `src/inject/mse-capture.ts` (built to `dist/mse-capture.js`) as a **MAIN-world, document_start** content script via `chrome.scripting.registerContentScripts` only while capture is enabled. When disabled nothing is injected into page worlds.
+- The hook observes `SourceBuffer.appendBuffer`, parses appends through a zero-copy view and only copies what it retains (new init segments; media segments while armed). It accepts no configuration from the page bus.
+- `src/content/capture-client.ts` (isolated world) validates/coerces everything the page posts (status, exported tracks), enforces the memory cap (`capture.maxMb`) by sending `limit`, and answers popup `CAPTURE_GET_STATUS` / `CAPTURE_COMMAND`.
+- Saving: content script → `CAPTURE_PREPARE` (SW allocates `cap_*` id + token) → hidden `capture-bridge/bridge.html` iframe. The bridge sends `CAPTURE_CLAIM` and writes **nothing** until the SW accepts the token; chunks are copied (not transferred) with acks and a byte budget, so the content script keeps its buffers until the result. `CAPTURE_FINALIZE` checks stored chunk counts and muxes via the DASH offscreen path.
+- Failure handling: content-side idle timeout + `CAPTURE_ABORT`, SW claim/idle timers (`CAPTURE_CLAIM_TIMEOUT_MS`, `CAPTURE_IDLE_TIMEOUT_MS`, refreshed by `CAPTURE_HEARTBEAT`), tab-close cleanup, and `cleanupStaleCaptures()` at SW startup. If the bridge fails the tracks are saved unmuxed from the page; success is only reported when a file was saved.
+- EME (`mediaKeys`) or encrypted init segments mark a session as DRM; it is never exported.
 
 ### Message Protocol
 
@@ -205,6 +216,14 @@ After a download completes, `handlePostDownloadActions()` in the service worker 
 src/
 ├── service-worker.ts              # Central orchestrator
 ├── content.ts                     # Content script (IIFE)
+├── content/capture-client.ts      # Isolated-world side of stream capture
+├── inject/mse-capture.ts          # MAIN-world MediaSource hook (registered only when enabled)
+├── capture-bridge/                # Hidden web-accessible page that writes capture chunks to IDB
+├── background/
+│   ├── network-sniffer.ts         # Content-Type detection + early-request replay
+│   ├── badge.ts                   # Per-tab detected count
+│   ├── capture-hook.ts            # Registers/unregisters the MAIN-world hook from settings
+│   └── capture-pipeline.ts        # PREPARE/CLAIM/FINALIZE/ABORT, timers, mux, startup cleanup
 ├── shared/
 │   ├── messages.ts                # MessageType enum
 │   └── constants.ts               # DEFAULT_MAX_CONCURRENT, DEFAULT_FFMPEG_TIMEOUT_MS, etc.

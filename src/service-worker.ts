@@ -37,6 +37,16 @@ import { normalizeUrl, detectFormatFromUrl } from "./core/utils/url-utils";
 import { initNetworkSniffer, replayPending } from "./background/network-sniffer";
 import { initBadge, badgeVideoDetected, badgeVideoRemoved, badgeReset } from "./background/badge";
 import {
+  initCapturePipeline,
+  cleanupStaleCaptures,
+  handleCapturePrepare,
+  handleCaptureClaim,
+  handleCaptureHeartbeat,
+  handleCaptureFinalize,
+  handleCaptureAbort,
+} from "./background/capture-pipeline";
+import { initCaptureHook } from "./background/capture-hook";
+import {
   generateFilenameWithExtension,
   generateFilenameFromTabInfo,
 } from "./core/utils/file-utils";
@@ -62,6 +72,8 @@ const uploadAbortControllers = new Map<string, AbortController>();
 const downloadAbortControllers = new Map<string, AbortController>();
 // Set of normalized URLs that should save partial progress on abort
 const savePartialDownloads = new Set<string>();
+// Stream captures being transferred or muxed (keyed by downloadId)
+const activeCaptures = new Set<string>();
 
 /**
  * Keep-alive heartbeat mechanism to prevent service worker termination
@@ -88,7 +100,7 @@ const keepAlive = (
 )();
 
 function updateKeepAlive(): void {
-  keepAlive(activeDownloads.size > 0 || activeUploads.size > 0);
+  keepAlive(activeDownloads.size > 0 || activeUploads.size > 0 || activeCaptures.size > 0);
 }
 
 /**
@@ -98,10 +110,12 @@ async function init() {
   logger.info("Service worker initialized");
   chrome.runtime.onInstalled.addListener(handleInstallation);
 
-  // Cleanup orphaned chunks from previous crashes (non-blocking)
-  cleanupStaleChunks().catch((err) =>
-    logger.error("Orphaned chunk cleanup failed:", err),
-  );
+  // Fail captures interrupted by a restart, then cleanup orphaned chunks from
+  // previous crashes (non-blocking)
+  cleanupStaleCaptures()
+    .catch((err) => logger.error("Stale capture cleanup failed:", err))
+    .then(() => cleanupStaleChunks())
+    .catch((err) => logger.error("Orphaned chunk cleanup failed:", err));
 
   // Clean up orphaned S3 multipart uploads from previous crashes
   cleanupOrphanedS3Uploads().catch((err) =>
@@ -352,6 +366,22 @@ initNetworkSniffer();
 initBadge();
 
 /**
+ * MediaSource stream capture (opt-in): hook registration follows the setting,
+ * and the pipeline keeps the SW alive while a capture is transferred or muxed.
+ */
+initCaptureHook();
+initCapturePipeline({
+  setActive: (downloadId, active) => {
+    if (active) activeCaptures.add(downloadId);
+    else activeCaptures.delete(downloadId);
+    updateKeepAlive();
+  },
+  onCompleted: (downloadId) => {
+    handlePostDownloadActions(downloadId);
+  },
+});
+
+/**
  * Handle messages from popup and content scripts
  * Processes download requests, state queries, config management, and CORS bypass requests
  */
@@ -396,6 +426,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (sender.tab?.id !== undefined) {
           replayPending(sender.tab.id, sender.frameId ?? 0);
         }
+        return false;
+
+      case MessageType.CAPTURE_PREPARE:
+        handleCapturePrepare(message.payload ?? {}, sender).then(sendResponse);
+        return true;
+
+      case MessageType.CAPTURE_CLAIM:
+        sendResponse(handleCaptureClaim(message.payload ?? {}, sender));
+        return false;
+
+      case MessageType.CAPTURE_HEARTBEAT:
+        sendResponse(handleCaptureHeartbeat(message.payload ?? {}, sender));
+        return false;
+
+      case MessageType.CAPTURE_FINALIZE:
+        handleCaptureFinalize(message.payload ?? {}, sender).then(sendResponse);
+        return true;
+
+      case MessageType.CAPTURE_ABORT:
+        handleCaptureAbort(message.payload ?? {}, sender).then(sendResponse);
+        return true;
+
+      // Popup -> content script (per frame); ignore if they reach the SW
+      case MessageType.CAPTURE_GET_STATUS:
+      case MessageType.CAPTURE_COMMAND:
         return false;
 
       case MessageType.SET_ICON_BLUE:
@@ -574,6 +629,11 @@ async function handleDownloadRequest(payload: {
     manifestQuality,
     isManual,
   } = payload;
+  if (metadata?.format === VideoFormat.CAPTURE) {
+    return {
+      error: "Captured streams can't be re-downloaded by URL. Open the page and capture the stream again.",
+    };
+  }
   const normalizedUrl = normalizeUrl(url);
   const existing = await getDownloadByUrl(normalizedUrl);
 

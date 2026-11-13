@@ -9,6 +9,8 @@ import { DetectionManager } from "./core/detection/detection-manager";
 import { normalizeUrl } from "./core/utils/url-utils";
 import { logger } from "./core/utils/logger";
 import { STORAGE_CONFIG_KEY } from "./shared/constants";
+import { resolveCaptureSettings } from "./core/storage/settings";
+import { initCaptureClient, updateCaptureLimit } from "./content/capture-client";
 
 let detectedVideos: Record<string, VideoMetadata> = {};
 let detectionManager: DetectionManager;
@@ -184,6 +186,10 @@ async function init() {
   // Initialize all detection mechanisms
   detectionManager.init();
 
+  // Stream capture is opt-in. The MAIN-world hook is only injected while it is
+  // enabled, so there is nothing to talk to otherwise.
+  applyCaptureSettings(config);
+
   // Ask the service worker to replay manifest/media requests that completed
   // before this script loaded (common with autoplaying players).
   safeSendMessage({ type: MessageType.CONTENT_READY });
@@ -277,3 +283,17 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
+
+function applyCaptureSettings(config: StorageConfig | null | undefined): void {
+  const capture = resolveCaptureSettings(config);
+  const bytes = capture.maxMb * 1024 * 1024;
+  if (capture.enabled) initCaptureClient({ maxBytes: bytes });
+  else updateCaptureLimit(bytes);
+}
+
+// React to capture settings changes without a reload (the hook itself only
+// reaches pages loaded after capture was enabled).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[STORAGE_CONFIG_KEY]) return;
+  applyCaptureSettings(changes[STORAGE_CONFIG_KEY].newValue as StorageConfig | undefined);
+});
